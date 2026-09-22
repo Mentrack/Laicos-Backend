@@ -6,7 +6,9 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
 import { ProduceService } from '../produce.service';
 
 const user = { id: 'user-1', role: Role.FARMER } as User;
@@ -40,7 +42,11 @@ describe('ProduceService', () => {
     // A plain function, not jest.fn, so resetAllMocks keeps it.
     $transaction: (queries: Promise<unknown>[]) => Promise.all(queries),
   };
-  const service = new ProduceService(database as unknown as PrismaService);
+  const storage = { uploadPublic: jest.fn() };
+  const service = new ProduceService(
+    database as unknown as PrismaService,
+    storage as unknown as StorageService,
+  );
   const dto = {
     farmId,
     name: 'Maize',
@@ -226,5 +232,46 @@ describe('ProduceService', () => {
     await expect(service.remove(user, produceId)).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+
+  describe('attachImage', () => {
+    const file: StorageUploadFile = {
+      buffer: Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0,
+      ]),
+      mimetype: 'image/png',
+      size: 10,
+    };
+
+    it('404s on produce the user does not own', async () => {
+      produce.findFirst.mockResolvedValue(null);
+      await expect(
+        service.attachImage(user, produceId, file),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(storage.uploadPublic).not.toHaveBeenCalled();
+    });
+
+    it('uploads to the public bucket and persists the returned URL', async () => {
+      produce.findFirst.mockResolvedValue({ id: produceId });
+      storage.uploadPublic.mockResolvedValue(
+        'https://cdn.example.com/produce/x.png',
+      );
+      produce.update.mockResolvedValue({
+        id: produceId,
+        imageUrl: 'https://cdn.example.com/produce/x.png',
+      });
+
+      await service.attachImage(user, produceId, file);
+
+      expect(storage.uploadPublic).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(`^produce/${produceId}/.+\\.png$`)),
+        file.buffer,
+        'image/png',
+      );
+      expect(produce.update).toHaveBeenCalledWith({
+        where: { id: produceId },
+        data: { imageUrl: 'https://cdn.example.com/produce/x.png' },
+      });
+    });
   });
 });

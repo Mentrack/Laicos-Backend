@@ -9,12 +9,19 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
+import {
+  imageUploadPipe,
+  type StorageUploadFile,
+} from '../common/upload-pipes';
 import {
   CreateProduceDto,
   ProduceDto,
@@ -34,6 +41,27 @@ export class ProduceController {
   async create(@CurrentUser() user: User, @Body() dto: CreateProduceDto) {
     const data = await this.produce.create(user, dto);
     return { data, message: 'Produce created' };
+  }
+
+  @Post(':id/image')
+  @Auth(Role.FARMER)
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: { file: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiEnvelope(ProduceDto)
+  async attachImage(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile(imageUploadPipe()) file: StorageUploadFile,
+  ) {
+    const data = await this.produce.attachImage(user, id, file);
+    return { data, message: 'Produce image updated' };
   }
 
   @Get()

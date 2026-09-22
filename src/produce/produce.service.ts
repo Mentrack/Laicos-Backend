@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { Prisma, ProduceStatus, type User } from '../../generated/client';
 import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
@@ -10,14 +11,20 @@ import {
   isForeignKeyViolation,
   isRecordNotFound,
 } from '../common/prisma-errors';
+import { IMAGE_SIGNATURES, matchSignature } from '../common/upload-pipes';
+import type { StorageUploadFile } from '../common/upload-pipes';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import { CreateProduceDto, ProduceQueryDto, UpdateProduceDto } from './dto';
 import { deriveProduceStatus } from './utils/produce-status';
 
 /** Writes are scoped to the owning farmer; reads hide other farmers' drafts. */
 @Injectable()
 export class ProduceService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async create(user: User, dto: CreateProduceDto) {
     const farm = await this.database.farm.findFirst({
@@ -41,6 +48,26 @@ export class ProduceService {
         floatingQuantity: actualQuantity,
         status,
       },
+    });
+  }
+
+  async attachImage(user: User, id: string, file: StorageUploadFile) {
+    const current = await this.database.produce.findFirst({
+      where: { id, farm: farmOwnedBy(user) },
+      select: { id: true },
+    });
+    if (!current) {
+      throw new NotFoundException('Produce not found');
+    }
+    const { contentType, extension } = matchSignature(IMAGE_SIGNATURES, file);
+    const imageUrl = await this.storage.uploadPublic(
+      `produce/${id}/${randomUUID()}.${extension}`,
+      file.buffer,
+      contentType,
+    );
+    return this.database.produce.update({
+      where: { id },
+      data: { imageUrl },
     });
   }
 
