@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class FarmDto {
   @ApiProperty({ format: 'uuid' })
@@ -15,6 +15,18 @@ export class FarmDto {
 
   @ApiProperty({ example: 2.5, description: 'Size in hectares' })
   size: number;
+
+  @ApiProperty({ example: 'ha' })
+  unit: string;
+
+  @ApiProperty({ example: 'Maize' })
+  mainProduce: string;
+
+  @ApiProperty()
+  isExporting: boolean;
+
+  @ApiPropertyOptional({ format: 'uuid', description: 'Referring agent' })
+  referralAgentId?: string | null;
 
   @ApiProperty()
   createdAt: Date;

@@ -1476,12 +1476,33 @@
             "minimum": 1,
             "example": 2.5,
             "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "ha",
+            "default": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean",
+            "default": false
+          },
+          "referralAgentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Referring agent"
           }
         },
         "required": [
           "name",
           "location",
-          "size"
+          "size",
+          "mainProduce"
         ]
       },
       "FarmDto": {
@@ -1509,6 +1530,23 @@
             "example": 2.5,
             "description": "Size in hectares"
           },
+          "unit": {
+            "type": "string",
+            "example": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean"
+          },
+          "referralAgentId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "Referring agent"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -1524,6 +1562,9 @@
           "name",
           "location",
           "size",
+          "unit",
+          "mainProduce",
+          "isExporting",
           "createdAt",
           "updatedAt"
         ]
@@ -1612,6 +1653,26 @@
             "minimum": 1,
             "example": 2.5,
             "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "ha",
+            "default": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean",
+            "default": false
+          },
+          "referralAgentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Referring agent"
           }
         }
       },

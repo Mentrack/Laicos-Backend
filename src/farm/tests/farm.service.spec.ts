@@ -34,12 +34,21 @@ describe('FarmService', () => {
 
   it('creates a farm connected to the user’s farmer', async () => {
     farm.create.mockResolvedValue({ id: farmId });
-    await service.create(user, { name: 'A', location: 'B', size: 2 });
+    await service.create(user, {
+      name: 'A',
+      location: 'B',
+      size: 2,
+      mainProduce: 'Maize',
+    });
     expect(farm.create).toHaveBeenCalledWith({
       data: {
         name: 'A',
         location: 'B',
         size: 2,
+        unit: undefined,
+        mainProduce: 'Maize',
+        isExporting: undefined,
+        referralAgentId: undefined,
         owner: { connect: { userId: user.id } },
       },
     });
@@ -48,7 +57,12 @@ describe('FarmService', () => {
   it('maps a missing farmer on create to 404', async () => {
     farm.create.mockRejectedValue(prismaError('P2025'));
     await expect(
-      service.create(user, { name: 'A', location: 'B', size: 2 }),
+      service.create(user, {
+        name: 'A',
+        location: 'B',
+        size: 2,
+        mainProduce: 'Maize',
+      }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 

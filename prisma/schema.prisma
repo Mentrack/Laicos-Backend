@@ -48,18 +48,22 @@ model Farmer {
 }
 
 model Farm {
-  id        String    @id @default(uuid())
+  id              String    @id @default(uuid())
   // References Farmer.id, not the public Farmer.farmerId code.
-  ownerId   String
-  owner     Farmer    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  name      String
-  location  String
+  ownerId         String
+  owner           Farmer    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name            String
+  location        String
   // Hectares.
-  size      Float
-  produce   Produce[]
-  orders    Order[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  size            Float
+  unit            String    @default("ha")
+  mainProduce     String
+  isExporting     Boolean   @default(false)
+  referralAgentId String?
+  produce         Produce[]
+  orders          Order[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([ownerId])
 }

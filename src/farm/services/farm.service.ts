@@ -29,6 +29,10 @@ export class FarmService {
           name: dto.name,
           location: dto.location,
           size: dto.size,
+          unit: dto.unit,
+          mainProduce: dto.mainProduce,
+          isExporting: dto.isExporting,
+          referralAgentId: dto.referralAgentId,
           owner: { connect: { userId: user.id } },
         },
       });
@@ -69,7 +73,15 @@ export class FarmService {
     try {
       return await this.database.farm.update({
         where: { id, ...farmOwnedBy(user) },
-        data: { name: dto.name, location: dto.location, size: dto.size },
+        data: {
+          name: dto.name,
+          location: dto.location,
+          size: dto.size,
+          unit: dto.unit,
+          mainProduce: dto.mainProduce,
+          isExporting: dto.isExporting,
+          referralAgentId: dto.referralAgentId,
+        },
       });
     } catch (error) {
       throw mapFarmWriteError(error);
