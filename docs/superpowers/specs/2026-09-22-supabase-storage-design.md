@@ -174,8 +174,13 @@ POST /produce/:id/image
   `attachImage`: happy path sets `imageUrl` and returns the row; not-found
   when the produce doesn't exist or isn't owned by the caller.
 
-New dev dependencies: `aws-sdk-client-mock`, `@types/multer`. Neither has an
-install script, so `pnpm-workspace.yaml`'s `allowBuilds` list is unaffected.
+New dev dependency: `aws-sdk-client-mock` (for mocking the S3 client in
+tests). No `@types/multer` dependency is needed: Nest's own `FileValidator`
+and `ParseFilePipe` types are already file-shape-agnostic (`IFile` in
+`@nestjs/common`, not `Express.Multer.File`), so a small local
+`StorageUploadFile` interface covers what validators and `StorageService`
+need. `aws-sdk-client-mock` has no install script, so `pnpm-workspace.yaml`'s
+`allowBuilds` list is unaffected.
 
 ## Open questions / follow-ups (explicitly out of scope here)
 
