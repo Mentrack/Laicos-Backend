@@ -7,6 +7,7 @@ import { FarmModule } from './farm/farm.module';
 import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProduceModule } from './produce/produce.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ProduceModule } from './produce/produce.module';
     FarmModule,
     ProduceModule,
     OrderModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [AppService],
