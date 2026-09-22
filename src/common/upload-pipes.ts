@@ -97,7 +97,11 @@ class MagicBytesValidator extends FileValidator<
   }
 }
 
-const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+// Exported so `FileInterceptor`'s own `limits.fileSize` can reject an
+// oversized upload before multer buffers it into memory, instead of only
+// after — `ParseFilePipe`'s `MaxFileSizeValidator` below still runs as
+// defence in depth on whatever gets through.
+export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 /** 5 MB max; JPEG/PNG/WebP by content. */

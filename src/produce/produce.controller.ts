@@ -20,6 +20,7 @@ import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
 import {
+  IMAGE_MAX_BYTES,
   imageUploadPipe,
   type StorageUploadFile,
 } from '../common/upload-pipes';
@@ -47,7 +48,9 @@ export class ProduceController {
   @Post(':id/image')
   @HttpCode(HttpStatus.OK)
   @Auth(Role.FARMER)
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),
+  )
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {

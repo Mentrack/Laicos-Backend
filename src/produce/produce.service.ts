@@ -65,10 +65,19 @@ export class ProduceService {
       file.buffer,
       contentType,
     );
-    return this.database.produce.update({
-      where: { id },
-      data: { imageUrl },
-    });
+    try {
+      // Scoped by ownership like update()/remove(), even though the
+      // findFirst above already checked it: if the produce is deleted
+      // between that check and this write (a race with another request),
+      // Prisma throws P2025, which mapProduceWriteError turns into a 404
+      // instead of an unhandled 500.
+      return await this.database.produce.update({
+        where: { id, farm: farmOwnedBy(user) },
+        data: { imageUrl },
+      });
+    } catch (error) {
+      throw mapProduceWriteError(error);
+    }
   }
 
   async findAll(user: User, query: ProduceQueryDto) {

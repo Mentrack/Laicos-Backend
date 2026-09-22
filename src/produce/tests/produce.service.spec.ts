@@ -269,9 +269,21 @@ describe('ProduceService', () => {
         'image/png',
       );
       expect(produce.update).toHaveBeenCalledWith({
-        where: { id: produceId },
+        where: { id: produceId, farm: ownedByUser },
         data: { imageUrl: 'https://cdn.example.com/produce/x.png' },
       });
+    });
+
+    it('maps a concurrent delete between the ownership check and the write to 404', async () => {
+      produce.findFirst.mockResolvedValue({ id: produceId });
+      storage.uploadPublic.mockResolvedValue(
+        'https://cdn.example.com/produce/x.png',
+      );
+      produce.update.mockRejectedValue(prismaError('P2025'));
+
+      await expect(
+        service.attachImage(user, produceId, file),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });
