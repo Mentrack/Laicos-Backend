@@ -1,0 +1,14 @@
+node_modules
+dist
+generated
+coverage
+.git
+.github
+.husky
+.vscode
+.idea
+.env
+.env.*
+!.env.example
+*.log
+test
