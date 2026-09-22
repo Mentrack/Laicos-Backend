@@ -1,0 +1,40 @@
+# Local dev infrastructure only — the app itself runs on the host (`pnpm start:dev`).
+# Every port/credential is `${VAR:-default}` so .env can override it.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-laicos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-laicos}
+      POSTGRES_DB: ${POSTGRES_DB:-laicos}
+    # Off-default host ports so this stack can run alongside other local projects' Postgres/Redis/MailHog.
+    ports:
+      - '${POSTGRES_PORT:-5434}:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-laicos} -d ${POSTGRES_DB:-laicos}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '${REDIS_PORT:-6380}:6379'
+    volumes:
+      - redis_data:/data
+
+  # Dev mail catcher: SMTP on 1025, web UI on 8025. Nothing outbound leaves the machine.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - '${SMTP_PORT:-1026}:1025'
+      - '${MAILHOG_UI_PORT:-8026}:8025'
+
+volumes:
+  postgres_data:
+  redis_data:

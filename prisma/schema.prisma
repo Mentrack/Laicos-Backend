@@ -1,0 +1,143 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String        @id @default(uuid())
+  firebaseUid   String        @unique
+  firstName     String
+  lastName      String
+  email         String        @unique
+  phoneNumber   String        @unique
+  role          Role
+  agreedToTerms Boolean       @default(false)
+  // Mirrors Firebase's emailVerified;
+  isVerified    Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  farmer        Farmer?
+  orders        Order[]
+  refreshToken  RefreshToken?
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Farmer {
+  id        String   @id @default(uuid())
+  // Public, human-readable code (FRM-000123). The sequence is created by hand in
+  // the migration; Prisma only knows the column default that reads it.
+  farmerId  String   @unique @default(dbgenerated("('FRM-'::text || lpad((nextval('\"Farmer_farmerId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  farms     Farm[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Farm {
+  id        String    @id @default(uuid())
+  // References Farmer.id, not the public Farmer.farmerId code.
+  ownerId   String
+  owner     Farmer    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name      String
+  location  String
+  // Hectares.
+  size      Float
+  produce   Produce[]
+  orders    Order[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([ownerId])
+}
+
+model Produce {
+  id               String        @id @default(uuid())
+  farmId           String
+  farm             Farm          @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  name             String
+  // Original stock listed at creation. Immutable: actual/floating move as
+  // orders come in, but this stays the record of what was first listed.
+  quantity         Float
+  // Stock not yet committed to a CONFIRMED order; mirrors quantity on
+  // creation, drops on confirm.
+  actualQuantity   Float
+  // Stock buyers can still order: actual minus PENDING reservations; mirrors
+  // quantity on creation, drops on order.
+  floatingQuantity Float
+  // Unit the quantities and pricePerUnit are expressed in, e.g. "kg" or "crate".
+  unit             String
+  pricePerUnit     Decimal       @db.Decimal(12, 2)
+  imageUrl         String?
+  status           ProduceStatus @default(DRAFT)
+  type             ProduceType   @default(LOCAL)
+  orders           Order[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // Target of Order's composite FK, so an order's farm always matches its produce's farm.
+  @@unique([id, farmId])
+  @@index([farmId])
+}
+
+model Order {
+  id                 String      @id @default(uuid())
+  produceId          String
+  farmId             String
+  buyerId            String
+  // Orders are history: Restrict stops a produce, farm or buyer delete from erasing them.
+  produce            Produce     @relation(fields: [produceId, farmId], references: [id, farmId], onDelete: Restrict)
+  farm               Farm        @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  buyer              User        @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  quantity           Float
+  totalPrice         Decimal     @db.Decimal(12, 2)
+  status             OrderStatus @default(PENDING)
+  // Required whenever status is CANCELLED.
+  cancellationReason String?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([farmId])
+  @@index([produceId])
+  @@index([buyerId])
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  READY
+  FULFILLED
+  CANCELLED
+}
+
+enum ProduceStatus {
+  DRAFT
+  PUBLISHED
+  SOLD_OUT
+}
+
+enum ProduceType {
+  LOCAL
+  EXPORT
+}
+
+enum Role {
+  FARMER
+  BUYER
+  EXTENSION_AGENT
+  RIDER
+  ADMIN
+}
