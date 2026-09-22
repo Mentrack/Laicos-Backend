@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
   ParseUUIDPipe,
@@ -44,6 +45,7 @@ export class ProduceController {
   }
 
   @Post(':id/image')
+  @HttpCode(HttpStatus.OK)
   @Auth(Role.FARMER)
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')

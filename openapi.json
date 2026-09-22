@@ -708,9 +708,6 @@
                 }
               }
             }
-          },
-          "201": {
-            "description": ""
           }
         },
         "security": [
