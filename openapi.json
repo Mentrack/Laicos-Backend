@@ -566,9 +566,25 @@
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/CreateProduceDto"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateProduceDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "file"
+                    ],
+                    "properties": {
+                      "file": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
               }
             }
           }
@@ -1847,11 +1863,6 @@
             "example": 350.5,
             "description": "Price of one `unit`"
           },
-          "imageUrl": {
-            "type": "string",
-            "format": "uri",
-            "example": "https://cdn.example.com/maize.jpg"
-          },
           "status": {
             "default": "DRAFT",
             "allOf": [
@@ -2021,11 +2032,6 @@
             "minimum": 1,
             "example": 350.5,
             "description": "Price of one `unit`"
-          },
-          "imageUrl": {
-            "type": "string",
-            "format": "uri",
-            "example": "https://cdn.example.com/maize.jpg"
           },
           "status": {
             "default": "DRAFT",

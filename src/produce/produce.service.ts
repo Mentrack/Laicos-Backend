@@ -26,7 +26,7 @@ export class ProduceService {
     private readonly storage: StorageService,
   ) {}
 
-  async create(user: User, dto: CreateProduceDto) {
+  async create(user: User, dto: CreateProduceDto, file: StorageUploadFile) {
     const farm = await this.database.farm.findFirst({
       where: { id: dto.farmId, ...farmOwnedBy(user) },
       select: { id: true },
@@ -41,12 +41,21 @@ export class ProduceService {
       actualQuantity,
       floatingQuantity: actualQuantity,
     });
+    // The id is drawn here rather than by the database so the photo can be
+    // stored under the row's final key. Uploading has to come first to have a
+    // URL to persist, so a create that fails after it — past the ownership
+    // check, only a race with the farm being deleted — leaves the object
+    // orphaned rather than the listing photo-less.
+    const id = randomUUID();
+    const imageUrl = await this.uploadImage(id, file);
     return this.database.produce.create({
       data: {
         ...dto,
+        id,
         quantity: actualQuantity,
         floatingQuantity: actualQuantity,
         status,
+        imageUrl,
       },
     });
   }
@@ -59,12 +68,7 @@ export class ProduceService {
     if (!current) {
       throw new NotFoundException('Produce not found');
     }
-    const { contentType, extension } = matchSignature(IMAGE_SIGNATURES, file);
-    const imageUrl = await this.storage.uploadPublic(
-      `produce/${id}/${randomUUID()}.${extension}`,
-      file.buffer,
-      contentType,
-    );
+    const imageUrl = await this.uploadImage(id, file);
     try {
       // Scoped by ownership like update()/remove(), even though the
       // findFirst above already checked it: if the produce is deleted
@@ -118,8 +122,6 @@ export class ProduceService {
       throw new NotFoundException('Produce not found');
     }
 
-    // Floating moves with actual, so pending reservations stay covered.
-    // quantity (the original listed stock) never changes here.
     const actualQuantity = dto.actualQuantity ?? current.actualQuantity;
     const delta = actualQuantity - current.actualQuantity;
     const floatingQuantity = current.floatingQuantity + delta;
@@ -161,6 +163,18 @@ export class ProduceService {
     } catch (error) {
       throw mapProduceWriteError(error);
     }
+  }
+
+  private uploadImage(
+    produceId: string,
+    file: StorageUploadFile,
+  ): Promise<string> {
+    const { contentType, extension } = matchSignature(IMAGE_SIGNATURES, file);
+    return this.storage.uploadPublic(
+      `produce/${produceId}/${randomUUID()}.${extension}`,
+      file.buffer,
+      contentType,
+    );
   }
 }
 

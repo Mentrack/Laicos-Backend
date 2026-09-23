@@ -19,6 +19,14 @@ const visible = {
   OR: [{ status: { not: ProduceStatus.DRAFT } }, { farm: ownedByUser }],
 };
 
+// The leading bytes of a PNG, which IMAGE_SIGNATURES matches on.
+const imageFile: StorageUploadFile = {
+  buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]),
+  mimetype: 'image/png',
+  size: 10,
+};
+const imageUrl = 'https://cdn.example.com/produce/x.png';
+
 function prismaError(code: string) {
   return new Prisma.PrismaClientKnownRequestError('boom', {
     code,
@@ -58,39 +66,69 @@ describe('ProduceService', () => {
   beforeEach(() => jest.resetAllMocks());
 
   describe('create', () => {
+    beforeEach(() => {
+      storage.uploadPublic.mockResolvedValue(imageUrl);
+    });
+
     it('starts quantity, actualQuantity and floatingQuantity equal, DRAFT by default', async () => {
       farm.findFirst.mockResolvedValue({ id: farmId });
-      await service.create(user, dto);
+      await service.create(user, dto, imageFile);
       expect(farm.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: farmId, ...ownedByUser } }),
       );
       expect(produce.create).toHaveBeenCalledWith({
         data: {
           ...dto,
+          id: expect.any(String),
           quantity: 10,
           floatingQuantity: 10,
           status: ProduceStatus.DRAFT,
+          imageUrl,
         },
       });
     });
 
     it('is immediately SOLD_OUT when published with no stock', async () => {
       farm.findFirst.mockResolvedValue({ id: farmId });
-      await service.create(user, {
-        ...dto,
-        actualQuantity: 0,
-        status: ProduceStatus.PUBLISHED,
-      });
+      await service.create(
+        user,
+        { ...dto, actualQuantity: 0, status: ProduceStatus.PUBLISHED },
+        imageFile,
+      );
       expect(produce.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ status: ProduceStatus.SOLD_OUT }),
       });
     });
 
-    it('404s when creating on a farm the user does not own', async () => {
+    it('stores the image under the id the row is created with', async () => {
+      farm.findFirst.mockResolvedValue({ id: farmId });
+      let key = '';
+      storage.uploadPublic.mockImplementation((uploadKey: string) => {
+        key = uploadKey;
+        return Promise.resolve(imageUrl);
+      });
+      let id = '';
+      produce.create.mockImplementation((args: { data: { id: string } }) => {
+        id = args.data.id;
+        return Promise.resolve(args.data);
+      });
+
+      await service.create(user, dto, imageFile);
+
+      expect(key).toMatch(new RegExp(`^produce/${id}/.+\\.png$`));
+      expect(storage.uploadPublic).toHaveBeenCalledWith(
+        key,
+        imageFile.buffer,
+        'image/png',
+      );
+    });
+
+    it('404s and uploads nothing when the farm is not the caller’s', async () => {
       farm.findFirst.mockResolvedValue(null);
-      await expect(service.create(user, dto)).rejects.toBeInstanceOf(
+      await expect(service.create(user, dto, imageFile)).rejects.toBeInstanceOf(
         NotFoundException,
       );
+      expect(storage.uploadPublic).not.toHaveBeenCalled();
       expect(produce.create).not.toHaveBeenCalled();
     });
   });
@@ -235,54 +273,39 @@ describe('ProduceService', () => {
   });
 
   describe('attachImage', () => {
-    const file: StorageUploadFile = {
-      buffer: Buffer.from([
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0,
-      ]),
-      mimetype: 'image/png',
-      size: 10,
-    };
-
     it('404s on produce the user does not own', async () => {
       produce.findFirst.mockResolvedValue(null);
       await expect(
-        service.attachImage(user, produceId, file),
+        service.attachImage(user, produceId, imageFile),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(storage.uploadPublic).not.toHaveBeenCalled();
     });
 
     it('uploads to the public bucket and persists the returned URL', async () => {
       produce.findFirst.mockResolvedValue({ id: produceId });
-      storage.uploadPublic.mockResolvedValue(
-        'https://cdn.example.com/produce/x.png',
-      );
-      produce.update.mockResolvedValue({
-        id: produceId,
-        imageUrl: 'https://cdn.example.com/produce/x.png',
-      });
+      storage.uploadPublic.mockResolvedValue(imageUrl);
+      produce.update.mockResolvedValue({ id: produceId, imageUrl });
 
-      await service.attachImage(user, produceId, file);
+      await service.attachImage(user, produceId, imageFile);
 
       expect(storage.uploadPublic).toHaveBeenCalledWith(
         expect.stringMatching(new RegExp(`^produce/${produceId}/.+\\.png$`)),
-        file.buffer,
+        imageFile.buffer,
         'image/png',
       );
       expect(produce.update).toHaveBeenCalledWith({
         where: { id: produceId, farm: ownedByUser },
-        data: { imageUrl: 'https://cdn.example.com/produce/x.png' },
+        data: { imageUrl },
       });
     });
 
     it('maps a concurrent delete between the ownership check and the write to 404', async () => {
       produce.findFirst.mockResolvedValue({ id: produceId });
-      storage.uploadPublic.mockResolvedValue(
-        'https://cdn.example.com/produce/x.png',
-      );
+      storage.uploadPublic.mockResolvedValue(imageUrl);
       produce.update.mockRejectedValue(prismaError('P2025'));
 
       await expect(
-        service.attachImage(user, produceId, file),
+        service.attachImage(user, produceId, imageFile),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });

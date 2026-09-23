@@ -14,11 +14,12 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
+import { ApiImageUpload } from '../common/dto/image-upload';
 import {
   IMAGE_MAX_BYTES,
   imageUploadPipe,
@@ -39,9 +40,19 @@ export class ProduceController {
 
   @Post()
   @Auth(Role.FARMER)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),
+  )
+  @ApiImageUpload(CreateProduceDto)
   @ApiEnvelope(ProduceDto, { status: HttpStatus.CREATED })
-  async create(@CurrentUser() user: User, @Body() dto: CreateProduceDto) {
-    const data = await this.produce.create(user, dto);
+  async create(
+    @CurrentUser() user: User,
+    @Body() dto: CreateProduceDto,
+    // A listing is never created without its photo: ParseFilePipe rejects a
+    // request that sent no file before the handler runs.
+    @UploadedFile(imageUploadPipe()) file: StorageUploadFile,
+  ) {
+    const data = await this.produce.create(user, dto, file);
     return { data, message: 'Produce created' };
   }
 
@@ -51,14 +62,7 @@ export class ProduceController {
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),
   )
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['file'],
-      properties: { file: { type: 'string', format: 'binary' } },
-    },
-  })
+  @ApiImageUpload()
   @ApiEnvelope(ProduceDto)
   async attachImage(
     @CurrentUser() user: User,

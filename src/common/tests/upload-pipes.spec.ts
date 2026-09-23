@@ -54,6 +54,12 @@ describe('imageUploadPipe', () => {
     );
   });
 
+  it('rejects a request that sent no file at all', async () => {
+    await expect(imageUploadPipe().transform(undefined)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   it('rejects a file over 5 MB', async () => {
     const oversized = Buffer.concat([
       PNG_HEADER,

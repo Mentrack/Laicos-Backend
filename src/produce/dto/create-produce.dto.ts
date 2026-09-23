@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsEnum,
   IsNotEmpty,
@@ -6,13 +7,15 @@ import {
   IsOptional,
   IsPositive,
   IsString,
-  IsUrl,
   IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
 import { ProduceStatus, ProduceType } from '../../../generated/client';
 
+// The route is multipart (it carries the produce photo), so every field
+// arrives as a string. The global ValidationPipe transforms but does not
+// convert implicitly, so the number fields declare their own @Type.
 export class CreateProduceDto {
   @ApiProperty({ format: 'uuid', description: 'A farm the caller owns' })
   @IsUUID()
@@ -31,6 +34,7 @@ export class CreateProduceDto {
   })
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(0)
+  @Type(() => Number)
   actualQuantity: number;
 
   @ApiProperty({ example: 'kg' })
@@ -42,12 +46,8 @@ export class CreateProduceDto {
   @ApiProperty({ example: 350.5, description: 'Price of one `unit`' })
   @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
   @IsPositive()
+  @Type(() => Number)
   pricePerUnit: number;
-
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/maize.jpg' })
-  @IsOptional()
-  @IsUrl()
-  imageUrl?: string;
 
   @ApiPropertyOptional({
     enum: ProduceStatus,
