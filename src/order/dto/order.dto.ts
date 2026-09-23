@@ -1,12 +1,21 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { OrderStatus } from '../../../generated/client';
+import { OrderStatus, ProduceType } from '../../../generated/client';
 
 export class OrderDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
+  @ApiProperty({ example: 'ORD-000123', description: 'Human-readable code' })
+  orderNumber: string;
+
   @ApiProperty({ format: 'uuid' })
   produceId: string;
+
+  @ApiProperty({
+    example: 'Premium Sesame Seeds',
+    description: "The produce's name when the order was placed",
+  })
+  produceName: string;
 
   @ApiProperty({ format: 'uuid' })
   farmId: string;
@@ -23,6 +32,13 @@ export class OrderDto {
 
   @ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus' })
   status: OrderStatus;
+
+  @ApiProperty({
+    enum: ProduceType,
+    enumName: 'ProduceType',
+    description: "The produce's type when the order was placed",
+  })
+  type: ProduceType;
 
   @ApiProperty({
     type: String,

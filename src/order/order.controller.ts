@@ -18,10 +18,13 @@ import { ApiEnvelope } from '../common/dto/envelope';
 import {
   CancelOrderDto,
   CreateOrderDto,
+  OrderChecklistDto,
   OrderCountDto,
   OrderDto,
   OrderFilterDto,
   OrderQueryDto,
+  OrderSummaryDto,
+  UpdateOrderChecklistDto,
 } from './dto';
 import { OrderService } from './order.service';
 
@@ -56,6 +59,15 @@ export class OrderController {
     return { data, message: 'Orders counted' };
   }
 
+  // Dashboard cards. Declared before `:id` for the same reason as count.
+  @Get('summary')
+  @Auth(Role.FARMER)
+  @ApiEnvelope(OrderSummaryDto)
+  async summary(@CurrentUser() user: User) {
+    const data = await this.orders.summary(user);
+    return { data, message: 'Order summary retrieved' };
+  }
+
   @Get(':id')
   @Auth()
   @ApiEnvelope(OrderDto)
@@ -67,8 +79,8 @@ export class OrderController {
     return { data, message: 'Order retrieved' };
   }
 
-  // A farmer's only moves are confirm and cancel, so each is its own route
-  // rather than a free-form status PATCH.
+  // A farmer's moves are confirm -> prepare -> ready (or cancel), so each is
+  // its own route rather than a free-form status PATCH.
   @Patch(':id/confirm')
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderDto)
@@ -78,6 +90,40 @@ export class OrderController {
   ) {
     const data = await this.orders.confirm(user, id);
     return { data, message: 'Order confirmed' };
+  }
+
+  @Patch(':id/prepare')
+  @Auth(Role.FARMER, Role.ADMIN)
+  @ApiEnvelope(OrderDto)
+  async prepare(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.orders.prepare(user, id);
+    return { data, message: 'Order preparation started' };
+  }
+
+  @Get(':id/checklist')
+  @Auth(Role.FARMER, Role.ADMIN)
+  @ApiEnvelope(OrderChecklistDto)
+  async findChecklist(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.orders.findChecklist(user, id);
+    return { data, message: 'Checklist retrieved' };
+  }
+
+  @Patch(':id/checklist')
+  @Auth(Role.FARMER, Role.ADMIN)
+  @ApiEnvelope(OrderChecklistDto)
+  async updateChecklist(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateOrderChecklistDto,
+  ) {
+    const data = await this.orders.updateChecklist(user, id, dto);
+    return { data, message: 'Checklist updated' };
   }
 
   @Patch(':id/ready')

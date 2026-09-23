@@ -22,13 +22,36 @@ import {
   CreateOrderDto,
   OrderFilterDto,
   OrderQueryDto,
+  UpdateOrderChecklistDto,
 } from './dto';
 
-// Farmer-cancellable statuses; buyers may only ever cancel a PENDING order.
+// Orders not yet delivered or cancelled.
+const ACTIVE: OrderStatus[] = [
+  OrderStatus.PENDING,
+  OrderStatus.CONFIRMED,
+  OrderStatus.PREPARING,
+  OrderStatus.READY,
+  OrderStatus.SHIPPED,
+];
+
+// Farmer-cancellable statuses (anything before the hand-over for pickup);
+// buyers may only ever cancel a PENDING order.
 const SELLER_CANCELLABLE: OrderStatus[] = [
   OrderStatus.PENDING,
   OrderStatus.CONFIRMED,
+  OrderStatus.PREPARING,
 ];
+
+// Every item must be ticked before an order can be marked READY.
+const CHECKLIST_ITEMS = [
+  'harvested',
+  'sorted',
+  'packaged',
+  'readyForPickup',
+] as const;
+const CHECKLIST_COMPLETE: Prisma.OrderChecklistWhereInput = Object.fromEntries(
+  CHECKLIST_ITEMS.map((item) => [item, true]),
+);
 
 /**
  * Buyers see the orders they placed, farmers the orders on their farms, and
@@ -73,6 +96,8 @@ export class OrderService {
           farmId: produce.farmId,
           buyerId: user.id,
           quantity: dto.quantity,
+          produceName: produce.name,
+          type: produce.type,
           totalPrice: produce.pricePerUnit.mul(dto.quantity).toDecimalPlaces(2),
         },
       });
@@ -104,7 +129,9 @@ export class OrderService {
     const byStatus: Record<OrderStatus, number> = {
       PENDING: 0,
       CONFIRMED: 0,
+      PREPARING: 0,
       READY: 0,
+      SHIPPED: 0,
       FULFILLED: 0,
       CANCELLED: 0,
     };
@@ -114,6 +141,23 @@ export class OrderService {
       total += group._count._all;
     }
     return { total, byStatus };
+  }
+
+  // Until payments land there is no ledger, so earnings are simply what
+  // delivered orders were worth; they only ever go up.
+  async summary(user: User) {
+    const where = scopedTo(user);
+    const [earned, activeOrders] = await this.database.$transaction([
+      this.database.order.aggregate({
+        where: { ...where, status: OrderStatus.FULFILLED },
+        _sum: { totalPrice: true },
+      }),
+      this.database.order.count({
+        where: { ...where, status: { in: ACTIVE } },
+      }),
+    ]);
+    const totalEarnings = earned._sum.totalPrice ?? new Prisma.Decimal(0);
+    return { totalEarnings: totalEarnings.toFixed(2), activeOrders };
   }
 
   async findOne(user: User, id: string) {
@@ -159,18 +203,75 @@ export class OrderService {
     }
   }
 
-  // The farmer's only other move: mark a confirmed order ready for pickup.
-  // Fulfilment (delivery) belongs to another role and isn't handled here.
-  async markReady(user: User, id: string) {
+  async prepare(user: User, id: string) {
     const order = await this.findOne(user, id);
     if (order.status !== OrderStatus.CONFIRMED) {
       throw new ConflictException(
-        `Only a confirmed order can be marked ready; this one is ${order.status}`,
+        `Only a accepted order can be prepared; this one is ${order.status}`,
       );
     }
     try {
       return await this.database.order.update({
         where: { id, status: OrderStatus.CONFIRMED },
+        data: { status: OrderStatus.PREPARING, checklist: { create: {} } },
+      });
+    } catch (error) {
+      throw mapOrderRaceError(error);
+    }
+  }
+
+  async findChecklist(user: User, id: string) {
+    const checklist = await this.database.orderChecklist.findFirst({
+      where: { orderId: id, order: scopedTo(user) },
+    });
+    if (!checklist) {
+      throw new NotFoundException(
+        'Checklist not found; start preparing the order first',
+      );
+    }
+    return checklist;
+  }
+
+  async updateChecklist(user: User, id: string, dto: UpdateOrderChecklistDto) {
+    const order = await this.findOne(user, id);
+    if (order.status !== OrderStatus.PREPARING) {
+      throw new ConflictException(
+        `The checklist can only change while preparing; this order is ${order.status}`,
+      );
+    }
+    try {
+      // Guarded on PREPARING so a tick can't land after the order moved on.
+      return await this.database.orderChecklist.update({
+        where: { orderId: id, order: { status: OrderStatus.PREPARING } },
+        data: dto,
+      });
+    } catch (error) {
+      throw mapOrderRaceError(error);
+    }
+  }
+
+  // Shipping and fulfilment belong to other roles and aren't handled here.
+  async markReady(user: User, id: string) {
+    const order = await this.findOne(user, id);
+    if (order.status !== OrderStatus.PREPARING) {
+      throw new ConflictException(
+        `Only an order being prepared can be marked ready; this one is ${order.status}`,
+      );
+    }
+    const checklist = await this.findChecklist(user, id);
+    const unticked = CHECKLIST_ITEMS.filter((item) => !checklist[item]);
+    if (unticked.length > 0) {
+      throw new ConflictException(
+        `Complete the preparation checklist first; unticked: ${unticked.join(', ')}`,
+      );
+    }
+    try {
+      return await this.database.order.update({
+        where: {
+          id,
+          status: OrderStatus.PREPARING,
+          checklist: { is: CHECKLIST_COMPLETE },
+        },
         data: { status: OrderStatus.READY },
       });
     } catch (error) {
@@ -180,7 +281,8 @@ export class OrderService {
 
   async cancel(user: User, id: string, dto: CancelOrderDto) {
     const order = await this.findOne(user, id);
-    // Farmers may withdraw a confirmed order; buyers only one not yet accepted.
+    // Farmers may withdraw an order until it's ready; buyers only one not yet
+    // accepted.
     const cancellable = isSeller(user)
       ? SELLER_CANCELLABLE
       : [OrderStatus.PENDING];
@@ -294,7 +396,7 @@ function filtered(user: User, filter: OrderFilterDto): Prisma.OrderWhereInput {
     ...scopedTo(user),
     produceId: filter.produceId,
     status: filter.status,
-    ...(filter.type && { produce: { type: filter.type } }),
+    type: filter.type,
   };
 }
 

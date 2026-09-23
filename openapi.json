@@ -906,7 +906,7 @@
             "name": "type",
             "required": false,
             "in": "query",
-            "description": "The ordered produce's type",
+            "description": "Local or export order",
             "schema": {
               "$ref": "#/components/schemas/ProduceType"
             }
@@ -980,7 +980,7 @@
             "name": "type",
             "required": false,
             "in": "query",
-            "description": "The ordered produce's type",
+            "description": "Local or export order",
             "schema": {
               "$ref": "#/components/schemas/ProduceType"
             }
@@ -993,6 +993,32 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrderCountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/summary": {
+      "get": {
+        "operationId": "OrderController_summary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderSummaryResponseDto"
                 }
               }
             }
@@ -1096,6 +1122,119 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/{id}/prepare": {
+      "patch": {
+        "operationId": "OrderController_prepare",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/orders/{id}/checklist": {
+      "get": {
+        "operationId": "OrderController_findChecklist",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderChecklistResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "tags": [
+          "Orders"
+        ]
+      },
+      "patch": {
+        "operationId": "OrderController_updateChecklist",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrderChecklistDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderChecklistResponseDto"
                 }
               }
             }
@@ -2076,7 +2215,9 @@
         "enum": [
           "PENDING",
           "CONFIRMED",
+          "PREPARING",
           "READY",
+          "SHIPPED",
           "FULFILLED",
           "CANCELLED"
         ]
@@ -2088,9 +2229,19 @@
             "type": "string",
             "format": "uuid"
           },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123",
+            "description": "Human-readable code"
+          },
           "produceId": {
             "type": "string",
             "format": "uuid"
+          },
+          "produceName": {
+            "type": "string",
+            "example": "Premium Sesame Seeds",
+            "description": "The produce's name when the order was placed"
           },
           "farmId": {
             "type": "string",
@@ -2117,6 +2268,14 @@
               }
             ]
           },
+          "type": {
+            "description": "The produce's type when the order was placed",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceType"
+              }
+            ]
+          },
           "cancellationReason": {
             "type": "string",
             "nullable": true,
@@ -2133,12 +2292,15 @@
         },
         "required": [
           "id",
+          "orderNumber",
           "produceId",
+          "produceName",
           "farmId",
           "buyerId",
           "quantity",
           "totalPrice",
           "status",
+          "type",
           "cancellationReason",
           "createdAt",
           "updatedAt"
@@ -2194,6 +2356,18 @@
             "type": "number",
             "example": 2
           },
+          "PREPARING": {
+            "type": "number",
+            "example": 1
+          },
+          "READY": {
+            "type": "number",
+            "example": 1
+          },
+          "SHIPPED": {
+            "type": "number",
+            "example": 1
+          },
           "FULFILLED": {
             "type": "number",
             "example": 7
@@ -2206,6 +2380,9 @@
         "required": [
           "PENDING",
           "CONFIRMED",
+          "PREPARING",
+          "READY",
+          "SHIPPED",
           "FULFILLED",
           "CANCELLED"
         ]
@@ -2241,6 +2418,120 @@
           "message",
           "data"
         ]
+      },
+      "OrderSummaryDto": {
+        "type": "object",
+        "properties": {
+          "totalEarnings": {
+            "type": "string",
+            "example": "450000.00",
+            "description": "Value of all FULFILLED orders on your farms"
+          },
+          "activeOrders": {
+            "type": "number",
+            "example": 3,
+            "description": "Orders not yet FULFILLED or CANCELLED"
+          }
+        },
+        "required": [
+          "totalEarnings",
+          "activeOrders"
+        ]
+      },
+      "OrderSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/OrderSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "OrderChecklistDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "harvested": {
+            "type": "boolean",
+            "description": "Harvest / collect"
+          },
+          "sorted": {
+            "type": "boolean",
+            "description": "Sort"
+          },
+          "packaged": {
+            "type": "boolean",
+            "description": "Package"
+          },
+          "readyForPickup": {
+            "type": "boolean",
+            "description": "Ready for pickup"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orderId",
+          "harvested",
+          "sorted",
+          "packaged",
+          "readyForPickup",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "OrderChecklistResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/OrderChecklistDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "UpdateOrderChecklistDto": {
+        "type": "object",
+        "properties": {
+          "harvested": {
+            "type": "boolean",
+            "description": "Harvest / collect"
+          },
+          "sorted": {
+            "type": "boolean",
+            "description": "Sort"
+          },
+          "packaged": {
+            "type": "boolean",
+            "description": "Package"
+          },
+          "readyForPickup": {
+            "type": "boolean",
+            "description": "Ready for pickup"
+          }
+        }
       },
       "CancelOrderDto": {
         "type": "object",

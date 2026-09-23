@@ -98,31 +98,55 @@ model Produce {
 }
 
 model Order {
-  id                 String      @id @default(uuid())
+  id                 String          @id @default(uuid())
+  // Public, human-readable code (ORD-000123), backed by a hand-made sequence
+  // like Farmer.farmerId.
+  orderNumber        String          @unique @default(dbgenerated("('ORD-'::text || lpad((nextval('\"Order_orderNumber_seq\"'::regclass))::text, 6, '0'::text))"))
   produceId          String
   farmId             String
   buyerId            String
   // Orders are history: Restrict stops a produce, farm or buyer delete from erasing them.
-  produce            Produce     @relation(fields: [produceId, farmId], references: [id, farmId], onDelete: Restrict)
-  farm               Farm        @relation(fields: [farmId], references: [id], onDelete: Restrict)
-  buyer              User        @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  produce            Produce         @relation(fields: [produceId, farmId], references: [id, farmId], onDelete: Restrict)
+  farm               Farm            @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  buyer              User            @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   quantity           Float
-  totalPrice         Decimal     @db.Decimal(12, 2)
-  status             OrderStatus @default(PENDING)
+  totalPrice         Decimal         @db.Decimal(12, 2)
+  status             OrderStatus     @default(PENDING)
+  // Snapshot of the produce's name at order time: lists show it without a
+  // join, and a later rename doesn't rewrite order history.
+  produceName        String
+  // Snapshot of the produce's type at order time, so lists can tag and filter
+  // local vs export orders without joining Produce.
+  type               ProduceType
   // Required whenever status is CANCELLED.
   cancellationReason String?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  // Created when the farmer starts preparing; READY needs every item ticked.
+  checklist          OrderChecklist?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
 
   @@index([farmId])
   @@index([produceId])
   @@index([buyerId])
 }
 
+model OrderChecklist {
+  orderId        String   @id
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  harvested      Boolean  @default(false)
+  sorted         Boolean  @default(false)
+  packaged       Boolean  @default(false)
+  readyForPickup Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
 enum OrderStatus {
   PENDING
   CONFIRMED
+  PREPARING
   READY
+  SHIPPED
   FULFILLED
   CANCELLED
 }

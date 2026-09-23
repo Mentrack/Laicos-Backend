@@ -7,6 +7,15 @@ export class OrderStatusCountsDto {
   @ApiProperty({ example: 2 })
   CONFIRMED: number;
 
+  @ApiProperty({ example: 1 })
+  PREPARING: number;
+
+  @ApiProperty({ example: 1 })
+  READY: number;
+
+  @ApiProperty({ example: 1 })
+  SHIPPED: number;
+
   @ApiProperty({ example: 7 })
   FULFILLED: number;
 

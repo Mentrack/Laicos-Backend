@@ -18,7 +18,7 @@ export class OrderFilterDto {
   @ApiPropertyOptional({
     enum: ProduceType,
     enumName: 'ProduceType',
-    description: "The ordered produce's type",
+    description: 'Local or export order',
   })
   @IsOptional()
   @IsEnum(ProduceType)
