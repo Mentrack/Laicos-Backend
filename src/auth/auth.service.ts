@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   Logger,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -12,12 +13,13 @@ import {
   LoginDto,
   ChangePasswordDto,
   ConfirmForgotPasswordDto,
+  GoogleLoginDto,
+  GoogleRegisterDto,
+  CreateLocalUserDto,
+  FirebaseAuthTokensDto,
 } from './dto';
 import { firebaseErrorCode } from './firebase/firebase.errors';
-import {
-  FirebaseAuthTokens,
-  FirebaseService,
-} from './firebase/firebase.service';
+import { FirebaseService } from './firebase/firebase.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role, type User as UserModel } from '../../generated/client';
 import { isUniqueViolation } from '../common/prisma-errors';
@@ -37,35 +39,12 @@ export class AuthService {
     try {
       return await this.completeRegistration(dto, firebaseRecord);
     } catch (error) {
-      // Any later failure must undo both accounts; a half-registered user
-      // gets "Account already registered" on every retry.
       await this.database.user
         .deleteMany({ where: { firebaseUid: firebaseRecord.uid } })
         .catch(() => undefined);
-      await this.firebase.auth
-        .deleteUser(firebaseRecord.uid)
-        .catch(() => undefined);
+      await this.deleteFirebaseUser(firebaseRecord.uid);
       throw error;
     }
-  }
-
-  private async completeRegistration(
-    dto: RegisterDto,
-    firebaseRecord: UserRecord,
-  ) {
-    const user = await this.createLocalUser(dto, firebaseRecord);
-    const tokens = await this.firebase.signInWithPassword(
-      dto.email,
-      dto.password,
-    );
-    await this.saveRefreshToken(user.id, tokens.refreshToken);
-
-    // await this.sendEmail(
-    //   dto.email,
-    //   this.emailTemplates.renderWelcome({ firstName: dto.firstName }),
-    // );
-
-    return { user, ...toTokenPair(tokens) };
   }
 
   async login(dto: LoginDto) {
@@ -78,7 +57,45 @@ export class AuthService {
     return { user, ...toTokenPair(tokens) };
   }
 
-  /** Firebase rejects a revoked refresh token itself, so no re-verify here. */
+  async googleLogin(dto: GoogleLoginDto) {
+    const google = await this.firebase.signInWithGoogle(dto.idToken);
+    const user = await this.database.user.findUnique({
+      where: { firebaseUid: google.localId },
+    });
+    if (!user) {
+      // Not a 401: the webapp reads a 401 as an expired session. A Firebase
+      // account this call just created is dropped so it doesn't linger.
+      if (google.isNewUser) {
+        await this.deleteFirebaseUser(google.localId);
+      }
+      throw new NotFoundException('Account not registered');
+    }
+    await this.saveRefreshToken(user.id, google.refreshToken);
+    return { user, ...toTokenPair(google) };
+  }
+
+  async googleRegister(dto: GoogleRegisterDto) {
+    const google = await this.firebase.signInWithGoogle(dto.idToken);
+    try {
+      const user = await this.createLocalUser({
+        firebaseUid: google.localId,
+        email: google.email,
+        firstName: google.firstName,
+        lastName: google.lastName,
+        phoneNumber: dto.phoneNumber,
+        role: dto.role,
+        isVerified: google.emailVerified,
+        refreshToken: google.refreshToken,
+      });
+      return { user, ...toTokenPair(google) };
+    } catch (error) {
+      if (google.isNewUser) {
+        await this.deleteFirebaseUser(google.localId);
+      }
+      throw error;
+    }
+  }
+
   async refreshToken(refreshToken: string) {
     const tokens = await this.firebase.refreshIdToken(refreshToken);
     const user = await this.requireLocalUser(tokens.localId);
@@ -179,6 +196,33 @@ export class AuthService {
   //   );
   // }
 
+  private async completeRegistration(
+    dto: RegisterDto,
+    firebaseRecord: UserRecord,
+  ) {
+    const user = await this.createLocalUser({
+      firebaseUid: firebaseRecord.uid,
+      email: dto.email,
+      firstName: dto.firstName,
+      lastName: dto.lastName,
+      phoneNumber: dto.phoneNumber,
+      role: dto.role,
+      isVerified: firebaseRecord.emailVerified,
+    });
+    const tokens = await this.firebase.signInWithPassword(
+      dto.email,
+      dto.password,
+    );
+    await this.saveRefreshToken(user.id, tokens.refreshToken);
+
+    // await this.sendEmail(
+    //   dto.email,
+    //   this.emailTemplates.renderWelcome({ firstName: dto.firstName }),
+    // );
+
+    return { user, ...toTokenPair(tokens) };
+  }
+
   private async createFirebaseUser(dto: RegisterDto): Promise<UserRecord> {
     try {
       return await this.firebase.auth.createUser({
@@ -191,18 +235,18 @@ export class AuthService {
     }
   }
 
-  private async createLocalUser(dto: RegisterDto, firebaseRecord: UserRecord) {
+  private async createLocalUser({
+    refreshToken,
+    ...input
+  }: CreateLocalUserDto) {
     try {
       return await this.database.user.create({
         data: {
-          firebaseUid: firebaseRecord.uid,
-          email: dto.email,
-          firstName: dto.firstName,
-          lastName: dto.lastName,
-          phoneNumber: dto.phoneNumber,
-          role: dto.role,
-          isVerified: firebaseRecord.emailVerified,
-          farmer: dto.role === Role.FARMER ? { create: {} } : undefined,
+          ...input,
+          farmer: input.role === Role.FARMER ? { create: {} } : undefined,
+          refreshToken: refreshToken
+            ? { create: { token: refreshToken } }
+            : undefined,
         },
       });
     } catch (error) {
@@ -213,7 +257,12 @@ export class AuthService {
     }
   }
 
-  /** The local user for a Firebase account that just proved its credentials. */
+  private async deleteFirebaseUser(firebaseUid: string): Promise<void> {
+    await this.firebase.auth.deleteUser(firebaseUid).catch((error) => {
+      this.logger.warn(`Failed to delete Firebase user ${firebaseUid}`, error);
+    });
+  }
+
   private async requireLocalUser(firebaseUid: string) {
     const user = await this.database.user.findUnique({
       where: { firebaseUid },
@@ -224,7 +273,6 @@ export class AuthService {
     return user;
   }
 
-  /** One row per user: each login or refresh overwrites the last token. */
   private async saveRefreshToken(userId: string, token: string): Promise<void> {
     await this.database.refreshToken.upsert({
       where: { userId },
@@ -237,37 +285,9 @@ export class AuthService {
   private async deleteRefreshToken(userId: string): Promise<void> {
     await this.database.refreshToken.deleteMany({ where: { userId } });
   }
-
-  // /** Points Firebase's hosted reset action at the webapp's own screen. */
-  // private webappResetLink(firebaseLink: string): string {
-  //   const oobCode = new URL(firebaseLink).searchParams.get('oobCode');
-  //   if (!oobCode) {
-  //     throw new Error('Firebase password reset link carries no oobCode');
-  //   }
-  //   const [origin] = webappOrigins(
-  //     this.config.get<string>('FRONTEND_WEBAPP_URL'),
-  //   );
-  //   const link = new URL('/reset-password', origin);
-  //   link.searchParams.set('oobCode', oobCode);
-  //   return link.toString();
-  // }
-
-  // private async sendEmail(to: string, email: RenderedEmail): Promise<void> {
-  //   try {
-  //     await this.notifications.send({
-  //       type: NotificationType.EMAIL,
-  //       to,
-  //       subject: email.subject,
-  //       message: email.text,
-  //       html: email.html,
-  //     });
-  //   } catch (error) {
-  //     this.logger.warn(`Failed to send "${email.subject}" to ${to}`, error);
-  //   }
-  // }
 }
 
-function toTokenPair(tokens: FirebaseAuthTokens) {
+function toTokenPair(tokens: FirebaseAuthTokensDto) {
   return {
     accessToken: tokens.idToken,
     refreshToken: tokens.refreshToken,

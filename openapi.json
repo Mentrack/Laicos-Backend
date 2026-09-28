@@ -81,6 +81,68 @@
         ]
       }
     },
+    "/auth/google/register": {
+      "post": {
+        "operationId": "AuthController_googleRegister",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleRegisterDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/google/login": {
+      "post": {
+        "operationId": "AuthController_googleLogin",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GoogleLoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/auth/refresh-token": {
       "post": {
         "operationId": "AuthController_refreshToken",
@@ -1392,7 +1454,6 @@
           "password",
           "firstName",
           "lastName",
-          "phoneNumber",
           "role"
         ]
       },
@@ -1430,6 +1491,7 @@
           },
           "phoneNumber": {
             "type": "string",
+            "nullable": true,
             "example": "+2348012345678"
           },
           "role": {
@@ -1530,6 +1592,49 @@
         "required": [
           "email",
           "password"
+        ]
+      },
+      "GoogleRegisterDto": {
+        "type": "object",
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
+            "description": "Google ID token from Google Identity Services"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          },
+          "role": {
+            "enum": [
+              "FARMER",
+              "BUYER",
+              "EXTENSION_AGENT",
+              "RIDER"
+            ],
+            "type": "string",
+            "example": "FARMER",
+            "description": "Account role. Only FARMER or BUYER may self-register."
+          }
+        },
+        "required": [
+          "idToken",
+          "role"
+        ]
+      },
+      "GoogleLoginDto": {
+        "type": "object",
+        "properties": {
+          "idToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
+            "description": "Google ID token from Google Identity Services"
+          }
+        },
+        "required": [
+          "idToken"
         ]
       },
       "RefreshTokenDto": {

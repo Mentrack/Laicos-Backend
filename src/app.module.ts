@@ -8,6 +8,7 @@ import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProduceModule } from './produce/produce.module';
 import { StorageModule } from './storage/storage.module';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { StorageModule } from './storage/storage.module';
     ProduceModule,
     OrderModule,
     StorageModule,
+    AgentModule,
   ],
   controllers: [AppController],
   providers: [AppService],

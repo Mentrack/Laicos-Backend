@@ -17,8 +17,8 @@ export class UserDto {
   @ApiProperty({ example: 'ada@example.com' })
   email: string;
 
-  @ApiProperty({ example: '+2348012345678' })
-  phoneNumber: string;
+  @ApiProperty({ example: '+2348012345678', nullable: true, type: String })
+  phoneNumber: string | null;
 
   @ApiProperty({ enum: Role, enumName: 'Role', example: Role.FARMER })
   role: Role;

@@ -9,14 +9,8 @@ import { ConfigService } from '@nestjs/config';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth, type Auth, type UserRecord } from 'firebase-admin/auth';
 import { requireConfig } from '../../common/config';
+import { FirebaseAuthTokensDto, FirebaseGoogleSignInDto } from '../dto';
 import { firebaseErrorCode } from './firebase.errors';
-
-export interface FirebaseAuthTokens {
-  idToken: string;
-  refreshToken: string;
-  localId: string;
-  expiresIn: string;
-}
 
 const IDENTITY_TOOLKIT_URL = 'https://identitytoolkit.googleapis.com/v1';
 const SECURE_TOKEN_URL = 'https://securetoken.googleapis.com/v1';
@@ -30,7 +24,6 @@ export class FirebaseService {
   constructor(config: ConfigService) {
     const projectId = requireConfig(config, 'FIREBASE_PROJECT_ID');
     const clientEmail = requireConfig(config, 'FIREBASE_CLIENT_EMAIL');
-    // .env files can't hold real newlines, so the PEM arrives with literal \n.
     const privateKey = requireConfig(config, 'FIREBASE_PRIVATE_KEY').replace(
       /\\n/g,
       '\n',
@@ -48,9 +41,9 @@ export class FirebaseService {
   async signInWithPassword(
     email: string,
     password: string,
-  ): Promise<FirebaseAuthTokens> {
+  ): Promise<FirebaseAuthTokensDto> {
     const fallback = new UnauthorizedException('Invalid email or password');
-    const body = await this.postToGoogle<Partial<FirebaseAuthTokens>>(
+    const body = await this.postToGoogle<Partial<FirebaseAuthTokensDto>>(
       `${IDENTITY_TOOLKIT_URL}/accounts:signInWithPassword`,
       { email, password, returnSecureToken: true },
     );
@@ -66,7 +59,45 @@ export class FirebaseService {
     };
   }
 
-  async refreshIdToken(refreshToken: string): Promise<FirebaseAuthTokens> {
+  /**
+   * Exchanges a Google ID token for a Firebase session, creating the Firebase
+   * account on first use. Firebase links it to an existing account with the
+   * same email, so a password user signing in with Google keeps their uid.
+   */
+  async signInWithGoogle(
+    googleIdToken: string,
+  ): Promise<FirebaseGoogleSignInDto> {
+    const fallback = new UnauthorizedException('Invalid Google credential');
+    const body = await this.postToGoogle<
+      Partial<FirebaseGoogleSignInDto> & { displayName?: string }
+    >(`${IDENTITY_TOOLKIT_URL}/accounts:signInWithIdp`, {
+      postBody: new URLSearchParams({
+        id_token: googleIdToken,
+        providerId: 'google.com',
+      }).toString(),
+      // Required, but only used by redirect flows; an ID token never redirects.
+      requestUri: 'http://localhost',
+      returnSecureToken: true,
+    });
+
+    if (!body.idToken || !body.refreshToken || !body.localId || !body.email) {
+      throw fallback;
+    }
+    return {
+      idToken: body.idToken,
+      refreshToken: body.refreshToken,
+      localId: body.localId,
+      expiresIn: body.expiresIn ?? DEFAULT_EXPIRES_IN,
+      email: body.email,
+      emailVerified: body.emailVerified ?? false,
+      // Google accounts may have only a display name, or a single name.
+      firstName: body.firstName ?? body.displayName ?? '',
+      lastName: body.lastName ?? '',
+      isNewUser: body.isNewUser ?? false,
+    };
+  }
+
+  async refreshIdToken(refreshToken: string): Promise<FirebaseAuthTokensDto> {
     const fallback = new UnauthorizedException(
       'Invalid or expired refresh token',
     );
@@ -135,11 +166,6 @@ export class FirebaseService {
     }
   }
 
-  /**
-   * POSTs to a Google auth REST endpoint with the web API key. A JSON object
-   * is sent as JSON, `URLSearchParams` as a form. A failed call becomes the
-   * mapped HTTP exception, or a 500 when Google's error is unrecognised.
-   */
   private async postToGoogle<TBody>(
     url: string,
     payload: Record<string, unknown> | URLSearchParams,
@@ -164,17 +190,16 @@ export class FirebaseService {
     return body;
   }
 
-  /**
-   * Only a genuinely bad credential may be a 401: the webapp reads any 401 as
-   * an expired session, refreshes, retries and then signs the user out.
-   */
   private mapGoogleError(message: string | undefined): Error {
-    switch (message) {
+    // Some errors carry a detail suffix, e.g. "INVALID_IDP_RESPONSE : ...".
+    switch (message?.split(' : ')[0]) {
       case 'EMAIL_NOT_FOUND':
       case 'INVALID_PASSWORD':
       case 'INVALID_LOGIN_CREDENTIALS':
       case 'USER_DISABLED':
         return new UnauthorizedException('Invalid email or password');
+      case 'INVALID_IDP_RESPONSE':
+        return new UnauthorizedException('Invalid Google credential');
       case 'INVALID_REFRESH_TOKEN':
       case 'TOKEN_EXPIRED':
         return new UnauthorizedException('Invalid or expired refresh token');
@@ -191,8 +216,6 @@ export class FirebaseService {
           'Password should be at least 6 characters',
         );
       default:
-        // Unrecognised means our fault (e.g. an invalid API key), so a logged
-        // 500 rather than a 401 that sends the webapp into a sign-out loop.
         return new Error(`Google auth call failed: ${message ?? 'unknown'}`);
     }
   }

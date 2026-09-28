@@ -14,7 +14,7 @@ model User {
   firstName     String
   lastName      String
   email         String        @unique
-  phoneNumber   String        @unique
+  phoneNumber   String?
   role          Role
   agreedToTerms Boolean       @default(false)
   // Mirrors Firebase's emailVerified;

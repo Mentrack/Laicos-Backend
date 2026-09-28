@@ -18,6 +18,8 @@ import {
   ChangePasswordDto,
   ConfirmForgotPasswordDto,
   ForgotPasswordDto,
+  GoogleLoginDto,
+  GoogleRegisterDto,
   LoginDto,
   RefreshTokenDto,
   RegisterDto,
@@ -42,6 +44,23 @@ export class AuthController {
   @ApiEnvelope(AuthSessionDto)
   async login(@Body() dto: LoginDto) {
     const data = await this.auth.login(dto);
+    return { data, message: 'Login successful' };
+  }
+
+  @Post('google/register')
+  @ApiEnvelope(AuthSessionDto, { status: HttpStatus.CREATED })
+  async googleRegister(@Body() dto: GoogleRegisterDto) {
+    const data = await this.auth.googleRegister(dto);
+    return { data, message: 'User registered' };
+  }
+
+  // 404 when the Google account isn't registered yet: send the user to
+  // POST /auth/google/register with the same idToken.
+  @Post('google/login')
+  @HttpCode(HttpStatus.OK)
+  @ApiEnvelope(AuthSessionDto)
+  async googleLogin(@Body() dto: GoogleLoginDto) {
+    const data = await this.auth.googleLogin(dto);
     return { data, message: 'Login successful' };
   }
 

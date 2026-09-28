@@ -1,5 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsIn, IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsEmail,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { Role } from '../../../generated/client';
 
 export class RegisterDto {
@@ -23,13 +29,14 @@ export class RegisterDto {
   @IsString()
   lastName: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '+2348012345678',
     description: 'Phone number in E.164 format',
   })
+  @IsOptional()
   @IsNotEmpty()
   @IsString()
-  phoneNumber: string;
+  phoneNumber?: string;
 
   @ApiProperty({
     enum: [Role.FARMER, Role.BUYER, Role.EXTENSION_AGENT, Role.RIDER],
