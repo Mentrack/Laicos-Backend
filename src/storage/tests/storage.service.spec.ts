@@ -1,11 +1,13 @@
 import { ConfigService } from '@nestjs/config';
 import {
+  DeleteObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { mockClient } from 'aws-sdk-client-mock';
+import { DOCUMENT_SIGNATURES } from '../../common/upload-pipes';
 import { StorageService } from '../storage.service';
 
 jest.mock('@aws-sdk/s3-request-presigner', () => ({
@@ -102,6 +104,40 @@ describe('StorageService', () => {
       Bucket: 'private-bucket',
       Key: 'docs/1/a.pdf',
     });
+  });
+
+  it('uploadPrivateFile keys the object by prefix and sniffed type', async () => {
+    s3Mock.on(PutObjectCommand).resolves({});
+    const service = new StorageService(fakeConfig());
+    const buffer = Buffer.from('%PDF-1.4');
+    const key = await service.uploadPrivateFile(
+      'farms/1/ownership',
+      { buffer, mimetype: 'image/png', size: buffer.length },
+      DOCUMENT_SIGNATURES,
+    );
+    expect(key).toMatch(/^farms\/1\/ownership\/[0-9a-f-]{36}\.pdf$/);
+    expect(
+      s3Mock.commandCalls(PutObjectCommand)[0].args[0].input,
+    ).toMatchObject({ Key: key, ContentType: 'application/pdf' });
+  });
+
+  it('deletePrivate skips blanks and swallows failures', async () => {
+    s3Mock
+      .on(DeleteObjectCommand, { Key: 'a' })
+      .resolves({})
+      .on(DeleteObjectCommand, { Key: 'b' })
+      .rejects(new Error('gone'));
+    const service = new StorageService(fakeConfig());
+    await expect(
+      service.deletePrivate(['a', null, undefined, 'b']),
+    ).resolves.toBeUndefined();
+    expect(s3Mock.commandCalls(DeleteObjectCommand)).toHaveLength(2);
+  });
+
+  it('presignedUrlOrNull returns null without signing when there is no key', async () => {
+    const service = new StorageService(fakeConfig());
+    await expect(service.presignedUrlOrNull(null)).resolves.toBeNull();
+    expect(getSignedUrl).not.toHaveBeenCalled();
   });
 
   describe('getPresignedUrl', () => {

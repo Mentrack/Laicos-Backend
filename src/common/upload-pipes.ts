@@ -1,7 +1,9 @@
 import {
+  BadRequestException,
   FileValidator,
   MaxFileSizeValidator,
   ParseFilePipe,
+  PipeTransform,
 } from '@nestjs/common';
 
 /**
@@ -50,12 +52,14 @@ export const IMAGE_SIGNATURES: FileSignature[] = [
   },
 ];
 
+// Images too: ID cards and ownership papers mostly arrive as phone photos.
 export const DOCUMENT_SIGNATURES: FileSignature[] = [
   {
     contentType: 'application/pdf',
     extension: 'pdf',
     matches: (buffer) => bytesMatchAt(buffer, 0, [0x25, 0x50, 0x44, 0x46]),
   },
+  ...IMAGE_SIGNATURES,
 ];
 
 /**
@@ -102,7 +106,7 @@ class MagicBytesValidator extends FileValidator<
 // after — `ParseFilePipe`'s `MaxFileSizeValidator` below still runs as
 // defence in depth on whatever gets through.
 export const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
-const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
+export const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 /** 5 MB max; JPEG/PNG/WebP by content. */
 export function imageUploadPipe(): ParseFilePipe {
@@ -114,7 +118,7 @@ export function imageUploadPipe(): ParseFilePipe {
   });
 }
 
-/** 10 MB max; PDF by content. */
+/** 10 MB max; PDF, JPEG, PNG or WebP by content. */
 export function documentUploadPipe(): ParseFilePipe {
   return new ParseFilePipe({
     validators: [
@@ -122,4 +126,38 @@ export function documentUploadPipe(): ParseFilePipe {
       new MagicBytesValidator({ signatures: DOCUMENT_SIGNATURES }),
     ],
   });
+}
+
+/**
+ * For `FileFieldsInterceptor` routes. `ParseFilePipe` only understands one
+ * file or an array, not the `{ field: File[] }` object those routes produce,
+ * so this runs `pipe` over the first file of each named field and returns
+ * `{ field: File | undefined }`.
+ */
+export class ParseFileFieldsPipe<
+  Field extends string,
+> implements PipeTransform {
+  constructor(
+    private readonly fields: Record<Field, { required: boolean }>,
+    private readonly pipe: () => ParseFilePipe,
+  ) {}
+
+  async transform(
+    value: Partial<Record<string, StorageUploadFile[]>> | undefined,
+  ): Promise<Partial<Record<Field, StorageUploadFile>>> {
+    const files: Partial<Record<Field, StorageUploadFile>> = {};
+    for (const field of Object.keys(this.fields) as Field[]) {
+      const file = value?.[field]?.[0];
+      if (!file) {
+        if (this.fields[field].required) {
+          throw new BadRequestException(`${field} is required`);
+        }
+        continue;
+      }
+      // Throws on an invalid file; a valid one comes back unchanged.
+      await this.pipe().transform(file);
+      files[field] = file;
+    }
+    return files;
+  }
 }

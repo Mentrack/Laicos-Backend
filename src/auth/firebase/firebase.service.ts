@@ -191,7 +191,6 @@ export class FirebaseService {
   }
 
   private mapGoogleError(message: string | undefined): Error {
-    // Some errors carry a detail suffix, e.g. "INVALID_IDP_RESPONSE : ...".
     switch (message?.split(' : ')[0]) {
       case 'EMAIL_NOT_FOUND':
       case 'INVALID_PASSWORD':

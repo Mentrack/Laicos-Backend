@@ -2,21 +2,30 @@ import { HttpStatus, Type } from '@nestjs/common';
 import { ApiProperty, ApiResponse } from '@nestjs/swagger';
 import { PaginationMetaDto } from '../pagination';
 
+interface EnvelopeShape {
+  /** `data` is an array of `dto` and `metaData` is added. */
+  paginated?: boolean;
+  /** `data` is a complete, unpaginated array of `dto`. */
+  list?: boolean;
+}
+
 /**
  * Builds the Swagger class for `{ data, message, metaData? }` so no route
- * declares its envelope by hand. `paginated` makes `data` an array of `dto`
- * and adds `metaData`.
+ * declares its envelope by hand.
  */
 export function enveloped(
   dto: Type<unknown>,
   name: string,
-  { paginated = false }: { paginated?: boolean } = {},
+  { paginated = false, list = false }: EnvelopeShape = {},
 ): Type<unknown> {
   class Envelope {
     @ApiProperty({ example: 'OK' })
     message: string;
   }
-  ApiProperty({ type: dto, isArray: paginated })(Envelope.prototype, 'data');
+  ApiProperty({ type: dto, isArray: paginated || list })(
+    Envelope.prototype,
+    'data',
+  );
   if (paginated) {
     ApiProperty({ type: PaginationMetaDto })(Envelope.prototype, 'metaData');
   }
@@ -31,20 +40,23 @@ const envelopes = new Map<string, Type<unknown>>();
 
 /**
  * Documents a route's enveloped response in one decorator. `FarmDto` becomes
- * `FarmResponseDto`, or `FarmListResponseDto` when `paginated`.
+ * `FarmResponseDto`, `FarmListResponseDto` when `paginated`, or
+ * `FarmArrayResponseDto` when `list`.
  */
 export function ApiEnvelope(
   dto: Type<unknown>,
   {
     paginated = false,
+    list = false,
     status = HttpStatus.OK,
-  }: { paginated?: boolean; status?: HttpStatus } = {},
+  }: EnvelopeShape & { status?: HttpStatus } = {},
 ) {
   const base = dto.name.replace(/Dto$/, '');
-  const name = `${base}${paginated ? 'List' : ''}ResponseDto`;
+  const suffix = paginated ? 'List' : list ? 'Array' : '';
+  const name = `${base}${suffix}ResponseDto`;
   let type = envelopes.get(name);
   if (!type) {
-    type = enveloped(dto, name, { paginated });
+    type = enveloped(dto, name, { paginated, list });
     envelopes.set(name, type);
   }
   return ApiResponse({ status, type });

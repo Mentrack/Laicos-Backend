@@ -4,7 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, ProduceStatus, type User } from '../../generated/client';
+import {
+  FarmVerificationStatus,
+  Prisma,
+  ProduceStatus,
+  type User,
+} from '../../generated/client';
 import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import {
@@ -178,10 +183,17 @@ export class ProduceService {
   }
 }
 
-// Drafts are private to their farmer; everything else is a public listing.
+// A farmer sees all their own produce. Everyone else sees only listings
+// that are out of draft on a farm an agent has verified.
 function visibleTo(user: User): Prisma.ProduceWhereInput {
   return {
-    OR: [{ status: { not: ProduceStatus.DRAFT } }, { farm: farmOwnedBy(user) }],
+    OR: [
+      {
+        status: { not: ProduceStatus.DRAFT },
+        farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
+      },
+      { farm: farmOwnedBy(user) },
+    ],
   };
 }
 

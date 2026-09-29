@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
+  FarmVerificationStatus,
   Prisma,
   ProduceStatus,
   ProduceType,
@@ -15,8 +16,15 @@ const user = { id: 'user-1', role: Role.FARMER } as User;
 const farmId = '6f1c1c3e-2b8e-4a55-9d0e-3b6b1f0c9a11';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const ownedByUser = { owner: { userId: user.id } };
+// Other farmers' produce shows only out of draft and on a verified farm.
 const visible = {
-  OR: [{ status: { not: ProduceStatus.DRAFT } }, { farm: ownedByUser }],
+  OR: [
+    {
+      status: { not: ProduceStatus.DRAFT },
+      farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
+    },
+    { farm: ownedByUser },
+  ],
 };
 
 // The leading bytes of a PNG, which IMAGE_SIGNATURES matches on.

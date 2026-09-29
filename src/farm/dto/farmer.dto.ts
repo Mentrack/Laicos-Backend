@@ -1,4 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, IntersectionType } from '@nestjs/swagger';
+import { IdentityDto } from '../../common/dto/identity.dto';
 
 export class FarmerDto {
   @ApiProperty({ format: 'uuid' })
@@ -16,3 +17,9 @@ export class FarmerDto {
   @ApiProperty()
   updatedAt: Date;
 }
+
+/** The farmer's own profile: FarmerDto plus their ID, never shown to others. */
+export class FarmerProfileDto extends IntersectionType(
+  FarmerDto,
+  IdentityDto,
+) {}

@@ -3,6 +3,7 @@
   "paths": {
     "/": {
       "get": {
+        "description": "Answers 200 with a plain-text greeting while the API is up.",
         "operationId": "AppController_getHello",
         "parameters": [],
         "responses": {
@@ -16,11 +17,13 @@
               }
             }
           }
-        }
+        },
+        "summary": "Liveness check"
       }
     },
     "/auth/register": {
       "post": {
+        "description": "Creates the Firebase account and the local user, and signs them in. Registering as FARMER or EXTENSION_AGENT also creates that profile.",
         "operationId": "AuthController_register",
         "parameters": [],
         "requestBody": {
@@ -45,6 +48,7 @@
             }
           }
         },
+        "summary": "Register with email and password",
         "tags": [
           "Auth"
         ]
@@ -76,6 +80,7 @@
             }
           }
         },
+        "summary": "Log in with email and password",
         "tags": [
           "Auth"
         ]
@@ -83,6 +88,7 @@
     },
     "/auth/google/register": {
       "post": {
+        "description": "Same result as email registration, using the Google account for name and email.",
         "operationId": "AuthController_googleRegister",
         "parameters": [],
         "requestBody": {
@@ -107,6 +113,7 @@
             }
           }
         },
+        "summary": "Register with a Google ID token",
         "tags": [
           "Auth"
         ]
@@ -114,6 +121,7 @@
     },
     "/auth/google/login": {
       "post": {
+        "description": "404 when the Google account has not registered yet: send the user to POST /auth/google/register with the same idToken.",
         "operationId": "AuthController_googleLogin",
         "parameters": [],
         "requestBody": {
@@ -138,6 +146,7 @@
             }
           }
         },
+        "summary": "Log in with a Google ID token",
         "tags": [
           "Auth"
         ]
@@ -169,6 +178,7 @@
             }
           }
         },
+        "summary": "Exchange a refresh token for a new token pair",
         "tags": [
           "Auth"
         ]
@@ -176,6 +186,7 @@
     },
     "/auth/forgot-password": {
       "post": {
+        "description": "Always answers the same way, whether or not the email has an account.",
         "operationId": "AuthController_forgotPassword",
         "parameters": [],
         "requestBody": {
@@ -200,6 +211,7 @@
             }
           }
         },
+        "summary": "Email a password reset link",
         "tags": [
           "Auth"
         ]
@@ -231,6 +243,7 @@
             }
           }
         },
+        "summary": "Set a new password from a reset link code",
         "tags": [
           "Auth"
         ]
@@ -238,6 +251,7 @@
     },
     "/auth/change-password": {
       "patch": {
+        "description": "Signs the user out of every session; they log in again with the new password.",
         "operationId": "AuthController_changePassword",
         "parameters": [],
         "requestBody": {
@@ -267,6 +281,7 @@
             "bearer": []
           }
         ],
+        "summary": "Change the signed-in user’s password",
         "tags": [
           "Auth"
         ]
@@ -293,6 +308,7 @@
             "bearer": []
           }
         ],
+        "summary": "Log out of every session",
         "tags": [
           "Auth"
         ]
@@ -319,6 +335,7 @@
             "bearer": []
           }
         ],
+        "summary": "Get the signed-in user",
         "tags": [
           "Auth"
         ]
@@ -326,14 +343,35 @@
     },
     "/farms": {
       "post": {
+        "description": "Multipart: the farm fields, a required ownershipDocument and an optional chiefConfirmation (PDF or image, 10 MB each). 400 until the farmer has uploaded their ID. The farm starts PENDING and is assigned to an agent in its LGA for verification.",
         "operationId": "FarmController_createFarm",
         "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/CreateFarmDto"
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateFarmDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "ownershipDocument"
+                    ],
+                    "properties": {
+                      "ownershipDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "chiefConfirmation": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
               }
             }
           }
@@ -355,6 +393,7 @@
             "bearer": []
           }
         ],
+        "summary": "Create a farm",
         "tags": [
           "Farms"
         ]
@@ -401,6 +440,7 @@
             "bearer": []
           }
         ],
+        "summary": "List my farms",
         "tags": [
           "Farms"
         ]
@@ -436,11 +476,13 @@
             "bearer": []
           }
         ],
+        "summary": "Get one of my farms",
         "tags": [
           "Farms"
         ]
       },
       "patch": {
+        "description": "Editing a REJECTED farm resubmits it for verification. Changing the state, LGA or address of a VERIFIED farm sends it back to PENDING and out of its cluster; other edits keep it verified.",
         "operationId": "FarmController_updateFarm",
         "parameters": [
           {
@@ -479,11 +521,13 @@
             "bearer": []
           }
         ],
+        "summary": "Update one of my farms",
         "tags": [
           "Farms"
         ]
       },
       "delete": {
+        "description": "409 once the farm has orders.",
         "operationId": "FarmController_removeFarm",
         "parameters": [
           {
@@ -512,6 +556,7 @@
             "bearer": []
           }
         ],
+        "summary": "Delete one of my farms",
         "tags": [
           "Farms"
         ]
@@ -555,6 +600,7 @@
             }
           }
         },
+        "summary": "List farmers",
         "tags": [
           "Farmers"
         ]
@@ -562,6 +608,7 @@
     },
     "/farmers/me": {
       "get": {
+        "description": "Includes my ID details and a short-lived link to my ID document.",
         "operationId": "FarmController_findMyFarmer",
         "parameters": [],
         "responses": {
@@ -570,7 +617,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FarmerResponseDto"
+                  "$ref": "#/components/schemas/FarmerProfileResponseDto"
                 }
               }
             }
@@ -581,6 +628,89 @@
             "bearer": []
           }
         ],
+        "summary": "Get my farmer profile",
+        "tags": [
+          "Farmers"
+        ]
+      },
+      "patch": {
+        "operationId": "FarmController_updateMyFarmer",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateIdentityDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmerProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set my ID type and number",
+        "tags": [
+          "Farmers"
+        ]
+      }
+    },
+    "/farmers/me/id-document": {
+      "post": {
+        "description": "PDF or image, 10 MB max. Replaces any earlier upload. Required before creating a farm.",
+        "operationId": "FarmController_uploadMyIdDocument",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmerProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload my ID document",
         "tags": [
           "Farmers"
         ]
@@ -616,13 +746,559 @@
             "bearer": []
           }
         ],
+        "summary": "Get a farmer’s public profile",
         "tags": [
           "Farmers"
         ]
       }
     },
+    "/locations/states": {
+      "get": {
+        "operationId": "LocationController_findStates",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateArrayResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List all states",
+        "tags": [
+          "Locations"
+        ]
+      }
+    },
+    "/locations/states/{stateId}/lgas": {
+      "get": {
+        "operationId": "LocationController_findLgas",
+        "parameters": [
+          {
+            "name": "stateId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LgaArrayResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List the LGAs in a state",
+        "tags": [
+          "Locations"
+        ]
+      }
+    },
+    "/verifications": {
+      "get": {
+        "description": "Filter by status, e.g. ASSIGNED for new tasks or IN_PROGRESS for drafts.",
+        "operationId": "VerificationController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/VerificationTaskStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationSummaryListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my verification tasks",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}": {
+      "get": {
+        "description": "The farm, the farmer and their documents, everything recorded so far, and `outstanding`: what still blocks approval.",
+        "operationId": "VerificationController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a verification task",
+        "tags": [
+          "Verifications"
+        ]
+      },
+      "patch": {
+        "description": "The identity note, measured size, estimated yield and the general inspection note.",
+        "operationId": "VerificationController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateVerificationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save notes and measurements",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/location": {
+      "put": {
+        "description": "matches: false records a discrepancy; add coordinates, a note and LOCATION_DISCREPANCY evidence before approving.",
+        "operationId": "VerificationController_saveLocation",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveLocationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save the location check",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/checks/{key}": {
+      "put": {
+        "description": "Identity checks take VERIFIED, ISSUE or UNABLE; the rest take VERIFIED, ISSUE or NOT_APPLICABLE. An ISSUE needs a note and CHECK evidence before approving.",
+        "operationId": "VerificationController_saveCheck",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "key",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "enum": [
+                "FARMER_ID",
+                "FARM_OWNERSHIP",
+                "CHIEF_CONFIRMATION",
+                "FARM_ACTIVE",
+                "ACCESS_ROUTE",
+                "MEASUREMENTS",
+                "DECLARED_PRODUCE",
+                "CROP_HEALTH",
+                "ESTIMATED_YIELD"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveCheckDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save one checklist item",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/evidence": {
+      "post": {
+        "description": "Multipart image in `file` (5 MB). CHECK evidence names its checkKey; PHOTO evidence names its photoSlot and replaces that slot’s photo.",
+        "operationId": "VerificationController_addEvidence",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/AddEvidenceDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "file"
+                    ],
+                    "properties": {
+                      "file": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload an evidence photo",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/evidence/{evidenceId}": {
+      "delete": {
+        "operationId": "VerificationController_removeEvidence",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "evidenceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove an evidence photo",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/decline": {
+      "post": {
+        "description": "A reason is required. The farm goes to another agent in its LGA, and whatever was recorded is discarded.",
+        "operationId": "VerificationController_decline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationReasonDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decline this task",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/approve": {
+      "post": {
+        "description": "Verifies the farm and adds it to my cluster. 400 with every gap in error.details while the checklist is incomplete.",
+        "operationId": "VerificationController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve the farm",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/verifications/{id}/reject": {
+      "post": {
+        "description": "A reason is required; the checklist does not need to be complete. The farmer can edit the farm to resubmit it.",
+        "operationId": "VerificationController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationReasonDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject the farm",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
     "/produce": {
       "post": {
+        "description": "Multipart: the listing fields plus a required image in `file` (JPEG, PNG or WebP, 5 MB).",
         "operationId": "ProduceController_create",
         "parameters": [],
         "requestBody": {
@@ -668,11 +1344,13 @@
             "bearer": []
           }
         ],
+        "summary": "Create a produce listing",
         "tags": [
           "Produce"
         ]
       },
       "get": {
+        "description": "Farmers also see their own drafts and listings on unverified farms; everyone else sees only published listings on verified farms.",
         "operationId": "ProduceController_findAll",
         "parameters": [
           {
@@ -739,6 +1417,7 @@
             "bearer": []
           }
         ],
+        "summary": "List produce",
         "tags": [
           "Produce"
         ]
@@ -793,6 +1472,7 @@
             "bearer": []
           }
         ],
+        "summary": "Replace a listing’s image",
         "tags": [
           "Produce"
         ]
@@ -828,6 +1508,7 @@
             "bearer": []
           }
         ],
+        "summary": "Get a produce listing",
         "tags": [
           "Produce"
         ]
@@ -871,11 +1552,13 @@
             "bearer": []
           }
         ],
+        "summary": "Update one of my listings",
         "tags": [
           "Produce"
         ]
       },
       "delete": {
+        "description": "409 once the listing has orders.",
         "operationId": "ProduceController_remove",
         "parameters": [
           {
@@ -904,6 +1587,7 @@
             "bearer": []
           }
         ],
+        "summary": "Delete one of my listings",
         "tags": [
           "Produce"
         ]
@@ -911,6 +1595,7 @@
     },
     "/orders": {
       "post": {
+        "description": "Buyers only. Reserves the quantity from the listing. 404 for listings the buyer cannot see, including those on unverified farms.",
         "operationId": "OrderController_create",
         "parameters": [],
         "requestBody": {
@@ -940,11 +1625,13 @@
             "bearer": []
           }
         ],
+        "summary": "Place an order",
         "tags": [
           "Orders"
         ]
       },
       "get": {
+        "description": "Buyers see orders they placed, farmers orders on their farms, admins everything.",
         "operationId": "OrderController_findAll",
         "parameters": [
           {
@@ -1012,6 +1699,7 @@
             "bearer": []
           }
         ],
+        "summary": "List orders",
         "tags": [
           "Orders"
         ]
@@ -1019,6 +1707,7 @@
     },
     "/orders/count": {
       "get": {
+        "description": "Every status is present, with zero where there are none.",
         "operationId": "OrderController_count",
         "parameters": [
           {
@@ -1065,6 +1754,7 @@
             "bearer": []
           }
         ],
+        "summary": "Count orders by status",
         "tags": [
           "Orders"
         ]
@@ -1091,6 +1781,7 @@
             "bearer": []
           }
         ],
+        "summary": "Get my order dashboard figures",
         "tags": [
           "Orders"
         ]
@@ -1126,11 +1817,13 @@
             "bearer": []
           }
         ],
+        "summary": "Get an order",
         "tags": [
           "Orders"
         ]
       },
       "delete": {
+        "description": "Buyers only, and only while it is still PENDING; otherwise cancel it.",
         "operationId": "OrderController_remove",
         "parameters": [
           {
@@ -1159,6 +1852,7 @@
             "bearer": []
           }
         ],
+        "summary": "Delete my pending order",
         "tags": [
           "Orders"
         ]
@@ -1194,6 +1888,7 @@
             "bearer": []
           }
         ],
+        "summary": "Confirm a pending order",
         "tags": [
           "Orders"
         ]
@@ -1201,6 +1896,7 @@
     },
     "/orders/{id}/prepare": {
       "patch": {
+        "description": "Creates the order’s preparation checklist.",
         "operationId": "OrderController_prepare",
         "parameters": [
           {
@@ -1229,6 +1925,7 @@
             "bearer": []
           }
         ],
+        "summary": "Start preparing a confirmed order",
         "tags": [
           "Orders"
         ]
@@ -1264,6 +1961,7 @@
             "bearer": []
           }
         ],
+        "summary": "Get an order’s preparation checklist",
         "tags": [
           "Orders"
         ]
@@ -1307,6 +2005,7 @@
             "bearer": []
           }
         ],
+        "summary": "Tick items on an order’s preparation checklist",
         "tags": [
           "Orders"
         ]
@@ -1314,6 +2013,7 @@
     },
     "/orders/{id}/ready": {
       "patch": {
+        "description": "Needs every checklist item ticked.",
         "operationId": "OrderController_markReady",
         "parameters": [
           {
@@ -1342,6 +2042,7 @@
             "bearer": []
           }
         ],
+        "summary": "Mark a prepared order ready",
         "tags": [
           "Orders"
         ]
@@ -1349,6 +2050,7 @@
     },
     "/orders/{id}/cancel": {
       "patch": {
+        "description": "Farmers can cancel until the order is ready; buyers only before it is confirmed. A reason is required.",
         "operationId": "OrderController_cancel",
         "parameters": [
           {
@@ -1387,8 +2089,169 @@
             "bearer": []
           }
         ],
+        "summary": "Cancel an order",
         "tags": [
           "Orders"
+        ]
+      }
+    },
+    "/agents/me": {
+      "get": {
+        "description": "Includes verification status and my cluster’s name and farm count.",
+        "operationId": "AgentController_findMine",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my agent profile",
+        "tags": [
+          "Agents"
+        ]
+      },
+      "patch": {
+        "description": "Send stateId and lgaId together. The LGA cannot change once an admin has verified me.",
+        "operationId": "AgentController_updateMine",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update my location and ID details",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agents/me/id-document": {
+      "post": {
+        "description": "PDF or image, 10 MB max. Replaces any earlier upload.",
+        "operationId": "AgentController_uploadIdDocument",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload my ID document",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agents/me/cluster/farms": {
+      "get": {
+        "operationId": "AgentController_findClusterFarms",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the farms in my cluster",
+        "tags": [
+          "Agents"
         ]
       }
     }
@@ -1399,7 +2262,40 @@
     "version": "1.0",
     "contact": {}
   },
-  "tags": [],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Registration, login (email/password or Google), token refresh, password reset and the signed-in user."
+    },
+    {
+      "name": "Locations",
+      "description": "Nigerian states and LGAs for the location dropdowns. Public; no token needed."
+    },
+    {
+      "name": "Farmers",
+      "description": "Farmer profiles. A farmer sets and uploads their ID here before they can create a farm."
+    },
+    {
+      "name": "Farms",
+      "description": "A farmer's own farms. Creating a farm sends it for verification by an agent in its LGA; its produce stays hidden from buyers until an agent verifies it."
+    },
+    {
+      "name": "Produce",
+      "description": "Produce listings. Farmers manage their own; everyone else sees published listings on verified farms."
+    },
+    {
+      "name": "Orders",
+      "description": "Buyers place orders; farmers confirm, prepare (with a checklist) and mark them ready. Either side can cancel within its limits."
+    },
+    {
+      "name": "Agents",
+      "description": "An extension agent's own profile, ID and cluster (the farms they manage). Usable before an admin verifies the agent."
+    },
+    {
+      "name": "Verifications",
+      "description": "Farm verification tasks assigned to the calling agent: the on-site checklist, evidence photos, and the approve / reject / decline decision. Verified agents only."
+    }
+  ],
   "servers": [],
   "components": {
     "securitySchemes": {
@@ -1780,10 +2676,21 @@
             "maxLength": 120,
             "example": "Green Acres"
           },
+          "stateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states/{stateId}/lgas; decides which agents verify the farm"
+          },
           "location": {
             "type": "string",
             "maxLength": 255,
-            "example": "Ogbomosho, Oyo State"
+            "example": "12 Market Road",
+            "description": "Street address"
           },
           "size": {
             "type": "number",
@@ -1809,14 +2716,63 @@
           "referralAgentId": {
             "type": "string",
             "format": "uuid",
-            "description": "Referring agent"
+            "description": "Referring Agent.id"
           }
         },
         "required": [
           "name",
+          "stateId",
+          "lgaId",
           "location",
           "size",
           "mainProduce"
+        ]
+      },
+      "StateDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Oyo"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "LgaDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Ogbomosho North"
+          }
+        },
+        "required": [
+          "id",
+          "stateId",
+          "name"
+        ]
+      },
+      "FarmVerificationStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "VERIFIED",
+          "REJECTED"
         ]
       },
       "FarmDto": {
@@ -1825,6 +2781,11 @@
           "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123",
+            "description": "Public farm code"
           },
           "ownerId": {
             "type": "string",
@@ -1835,9 +2796,20 @@
             "type": "string",
             "example": "Green Acres"
           },
+          "country": {
+            "type": "string",
+            "example": "NG"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          },
           "location": {
             "type": "string",
-            "example": "Ogbomosho, Oyo State"
+            "example": "12 Market Road",
+            "description": "Street address"
           },
           "size": {
             "type": "number",
@@ -1859,7 +2831,36 @@
             "type": "string",
             "nullable": true,
             "format": "uuid",
-            "description": "Referring agent"
+            "description": "Referring agent (Agent.id)"
+          },
+          "verificationStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmVerificationStatus"
+              }
+            ]
+          },
+          "rejectionReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why the latest verification was rejected, while REJECTED"
+          },
+          "isClustered": {
+            "type": "boolean"
+          },
+          "clusterId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "ownershipDocumentUrl": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "chiefConfirmationUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
           },
           "createdAt": {
             "format": "date-time",
@@ -1872,13 +2873,24 @@
         },
         "required": [
           "id",
+          "farmCode",
           "ownerId",
           "name",
+          "country",
+          "state",
+          "lga",
           "location",
           "size",
           "unit",
           "mainProduce",
           "isExporting",
+          "referralAgentId",
+          "verificationStatus",
+          "rejectionReason",
+          "isClustered",
+          "clusterId",
+          "ownershipDocumentUrl",
+          "chiefConfirmationUrl",
           "createdAt",
           "updatedAt"
         ]
@@ -1957,10 +2969,21 @@
             "maxLength": 120,
             "example": "Green Acres"
           },
+          "stateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states/{stateId}/lgas; decides which agents verify the farm"
+          },
           "location": {
             "type": "string",
             "maxLength": 255,
-            "example": "Ogbomosho, Oyo State"
+            "example": "12 Market Road",
+            "description": "Street address"
           },
           "size": {
             "type": "number",
@@ -1986,7 +3009,7 @@
           "referralAgentId": {
             "type": "string",
             "format": "uuid",
-            "description": "Referring agent"
+            "description": "Referring Agent.id"
           }
         }
       },
@@ -2046,6 +3069,100 @@
           "metaData"
         ]
       },
+      "IdType": {
+        "type": "string",
+        "enum": [
+          "NIN",
+          "VOTERS_CARD"
+        ]
+      },
+      "FarmerProfileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmerId": {
+            "type": "string",
+            "example": "FRM-000123",
+            "description": "Public farmer code"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "idType": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "12345678901"
+          },
+          "idDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the uploaded ID document; expires in 15 min"
+          }
+        },
+        "required": [
+          "id",
+          "farmerId",
+          "userId",
+          "createdAt",
+          "updatedAt",
+          "idType",
+          "idNumber",
+          "idDocumentUrl"
+        ]
+      },
+      "FarmerProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/FarmerProfileDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "UpdateIdentityDto": {
+        "type": "object",
+        "properties": {
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          }
+        }
+      },
       "FarmerResponseDto": {
         "type": "object",
         "properties": {
@@ -2060,6 +3177,667 @@
         "required": [
           "message",
           "data"
+        ]
+      },
+      "StateArrayResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StateDto"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "LgaArrayResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LgaDto"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "VerificationTaskStatus": {
+        "type": "string",
+        "enum": [
+          "UNASSIGNED",
+          "ASSIGNED",
+          "IN_PROGRESS",
+          "APPROVED",
+          "REJECTED"
+        ]
+      },
+      "VerificationFarmSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123"
+          },
+          "name": {
+            "type": "string",
+            "example": "Green Acres"
+          },
+          "location": {
+            "type": "string",
+            "example": "12 Market Road",
+            "description": "Street address"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          },
+          "size": {
+            "type": "number",
+            "example": 5,
+            "description": "Declared size, in `unit`"
+          },
+          "unit": {
+            "type": "string",
+            "example": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "example": "Maize"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "name",
+          "location",
+          "state",
+          "lga",
+          "size",
+          "unit",
+          "mainProduce"
+        ]
+      },
+      "VerificationSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationTaskStatus"
+              }
+            ]
+          },
+          "farm": {
+            "$ref": "#/components/schemas/VerificationFarmSummaryDto"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "farm",
+          "startedAt",
+          "decidedAt",
+          "createdAt"
+        ]
+      },
+      "VerificationSummaryListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerificationSummaryDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "VerificationFarmerDto": {
+        "type": "object",
+        "properties": {
+          "idType": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "12345678901"
+          },
+          "idDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the uploaded ID document; expires in 15 min"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmerId": {
+            "type": "string",
+            "example": "FRM-000123"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "John"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Farmer"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "idType",
+          "idNumber",
+          "idDocumentUrl",
+          "id",
+          "farmerId",
+          "firstName",
+          "lastName",
+          "phoneNumber"
+        ]
+      },
+      "VerificationFarmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123"
+          },
+          "name": {
+            "type": "string",
+            "example": "Green Acres"
+          },
+          "location": {
+            "type": "string",
+            "example": "12 Market Road",
+            "description": "Street address"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          },
+          "size": {
+            "type": "number",
+            "example": 5,
+            "description": "Declared size, in `unit`"
+          },
+          "unit": {
+            "type": "string",
+            "example": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean"
+          },
+          "ownershipDocumentUrl": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "chiefConfirmationUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "farmer": {
+            "$ref": "#/components/schemas/VerificationFarmerDto"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "name",
+          "location",
+          "state",
+          "lga",
+          "size",
+          "unit",
+          "mainProduce",
+          "isExporting",
+          "ownershipDocumentUrl",
+          "chiefConfirmationUrl",
+          "farmer"
+        ]
+      },
+      "VerificationCheckKey": {
+        "type": "string",
+        "enum": [
+          "FARMER_ID",
+          "FARM_OWNERSHIP",
+          "CHIEF_CONFIRMATION",
+          "FARM_ACTIVE",
+          "ACCESS_ROUTE",
+          "MEASUREMENTS",
+          "DECLARED_PRODUCE",
+          "CROP_HEALTH",
+          "ESTIMATED_YIELD"
+        ]
+      },
+      "CheckResult": {
+        "type": "string",
+        "enum": [
+          "VERIFIED",
+          "ISSUE",
+          "UNABLE",
+          "NOT_APPLICABLE"
+        ]
+      },
+      "VerificationCheckDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationCheckKey"
+              }
+            ]
+          },
+          "result": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CheckResult"
+              }
+            ]
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "key",
+          "result",
+          "note"
+        ]
+      },
+      "EvidenceKind": {
+        "type": "string",
+        "enum": [
+          "CHECK",
+          "LOCATION_DISCREPANCY",
+          "PHOTO"
+        ]
+      },
+      "PhotoSlot": {
+        "type": "string",
+        "enum": [
+          "ENTRANCE",
+          "FARM_AREA",
+          "PRODUCE",
+          "INFRASTRUCTURE"
+        ]
+      },
+      "VerificationEvidenceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceKind"
+              }
+            ]
+          },
+          "checkKey": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationCheckKey"
+              }
+            ]
+          },
+          "photoSlot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhotoSlot"
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "checkKey",
+          "photoSlot",
+          "url",
+          "createdAt"
+        ]
+      },
+      "VerificationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationTaskStatus"
+              }
+            ]
+          },
+          "farm": {
+            "$ref": "#/components/schemas/VerificationFarmDto"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "decidedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "locationMatches": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "discrepancyLat": {
+            "type": "number",
+            "nullable": true,
+            "example": 8.1234
+          },
+          "discrepancyLng": {
+            "type": "number",
+            "nullable": true,
+            "example": 4.2567
+          },
+          "discrepancyNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "identityNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "measuredSize": {
+            "type": "number",
+            "nullable": true,
+            "example": 4.8,
+            "description": "Measured on site, in the farm’s unit"
+          },
+          "estimatedYield": {
+            "type": "number",
+            "nullable": true,
+            "example": 12
+          },
+          "estimatedYieldUnit": {
+            "type": "string",
+            "nullable": true,
+            "example": "tonnes"
+          },
+          "generalNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "rejectionReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerificationCheckDto"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerificationEvidenceDto"
+            }
+          },
+          "outstanding": {
+            "example": [
+              "CROP_HEALTH is not recorded"
+            ],
+            "description": "What still blocks approval; empty when ready to approve",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "farm",
+          "startedAt",
+          "decidedAt",
+          "createdAt",
+          "locationMatches",
+          "discrepancyLat",
+          "discrepancyLng",
+          "discrepancyNote",
+          "identityNote",
+          "measuredSize",
+          "estimatedYield",
+          "estimatedYieldUnit",
+          "generalNote",
+          "rejectionReason",
+          "checks",
+          "evidence",
+          "outstanding"
+        ]
+      },
+      "VerificationResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/VerificationDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "SaveLocationDto": {
+        "type": "object",
+        "properties": {
+          "matches": {
+            "type": "boolean",
+            "description": "false records a location discrepancy"
+          },
+          "latitude": {
+            "type": "number",
+            "example": 8.1234
+          },
+          "longitude": {
+            "type": "number",
+            "example": 4.2567
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Farm is 2 km east of the stated address"
+          }
+        },
+        "required": [
+          "matches"
+        ]
+      },
+      "SaveCheckDto": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "Identity checks take VERIFIED, ISSUE or UNABLE; the rest VERIFIED, ISSUE or NOT_APPLICABLE",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CheckResult"
+              }
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "description": "Required on approval for an ISSUE"
+          }
+        },
+        "required": [
+          "result"
+        ]
+      },
+      "UpdateVerificationDto": {
+        "type": "object",
+        "properties": {
+          "identityNote": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "measuredSize": {
+            "type": "number",
+            "minimum": 1,
+            "example": 4.8,
+            "description": "In the farm’s unit"
+          },
+          "estimatedYield": {
+            "type": "number",
+            "minimum": 0,
+            "example": 12
+          },
+          "estimatedYieldUnit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "tonnes"
+          },
+          "generalNote": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "AddEvidenceDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceKind"
+              }
+            ]
+          },
+          "checkKey": {
+            "description": "Required for CHECK evidence only",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationCheckKey"
+              }
+            ]
+          },
+          "photoSlot": {
+            "description": "Required for PHOTO evidence only; replaces that slot’s photo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhotoSlot"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "VerificationReasonDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Farm could not be located at the address"
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "ProduceStatus": {
@@ -2650,6 +4428,150 @@
         "required": [
           "reason"
         ]
+      },
+      "ClusterSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Gwagwalada Hub"
+          },
+          "farmCount": {
+            "type": "number",
+            "example": 12
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "farmCount"
+        ]
+      },
+      "AgentProfileDto": {
+        "type": "object",
+        "properties": {
+          "idType": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "12345678901"
+          },
+          "idDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the uploaded ID document; expires in 15 min"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string",
+            "example": "AG-000044",
+            "description": "Public agent code"
+          },
+          "country": {
+            "type": "string",
+            "example": "NG"
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StateDto"
+              }
+            ]
+          },
+          "lga": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LgaDto"
+              }
+            ]
+          },
+          "isVerified": {
+            "type": "boolean",
+            "description": "Set by an admin"
+          },
+          "verifiedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "cluster": {
+            "$ref": "#/components/schemas/ClusterSummaryDto"
+          }
+        },
+        "required": [
+          "idType",
+          "idNumber",
+          "idDocumentUrl",
+          "id",
+          "agentId",
+          "country",
+          "state",
+          "lga",
+          "isVerified",
+          "verifiedAt",
+          "cluster"
+        ]
+      },
+      "AgentProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AgentProfileDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "UpdateAgentDto": {
+        "type": "object",
+        "properties": {
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Cannot change once the agent is verified"
+          }
+        }
       },
       "ErrorDetailDto": {
         "type": "object",
