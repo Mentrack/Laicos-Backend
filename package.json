@@ -21,7 +21,7 @@
     "gen:openapi": "nest build && node dist/src/scripts/generate-openapi.js",
     "gen:api": "pnpm gen:openapi && pnpm --dir ../webapp run gen:api",
     "db:generate": "prisma generate",
-    "db:seed": "tsc -p tsconfig.seed.json && node dist/prisma/seed.js"
+    "seed": "tsc -p tsconfig.seed.json && node dist/prisma/seed.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",
@@ -39,6 +39,7 @@
     "class-validator": "^0.15.1",
     "dotenv": "^18.0.1",
     "firebase-admin": "^14.4.0",
+    "ioredis": "^5.11.1",
     "jose": "^6.2.12",
     "nodemailer": "^10.0.10",
     "pg": "^8.23.0",

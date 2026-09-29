@@ -1,6 +1,8 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
   PutObjectCommand,
@@ -8,11 +10,17 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { requireConfig } from '../common/config';
+import {
+  matchSignature,
+  type FileSignature,
+  type StorageUploadFile,
+} from '../common/upload-pipes';
 
 const DEFAULT_PRESIGN_TTL_SECONDS = 900;
 
 @Injectable()
 export class StorageService implements OnModuleInit {
+  private readonly logger = new Logger(StorageService.name);
   private readonly client: S3Client;
   private readonly publicBucket: string;
   private readonly privateBucket: string;
@@ -85,6 +93,49 @@ export class StorageService implements OnModuleInit {
       }),
     );
     return key;
+  }
+
+  /**
+   * Stores an already-validated upload at `<prefix>/<uuid>.<ext>` in the
+   * private bucket and returns its key. `signatures` must be the ones the
+   * route's pipe validated against.
+   */
+  uploadPrivateFile(
+    prefix: string,
+    file: StorageUploadFile,
+    signatures: FileSignature[],
+  ): Promise<string> {
+    const { contentType, extension } = matchSignature(signatures, file);
+    return this.uploadPrivate(
+      `${prefix}/${randomUUID()}.${extension}`,
+      file.buffer,
+      contentType,
+    );
+  }
+
+  /**
+   * Best-effort cleanup of private objects nothing references any more. A
+   * failed delete only orphans an object, so it logs instead of failing the
+   * request that already committed.
+   */
+  async deletePrivate(keys: (string | null | undefined)[]): Promise<void> {
+    await Promise.all(
+      keys
+        .filter((key): key is string => Boolean(key))
+        .map((key) =>
+          this.client
+            .send(
+              new DeleteObjectCommand({ Bucket: this.privateBucket, Key: key }),
+            )
+            .catch((error: unknown) => {
+              this.logger.warn(`Failed to delete private object ${key}`, error);
+            }),
+        ),
+    );
+  }
+
+  presignedUrlOrNull(key: string | null): Promise<string | null> {
+    return key ? this.getPresignedUrl(key) : Promise.resolve(null);
   }
 
   getPresignedUrl(

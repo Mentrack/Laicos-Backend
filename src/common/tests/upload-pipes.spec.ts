@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import {
   DOCUMENT_SIGNATURES,
   IMAGE_SIGNATURES,
+  ParseFileFieldsPipe,
   StorageUploadFile,
   documentUploadPipe,
   imageUploadPipe,
@@ -78,11 +79,49 @@ describe('documentUploadPipe', () => {
     await expect(documentUploadPipe().transform(file)).resolves.toBe(file);
   });
 
-  it('rejects a non-PDF buffer', async () => {
+  it('accepts a photographed document', async () => {
+    const file = fakeFile({ buffer: JPEG_HEADER, size: JPEG_HEADER.length });
+    await expect(documentUploadPipe().transform(file)).resolves.toBe(file);
+  });
+
+  it('rejects a buffer that is neither PDF nor image', async () => {
     const file = fakeFile({ buffer: Buffer.from('hello'), size: 5 });
     await expect(documentUploadPipe().transform(file)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+});
+
+describe('ParseFileFieldsPipe', () => {
+  const pipe = new ParseFileFieldsPipe(
+    { ownership: { required: true }, chief: { required: false } },
+    documentUploadPipe,
+  );
+  const pdf = fakeFile({ buffer: PDF_HEADER, size: PDF_HEADER.length });
+
+  it('returns the first file of each field', async () => {
+    await expect(
+      pipe.transform({ ownership: [pdf], chief: [pdf] }),
+    ).resolves.toEqual({ ownership: pdf, chief: pdf });
+  });
+
+  it('skips a missing optional field', async () => {
+    await expect(pipe.transform({ ownership: [pdf] })).resolves.toEqual({
+      ownership: pdf,
+    });
+  });
+
+  it('rejects a missing required field', async () => {
+    await expect(pipe.transform(undefined)).rejects.toThrow(
+      'ownership is required',
+    );
+  });
+
+  it('validates every file it returns', async () => {
+    const bad = fakeFile({ buffer: Buffer.from('hello'), size: 5 });
+    await expect(
+      pipe.transform({ ownership: [pdf], chief: [bad] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
 

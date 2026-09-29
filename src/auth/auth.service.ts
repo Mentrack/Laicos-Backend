@@ -244,6 +244,11 @@ export class AuthService {
         data: {
           ...input,
           farmer: input.role === Role.FARMER ? { create: {} } : undefined,
+          // Every agent owns exactly one cluster, so it is born with them.
+          agent:
+            input.role === Role.EXTENSION_AGENT
+              ? { create: { cluster: { create: {} } } }
+              : undefined,
           refreshToken: refreshToken
             ? { create: { token: refreshToken } }
             : undefined,
