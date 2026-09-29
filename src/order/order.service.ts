@@ -4,10 +4,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  FarmVerificationStatus,
   OrderStatus,
   Prisma,
   ProduceStatus,
   Role,
+  type Farm,
   type Order,
   type Produce,
   type User,
@@ -77,11 +79,13 @@ export class OrderService {
           id: dto.produceId,
           status: ProduceStatus.PUBLISHED,
           floatingQuantity: { gte: dto.quantity },
+          farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
         },
         data: { floatingQuantity: { decrement: dto.quantity } },
       });
       const produce = await tx.produce.findUnique({
         where: { id: dto.produceId },
+        include: { farm: { select: { verificationStatus: true } } },
       });
 
       if (reserved.count === 0 || !produce) {
@@ -364,9 +368,16 @@ async function releaseStock(tx: Prisma.TransactionClient, order: Order) {
 }
 
 // Runs after a failed reservation to say why it failed.
-function orderRefusal(produce: Produce | null) {
-  // Drafts are private, so ordering one reads as not found.
-  if (!produce || produce.status === ProduceStatus.DRAFT) {
+function orderRefusal(
+  produce: (Produce & { farm: Pick<Farm, 'verificationStatus'> }) | null,
+) {
+  // Drafts and unverified farms' listings are hidden, so ordering one reads
+  // as not found.
+  if (
+    !produce ||
+    produce.status === ProduceStatus.DRAFT ||
+    produce.farm.verificationStatus !== FarmVerificationStatus.VERIFIED
+  ) {
     return new NotFoundException('Produce not found');
   }
   if (produce.status !== ProduceStatus.PUBLISHED) {

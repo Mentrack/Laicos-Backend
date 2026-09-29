@@ -22,6 +22,7 @@ model User {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   farmer        Farmer?
+  agent         Agent?
   orders        Order[]
   refreshToken  RefreshToken?
 }
@@ -36,36 +37,204 @@ model RefreshToken {
 }
 
 model Farmer {
-  id        String   @id @default(uuid())
+  id            String   @id @default(uuid())
   // Public, human-readable code (FRM-000123). The sequence is created by hand in
   // the migration; Prisma only knows the column default that reads it.
-  farmerId  String   @unique @default(dbgenerated("('FRM-'::text || lpad((nextval('\"Farmer_farmerId_seq\"'::regclass))::text, 6, '0'::text))"))
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  farmerId      String   @unique @default(dbgenerated("('FRM-'::text || lpad((nextval('\"Farmer_farmerId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Set at profile setup; the agent checks them during farm verification.
+  idType        IdType?
+  idNumber      String?
+  // Private-bucket key.
+  idDocumentKey String?
+  farms         Farm[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Farm {
+  id                   String                 @id @default(uuid())
+  // Public, human-readable code (LF-000123), backed by a hand-made sequence
+  // like Farmer.farmerId.
+  farmCode             String                 @unique @default(dbgenerated("('LF-'::text || lpad((nextval('\"Farm_farmCode_seq\"'::regclass))::text, 6, '0'::text))"))
+  // References Farmer.id, not the public Farmer.farmerId code.
+  ownerId              String
+  owner                Farmer                 @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name                 String
+  country              String                 @default("NG")
+  stateId              String
+  state                State                  @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  // Verification is assigned to agents in this LGA.
+  lgaId                String
+  lga                  Lga                    @relation(fields: [lgaId], references: [id], onDelete: Restrict)
+  // Street address; state and LGA are the structured part.
+  location             String
+  // Hectares.
+  size                 Float
+  unit                 String                 @default("ha")
+  mainProduce          String
+  isExporting          Boolean                @default(false)
+  // Private-bucket keys, uploaded with the farm.
+  ownershipDocumentKey String
+  chiefConfirmationKey String?
+  // Denormalised from the latest FarmVerification and always written in the
+  // same transaction, so lists filter on it without a join.
+  verificationStatus   FarmVerificationStatus @default(PENDING)
+  isClustered          Boolean                @default(false)
+  // Restrict: deleting an agent (and with it their cluster) while farms are
+  // still in it would otherwise leave those farms isClustered with no cluster.
+  clusterId            String?
+  cluster              Cluster?               @relation(fields: [clusterId], references: [id], onDelete: Restrict)
+  // Informational only; plays no part in assignment.
+  referralAgentId      String?
+  referralAgent        Agent?                 @relation("FarmReferral", fields: [referralAgentId], references: [id], onDelete: SetNull)
+  produce              Produce[]
+  orders               Order[]
+  verifications        FarmVerification[]
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  @@index([ownerId])
+  @@index([lgaId])
+  @@index([clusterId])
+}
+
+model State {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  lgas   Lga[]
+  farms  Farm[]
+  agents Agent[]
+}
+
+model Lga {
+  id      String  @id @default(uuid())
+  stateId String
+  state   State   @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  name    String
+  farms   Farm[]
+  agents  Agent[]
+
+  @@unique([stateId, name])
+}
+
+model Agent {
+  id            String              @id @default(uuid())
+  // Public code (AG-000123), backed by a hand-made sequence like Farmer.farmerId.
+  agentId       String              @unique @default(dbgenerated("('AG-'::text || lpad((nextval('\"Agent_agentId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId        String              @unique
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country       String              @default("NG")
+  // Location and ID are null until profile setup.
+  stateId       String?
+  state         State?              @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  lgaId         String?
+  lga           Lga?                @relation(fields: [lgaId], references: [id], onDelete: Restrict)
+  idType        IdType?
+  idNumber      String?
+  // Private-bucket key.
+  idDocumentKey String?
+  // Set by an admin; only verified agents are assigned farms.
+  isVerified    Boolean             @default(false)
+  verifiedAt    DateTime?
+  cluster       Cluster?
+  verifications FarmVerification[]
+  declines      AssignmentDecline[]
+  handovers     OrderHandover[]
+  referredFarms Farm[]              @relation("FarmReferral")
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([lgaId, isVerified])
+}
+
+// Exactly one per agent, created with it: the farms that agent manages.
+model Cluster {
+  id        String   @id @default(uuid())
+  agentId   String   @unique
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  // "<LGA> Hub", set whenever the agent sets their LGA.
+  name      String?
   farms     Farm[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-model Farm {
-  id              String    @id @default(uuid())
-  // References Farmer.id, not the public Farmer.farmerId code.
-  ownerId         String
-  owner           Farmer    @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  name            String
-  location        String
-  // Hectares.
-  size            Float
-  unit            String    @default("ha")
-  mainProduce     String
-  isExporting     Boolean   @default(false)
-  referralAgentId String?
-  produce         Produce[]
-  orders          Order[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+// One verification round of a farm. A farm keeps every round, and at most one
+// is open (UNASSIGNED/ASSIGNED/IN_PROGRESS): a partial unique index
+// hand-written in the migration, because Prisma can't express one.
+model FarmVerification {
+  id                 String                 @id @default(uuid())
+  farmId             String
+  farm               Farm                   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  agentId            String?
+  agent              Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  status             VerificationTaskStatus @default(UNASSIGNED)
+  // Location step. false is a discrepancy: needs lat, lng, a note and evidence.
+  locationMatches    Boolean?
+  discrepancyLat     Decimal?               @db.Decimal(9, 6)
+  discrepancyLng     Decimal?               @db.Decimal(9, 6)
+  discrepancyNote    String?
+  identityNote       String?
+  // Measured on site; never overwrites Farm.size.
+  measuredSize       Float?
+  estimatedYield     Float?
+  estimatedYieldUnit String?
+  generalNote        String?
+  rejectionReason    String?
+  startedAt          DateTime?
+  decidedAt          DateTime?
+  checks             VerificationCheck[]
+  evidence           VerificationEvidence[]
+  declines           AssignmentDecline[]
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
-  @@index([ownerId])
+  @@index([farmId])
+  @@index([agentId, status])
+  @@index([status])
+}
+
+model VerificationCheck {
+  id             String               @id @default(uuid())
+  verificationId String
+  verification   FarmVerification     @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  key            VerificationCheckKey
+  result         CheckResult
+  note           String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@unique([verificationId, key])
+}
+
+// A CHECK constraint in the migration ties checkKey to kind CHECK and
+// photoSlot to kind PHOTO.
+model VerificationEvidence {
+  id             String                @id @default(uuid())
+  verificationId String
+  verification   FarmVerification      @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  kind           EvidenceKind
+  checkKey       VerificationCheckKey?
+  photoSlot      PhotoSlot?
+  // Private-bucket key.
+  storageKey     String
+  createdAt      DateTime              @default(now())
+
+  @@index([verificationId])
+}
+
+model AssignmentDecline {
+  id             String           @id @default(uuid())
+  verificationId String
+  verification   FarmVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  agentId        String
+  agent          Agent            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  reason         String
+  createdAt      DateTime         @default(now())
+
+  @@unique([verificationId, agentId])
 }
 
 model Produce {
@@ -122,6 +291,8 @@ model Order {
   cancellationReason String?
   // Created when the farmer starts preparing; READY needs every item ticked.
   checklist          OrderChecklist?
+  // Created when the order is marked READY; the agent takes it from there.
+  handover           OrderHandover?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
@@ -139,6 +310,87 @@ model OrderChecklist {
   readyForPickup Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// The agent's side of a READY order: verify the goods at the farm, then hand
+// them to logistics, which ships the order. Opened by OrderService.markReady.
+model OrderHandover {
+  orderId          String         @id
+  order            Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  // The agent whose cluster held the farm when the order became READY. Null
+  // when the farm was out of every cluster (mid re-verification); approving
+  // the farm's next round claims it.
+  agentId          String?
+  agent            Agent?         @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  status           HandoverStatus @default(PENDING)
+  verificationNote String?
+  verifiedAt       DateTime?
+  // Who took the goods; there is no logistics model yet.
+  recipientName    String?
+  recipientPhone   String?
+  handoverNote     String?
+  handedOverAt     DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([agentId, status])
+}
+
+enum HandoverStatus {
+  PENDING
+  VERIFIED
+  HANDED_OVER
+}
+
+enum IdType {
+  NIN
+  VOTERS_CARD
+}
+
+enum FarmVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationTaskStatus {
+  UNASSIGNED
+  ASSIGNED
+  IN_PROGRESS
+  APPROVED
+  REJECTED
+}
+
+enum CheckResult {
+  VERIFIED
+  ISSUE
+  UNABLE
+  NOT_APPLICABLE
+}
+
+enum VerificationCheckKey {
+  FARMER_ID
+  FARM_OWNERSHIP
+  CHIEF_CONFIRMATION
+  FARM_ACTIVE
+  ACCESS_ROUTE
+  MEASUREMENTS
+  DECLARED_PRODUCE
+  CROP_HEALTH
+  ESTIMATED_YIELD
+}
+
+enum EvidenceKind {
+  CHECK
+  LOCATION_DISCREPANCY
+  PHOTO
+}
+
+enum PhotoSlot {
+  ENTRANCE
+  FARM_AREA
+  PRODUCE
+  INFRASTRUCTURE
 }
 
 enum OrderStatus {

@@ -6,27 +6,37 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 
+export interface UploadField {
+  name: string;
+  required: boolean;
+}
+
 // Inlined in each body rather than $ref'd, and rebuilt per route so two
 // routes never share one object: an uploaded file is a transport detail of
 // the request, not a model the client should see.
-function fileSchema() {
+function fileSchema(fields: UploadField[]) {
   return {
     type: 'object',
-    required: ['file'],
-    properties: { file: { type: 'string', format: 'binary' } },
+    required: fields.filter((field) => field.required).map(({ name }) => name),
+    properties: Object.fromEntries(
+      fields.map(({ name }) => [name, { type: 'string', format: 'binary' }]),
+    ),
   };
 }
 
 /**
- * Documents a multipart route carrying one required image in `file`. Passing
- * `dto` merges the image onto that DTO by `$ref`, so a route that sends
- * fields alongside the photo still declares them only on the DTO.
+ * Documents a multipart route carrying the files in `fields`. Passing `dto`
+ * merges them onto that DTO by `$ref`, so a route that sends fields alongside
+ * its files still declares them only on the DTO.
  */
-export function ApiImageUpload(dto?: Type<unknown>) {
+export function ApiFileUpload(
+  dto: Type<unknown> | undefined,
+  fields: UploadField[],
+) {
   if (!dto) {
     return applyDecorators(
       ApiConsumes('multipart/form-data'),
-      ApiBody({ schema: fileSchema() }),
+      ApiBody({ schema: fileSchema(fields) }),
     );
   }
   return applyDecorators(
@@ -35,7 +45,12 @@ export function ApiImageUpload(dto?: Type<unknown>) {
     // nothing else puts it there: it is never a response type.
     ApiExtraModels(dto),
     ApiBody({
-      schema: { allOf: [{ $ref: getSchemaPath(dto) }, fileSchema()] },
+      schema: { allOf: [{ $ref: getSchemaPath(dto) }, fileSchema(fields)] },
     }),
   );
+}
+
+/** A multipart route carrying one required file in `file`. */
+export function ApiImageUpload(dto?: Type<unknown>) {
+  return ApiFileUpload(dto, [{ name: 'file', required: true }]);
 }

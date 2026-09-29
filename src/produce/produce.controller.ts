@@ -14,7 +14,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -39,6 +39,11 @@ export class ProduceController {
   constructor(private readonly produce: ProduceService) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Create a produce listing',
+    description:
+      'Multipart: the listing fields plus a required image in `file` (JPEG, PNG or WebP, 5 MB).',
+  })
   @Auth(Role.FARMER)
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),
@@ -57,6 +62,7 @@ export class ProduceController {
   }
 
   @Post(':id/image')
+  @ApiOperation({ summary: 'Replace a listing’s image' })
   @HttpCode(HttpStatus.OK)
   @Auth(Role.FARMER)
   @UseInterceptors(
@@ -74,6 +80,11 @@ export class ProduceController {
   }
 
   @Get()
+  @ApiOperation({
+    summary: 'List produce',
+    description:
+      'Farmers also see their own drafts and listings on unverified farms; everyone else sees only published listings on verified farms.',
+  })
   @Auth()
   @ApiEnvelope(ProduceDto, { paginated: true })
   async findAll(@CurrentUser() user: User, @Query() query: ProduceQueryDto) {
@@ -82,6 +93,7 @@ export class ProduceController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get a produce listing' })
   @Auth()
   @ApiEnvelope(ProduceDto)
   async findOne(
@@ -93,6 +105,7 @@ export class ProduceController {
   }
 
   @Patch(':id')
+  @ApiOperation({ summary: 'Update one of my listings' })
   @Auth(Role.FARMER)
   @ApiEnvelope(ProduceDto)
   async update(
@@ -105,6 +118,10 @@ export class ProduceController {
   }
 
   @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete one of my listings',
+    description: '409 once the listing has orders.',
+  })
   @Auth(Role.FARMER)
   @ApiEnvelope(ProduceDto)
   async remove(

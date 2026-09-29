@@ -10,7 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -34,6 +34,11 @@ export class OrderController {
   constructor(private readonly orders: OrderService) {}
 
   @Post()
+  @ApiOperation({
+    summary: 'Place an order',
+    description:
+      'Buyers only. Reserves the quantity from the listing. 404 for listings the buyer cannot see, including those on unverified farms.',
+  })
   @Auth(Role.BUYER)
   @ApiEnvelope(OrderDto, { status: HttpStatus.CREATED })
   async create(@CurrentUser() user: User, @Body() dto: CreateOrderDto) {
@@ -42,6 +47,11 @@ export class OrderController {
   }
 
   @Get()
+  @ApiOperation({
+    summary: 'List orders',
+    description:
+      'Buyers see orders they placed, farmers orders on their farms, admins everything.',
+  })
   @Auth()
   @ApiEnvelope(OrderDto, { paginated: true })
   async findAll(@CurrentUser() user: User, @Query() query: OrderQueryDto) {
@@ -52,6 +62,10 @@ export class OrderController {
   // Declared before `:id`, or "count" would be routed to findOne and 400 on
   // ParseUUIDPipe.
   @Get('count')
+  @ApiOperation({
+    summary: 'Count orders by status',
+    description: 'Every status is present, with zero where there are none.',
+  })
   @Auth()
   @ApiEnvelope(OrderCountDto)
   async count(@CurrentUser() user: User, @Query() filter: OrderFilterDto) {
@@ -61,6 +75,7 @@ export class OrderController {
 
   // Dashboard cards. Declared before `:id` for the same reason as count.
   @Get('summary')
+  @ApiOperation({ summary: 'Get my order dashboard figures' })
   @Auth(Role.FARMER)
   @ApiEnvelope(OrderSummaryDto)
   async summary(@CurrentUser() user: User) {
@@ -69,6 +84,7 @@ export class OrderController {
   }
 
   @Get(':id')
+  @ApiOperation({ summary: 'Get an order' })
   @Auth()
   @ApiEnvelope(OrderDto)
   async findOne(
@@ -82,6 +98,7 @@ export class OrderController {
   // A farmer's moves are confirm -> prepare -> ready (or cancel), so each is
   // its own route rather than a free-form status PATCH.
   @Patch(':id/confirm')
+  @ApiOperation({ summary: 'Confirm a pending order' })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderDto)
   async confirm(
@@ -93,6 +110,10 @@ export class OrderController {
   }
 
   @Patch(':id/prepare')
+  @ApiOperation({
+    summary: 'Start preparing a confirmed order',
+    description: 'Creates the order’s preparation checklist.',
+  })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderDto)
   async prepare(
@@ -104,6 +125,7 @@ export class OrderController {
   }
 
   @Get(':id/checklist')
+  @ApiOperation({ summary: 'Get an order’s preparation checklist' })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderChecklistDto)
   async findChecklist(
@@ -115,6 +137,7 @@ export class OrderController {
   }
 
   @Patch(':id/checklist')
+  @ApiOperation({ summary: 'Tick items on an order’s preparation checklist' })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderChecklistDto)
   async updateChecklist(
@@ -127,6 +150,10 @@ export class OrderController {
   }
 
   @Patch(':id/ready')
+  @ApiOperation({
+    summary: 'Mark a prepared order ready',
+    description: 'Needs every checklist item ticked.',
+  })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderDto)
   async markReady(
@@ -138,6 +165,11 @@ export class OrderController {
   }
 
   @Patch(':id/cancel')
+  @ApiOperation({
+    summary: 'Cancel an order',
+    description:
+      'Farmers can cancel until the order is ready; buyers only before it is confirmed. A reason is required.',
+  })
   @Auth()
   @ApiEnvelope(OrderDto)
   async cancel(
@@ -150,6 +182,11 @@ export class OrderController {
   }
 
   @Delete(':id')
+  @ApiOperation({
+    summary: 'Delete my pending order',
+    description:
+      'Buyers only, and only while it is still PENDING; otherwise cancel it.',
+  })
   @Auth(Role.BUYER)
   @ApiEnvelope(OrderDto)
   async remove(

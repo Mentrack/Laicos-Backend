@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
+  FarmVerificationStatus,
   OrderStatus,
   Prisma,
   ProduceStatus,
@@ -64,6 +65,7 @@ describe('OrderService', () => {
     status: ProduceStatus.PUBLISHED,
     type: ProduceType.EXPORT,
     pricePerUnit: new Prisma.Decimal('350.50'),
+    farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
   };
   const pending = {
     id: orderId,
@@ -88,6 +90,7 @@ describe('OrderService', () => {
           id: produceId,
           status: ProduceStatus.PUBLISHED,
           floatingQuantity: { gte: 3 },
+          farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
         },
         data: { floatingQuantity: { decrement: 3 } },
       });
@@ -139,6 +142,18 @@ describe('OrderService', () => {
       await expect(
         service.create(buyer, { produceId, quantity: 3 }),
       ).rejects.toThrow('Only 2 kg available');
+      expect(order.create).not.toHaveBeenCalled();
+    });
+
+    it('404s produce on a farm no agent has verified', async () => {
+      produce.updateMany.mockResolvedValue({ count: 0 });
+      produce.findUnique.mockResolvedValue({
+        ...published,
+        farm: { verificationStatus: FarmVerificationStatus.PENDING },
+      });
+      await expect(
+        service.create(buyer, { produceId, quantity: 3 }),
+      ).rejects.toBeInstanceOf(NotFoundException);
       expect(order.create).not.toHaveBeenCalled();
     });
   });
