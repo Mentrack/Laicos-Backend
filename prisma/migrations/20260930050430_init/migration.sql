@@ -1,12 +1,12 @@
--- Hand-written: back Agent.agentId and Farm.farmCode defaults. Prisma doesn't
--- model sequences.
-CREATE SEQUENCE "Agent_agentId_seq";
+-- Hand-written: back the farmerId/farmCode/agentId/orderNumber defaults.
+-- Prisma doesn't model sequences, so migrate diff omits them.
+CREATE SEQUENCE "Farmer_farmerId_seq";
 CREATE SEQUENCE "Farm_farmCode_seq";
+CREATE SEQUENCE "Agent_agentId_seq";
+CREATE SEQUENCE "Order_orderNumber_seq";
 
--- Hand-written note: the Farm columns below are added NOT NULL without a
--- default (stateId, lgaId, ownershipDocumentKey), which fails loudly if any
--- farm exists. Every environment this has been applied to had none; a
--- database with farms needs a backfill decided first.
+-- CreateEnum
+CREATE TYPE "HandoverStatus" AS ENUM ('PENDING', 'VERIFIED', 'HANDED_OVER');
 
 -- CreateEnum
 CREATE TYPE "IdType" AS ENUM ('NIN', 'VOTERS_CARD');
@@ -29,21 +29,85 @@ CREATE TYPE "EvidenceKind" AS ENUM ('CHECK', 'LOCATION_DISCREPANCY', 'PHOTO');
 -- CreateEnum
 CREATE TYPE "PhotoSlot" AS ENUM ('ENTRANCE', 'FARM_AREA', 'PRODUCE', 'INFRASTRUCTURE');
 
--- AlterTable
-ALTER TABLE "Farm" ADD COLUMN     "chiefConfirmationKey" TEXT,
-ADD COLUMN     "clusterId" TEXT,
-ADD COLUMN     "country" TEXT NOT NULL DEFAULT 'NG',
-ADD COLUMN     "farmCode" TEXT NOT NULL DEFAULT ('LF-'::text || lpad((nextval('"Farm_farmCode_seq"'::regclass))::text, 6, '0'::text)),
-ADD COLUMN     "isClustered" BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN     "lgaId" TEXT NOT NULL,
-ADD COLUMN     "ownershipDocumentKey" TEXT NOT NULL,
-ADD COLUMN     "stateId" TEXT NOT NULL,
-ADD COLUMN     "verificationStatus" "FarmVerificationStatus" NOT NULL DEFAULT 'PENDING';
+-- CreateEnum
+CREATE TYPE "OrderStatus" AS ENUM ('PENDING', 'CONFIRMED', 'PREPARING', 'READY', 'SHIPPED', 'FULFILLED', 'CANCELLED');
 
--- AlterTable
-ALTER TABLE "Farmer" ADD COLUMN     "idDocumentKey" TEXT,
-ADD COLUMN     "idNumber" TEXT,
-ADD COLUMN     "idType" "IdType";
+-- CreateEnum
+CREATE TYPE "ProduceStatus" AS ENUM ('DRAFT', 'PUBLISHED', 'SOLD_OUT');
+
+-- CreateEnum
+CREATE TYPE "ProduceType" AS ENUM ('LOCAL', 'EXPORT');
+
+-- CreateEnum
+CREATE TYPE "Role" AS ENUM ('FARMER', 'BUYER', 'EXTENSION_AGENT', 'RIDER', 'ADMIN');
+
+-- CreateTable
+CREATE TABLE "User" (
+    "id" TEXT NOT NULL,
+    "firebaseUid" TEXT NOT NULL,
+    "firstName" TEXT NOT NULL,
+    "lastName" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "phoneNumber" TEXT,
+    "role" "Role" NOT NULL,
+    "agreedToTerms" BOOLEAN NOT NULL DEFAULT false,
+    "isVerified" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RefreshToken" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "token" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RefreshToken_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Farmer" (
+    "id" TEXT NOT NULL,
+    "farmerId" TEXT NOT NULL DEFAULT ('FRM-'::text || lpad((nextval('"Farmer_farmerId_seq"'::regclass))::text, 6, '0'::text)),
+    "userId" TEXT NOT NULL,
+    "idType" "IdType",
+    "idNumber" TEXT,
+    "idDocumentKey" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Farmer_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Farm" (
+    "id" TEXT NOT NULL,
+    "farmCode" TEXT NOT NULL DEFAULT ('LF-'::text || lpad((nextval('"Farm_farmCode_seq"'::regclass))::text, 6, '0'::text)),
+    "ownerId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "country" TEXT NOT NULL DEFAULT 'NG',
+    "stateId" TEXT NOT NULL,
+    "lgaId" TEXT NOT NULL,
+    "location" TEXT NOT NULL,
+    "size" DOUBLE PRECISION NOT NULL,
+    "unit" TEXT NOT NULL DEFAULT 'ha',
+    "mainProduce" TEXT NOT NULL,
+    "isExporting" BOOLEAN NOT NULL DEFAULT false,
+    "ownershipDocumentKey" TEXT NOT NULL,
+    "chiefConfirmationKey" TEXT,
+    "verificationStatus" "FarmVerificationStatus" NOT NULL DEFAULT 'PENDING',
+    "isClustered" BOOLEAN NOT NULL DEFAULT false,
+    "clusterId" TEXT,
+    "referralAgentId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Farm_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "State" (
@@ -153,6 +217,101 @@ CREATE TABLE "AssignmentDecline" (
     CONSTRAINT "AssignmentDecline_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "Produce" (
+    "id" TEXT NOT NULL,
+    "farmId" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "quantity" DOUBLE PRECISION NOT NULL,
+    "actualQuantity" DOUBLE PRECISION NOT NULL,
+    "floatingQuantity" DOUBLE PRECISION NOT NULL,
+    "unit" TEXT NOT NULL,
+    "pricePerUnit" DECIMAL(12,2) NOT NULL,
+    "imageUrl" TEXT,
+    "status" "ProduceStatus" NOT NULL DEFAULT 'DRAFT',
+    "type" "ProduceType" NOT NULL DEFAULT 'LOCAL',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Produce_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Order" (
+    "id" TEXT NOT NULL,
+    "orderNumber" TEXT NOT NULL DEFAULT ('ORD-'::text || lpad((nextval('"Order_orderNumber_seq"'::regclass))::text, 6, '0'::text)),
+    "produceId" TEXT NOT NULL,
+    "farmId" TEXT NOT NULL,
+    "buyerId" TEXT NOT NULL,
+    "quantity" DOUBLE PRECISION NOT NULL,
+    "totalPrice" DECIMAL(12,2) NOT NULL,
+    "status" "OrderStatus" NOT NULL DEFAULT 'PENDING',
+    "produceName" TEXT NOT NULL,
+    "type" "ProduceType" NOT NULL,
+    "cancellationReason" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "OrderChecklist" (
+    "orderId" TEXT NOT NULL,
+    "harvested" BOOLEAN NOT NULL DEFAULT false,
+    "sorted" BOOLEAN NOT NULL DEFAULT false,
+    "packaged" BOOLEAN NOT NULL DEFAULT false,
+    "readyForPickup" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "OrderChecklist_pkey" PRIMARY KEY ("orderId")
+);
+
+-- CreateTable
+CREATE TABLE "OrderHandover" (
+    "orderId" TEXT NOT NULL,
+    "agentId" TEXT,
+    "status" "HandoverStatus" NOT NULL DEFAULT 'PENDING',
+    "verificationNote" TEXT,
+    "verifiedAt" TIMESTAMP(3),
+    "recipientName" TEXT,
+    "recipientPhone" TEXT,
+    "handoverNote" TEXT,
+    "handedOverAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "OrderHandover_pkey" PRIMARY KEY ("orderId")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_firebaseUid_key" ON "User"("firebaseUid");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RefreshToken_userId_key" ON "RefreshToken"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Farmer_farmerId_key" ON "Farmer"("farmerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Farmer_userId_key" ON "Farmer"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Farm_farmCode_key" ON "Farm"("farmCode");
+
+-- CreateIndex
+CREATE INDEX "Farm_ownerId_idx" ON "Farm"("ownerId");
+
+-- CreateIndex
+CREATE INDEX "Farm_lgaId_idx" ON "Farm"("lgaId");
+
+-- CreateIndex
+CREATE INDEX "Farm_clusterId_idx" ON "Farm"("clusterId");
+
 -- CreateIndex
 CREATE UNIQUE INDEX "State_name_key" ON "State"("name");
 
@@ -190,13 +349,34 @@ CREATE INDEX "VerificationEvidence_verificationId_idx" ON "VerificationEvidence"
 CREATE UNIQUE INDEX "AssignmentDecline_verificationId_agentId_key" ON "AssignmentDecline"("verificationId", "agentId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Farm_farmCode_key" ON "Farm"("farmCode");
+CREATE INDEX "Produce_farmId_idx" ON "Produce"("farmId");
 
 -- CreateIndex
-CREATE INDEX "Farm_lgaId_idx" ON "Farm"("lgaId");
+CREATE UNIQUE INDEX "Produce_id_farmId_key" ON "Produce"("id", "farmId");
 
 -- CreateIndex
-CREATE INDEX "Farm_clusterId_idx" ON "Farm"("clusterId");
+CREATE UNIQUE INDEX "Order_orderNumber_key" ON "Order"("orderNumber");
+
+-- CreateIndex
+CREATE INDEX "Order_farmId_idx" ON "Order"("farmId");
+
+-- CreateIndex
+CREATE INDEX "Order_produceId_idx" ON "Order"("produceId");
+
+-- CreateIndex
+CREATE INDEX "Order_buyerId_idx" ON "Order"("buyerId");
+
+-- CreateIndex
+CREATE INDEX "OrderHandover_agentId_status_idx" ON "OrderHandover"("agentId", "status");
+
+-- AddForeignKey
+ALTER TABLE "RefreshToken" ADD CONSTRAINT "RefreshToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Farmer" ADD CONSTRAINT "Farmer_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Farm" ADD CONSTRAINT "Farm_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "Farmer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Farm" ADD CONSTRAINT "Farm_stateId_fkey" FOREIGN KEY ("stateId") REFERENCES "State"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -243,9 +423,38 @@ ALTER TABLE "AssignmentDecline" ADD CONSTRAINT "AssignmentDecline_verificationId
 -- AddForeignKey
 ALTER TABLE "AssignmentDecline" ADD CONSTRAINT "AssignmentDecline_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- AddForeignKey
+ALTER TABLE "Produce" ADD CONSTRAINT "Produce_farmId_fkey" FOREIGN KEY ("farmId") REFERENCES "Farm"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Order" ADD CONSTRAINT "Order_produceId_farmId_fkey" FOREIGN KEY ("produceId", "farmId") REFERENCES "Produce"("id", "farmId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Order" ADD CONSTRAINT "Order_farmId_fkey" FOREIGN KEY ("farmId") REFERENCES "Farm"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Order" ADD CONSTRAINT "Order_buyerId_fkey" FOREIGN KEY ("buyerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "OrderChecklist" ADD CONSTRAINT "OrderChecklist_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "OrderHandover" ADD CONSTRAINT "OrderHandover_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "OrderHandover" ADD CONSTRAINT "OrderHandover_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
 -- Hand-written: tie the sequences' lifetime to their columns.
-ALTER SEQUENCE "Agent_agentId_seq" OWNED BY "Agent"."agentId";
+ALTER SEQUENCE "Farmer_farmerId_seq" OWNED BY "Farmer"."farmerId";
 ALTER SEQUENCE "Farm_farmCode_seq" OWNED BY "Farm"."farmCode";
+ALTER SEQUENCE "Agent_agentId_seq" OWNED BY "Agent"."agentId";
+ALTER SEQUENCE "Order_orderNumber_seq" OWNED BY "Order"."orderNumber";
+
+-- Hand-written: Prisma doesn't model CHECK constraints. They back up the
+-- conditional stock updates in OrderService, so a missed guard fails loudly
+-- instead of overselling.
+ALTER TABLE "Produce" ADD CONSTRAINT "Produce_floatingQuantity_nonnegative" CHECK ("floatingQuantity" >= 0),
+ADD CONSTRAINT "Produce_floating_within_actual" CHECK ("floatingQuantity" <= "actualQuantity");
 
 -- Hand-written: at most one open verification round per farm. Prisma can't
 -- express a partial unique index.
@@ -258,18 +467,6 @@ ALTER TABLE "VerificationEvidence" ADD CONSTRAINT "VerificationEvidence_shape_ch
     ("kind" = 'CHECK') = ("checkKey" IS NOT NULL)
     AND ("kind" = 'PHOTO') = ("photoSlot" IS NOT NULL)
 );
-
--- Hand-written backfill: every EXTENSION_AGENT registered before this
--- migration gets an Agent row and its Cluster, as registration now creates.
-INSERT INTO "Agent" ("id", "userId", "updatedAt")
-SELECT gen_random_uuid()::text, "id", CURRENT_TIMESTAMP
-FROM "User"
-WHERE "role" = 'EXTENSION_AGENT'
-ORDER BY "createdAt";
-
-INSERT INTO "Cluster" ("id", "agentId", "updatedAt")
-SELECT gen_random_uuid()::text, "id", CURRENT_TIMESTAMP
-FROM "Agent";
 
 -- Hand-written seed: Nigeria's 36 states + FCT and 774 LGAs, from the
 -- nigerian-states-and-lgas@1.0.8 npm package (ISC), "Kastina" corrected to
