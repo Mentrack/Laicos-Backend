@@ -22,6 +22,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # Password-protected like Railway's Redis, so a missing REDIS_PASSWORD fails locally too.
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:-laicos}']
     ports:
       - '${REDIS_PORT:-6380}:6379'
     volumes:

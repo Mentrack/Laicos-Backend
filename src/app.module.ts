@@ -26,7 +26,11 @@ import { VerificationModule } from './verification/verification.module';
           throw new Error('REDIS_PORT must be an integer');
         }
         return {
-          connection: { host: requireConfig(config, 'REDIS_HOST'), port },
+          connection: {
+            host: requireConfig(config, 'REDIS_HOST'),
+            port,
+            password: requireConfig(config, 'REDIS_PASSWORD'),
+          },
           // Every queue shares these; a queue overrides only what it must.
           defaultJobOptions: {
             attempts: 3,
