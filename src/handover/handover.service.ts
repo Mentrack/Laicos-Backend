@@ -64,67 +64,84 @@ export class HandoverService {
     return formatHandover(handover);
   }
 
-  /** The agent has checked the goods at the farm against the order. */
   async verify(agent: Agent, orderId: string, dto: VerifyHandoverDto) {
-    // Guarded on PENDING by the write itself, so a double tap is a 409, not
-    // a second verifiedAt.
-    const { count } = await this.database.orderHandover.updateMany({
-      where: { orderId, agentId: agent.id, status: HandoverStatus.PENDING },
-      data: {
-        status: HandoverStatus.VERIFIED,
-        verificationNote: dto.note ?? null,
-        verifiedAt: new Date(),
-      },
-    });
-    if (!count) {
-      await this.refuse(
-        agent,
-        orderId,
-        'Only a pending handover can be verified',
-      );
-    }
-    return this.findOne(agent, orderId);
+    const handover = await this.guarded(
+      agent,
+      orderId,
+      'Only a pending handover can be verified',
+      this.database.orderHandover.update({
+        where: { orderId, agentId: agent.id, status: HandoverStatus.PENDING },
+        data: {
+          status: HandoverStatus.VERIFIED,
+          verificationNote: dto.note ?? null,
+          verifiedAt: new Date(),
+        },
+        include: HANDOVER_INCLUDE,
+      }),
+    );
+    return formatHandover(handover);
   }
 
   /** Logistics has the goods: the order ships. */
   async complete(agent: Agent, orderId: string, dto: CompleteHandoverDto) {
     try {
-      await this.database.$transaction(async (tx) => {
-        const { count } = await tx.orderHandover.updateMany({
-          where: {
-            orderId,
-            agentId: agent.id,
-            status: HandoverStatus.VERIFIED,
-          },
-          data: {
-            status: HandoverStatus.HANDED_OVER,
-            recipientName: dto.recipientName,
-            recipientPhone: dto.recipientPhone ?? null,
-            handoverNote: dto.note ?? null,
-            handedOverAt: new Date(),
-          },
-        });
-        if (!count) {
-          await this.refuse(
-            agent,
-            orderId,
-            'Verify the order before handing it over',
-          );
-        }
+      const handover = await this.database.$transaction(async (tx) => {
+        const handedOver = await this.guarded(
+          agent,
+          orderId,
+          'Verify the order before handing it over',
+          tx.orderHandover.update({
+            where: {
+              orderId,
+              agentId: agent.id,
+              status: HandoverStatus.VERIFIED,
+            },
+            data: {
+              status: HandoverStatus.HANDED_OVER,
+              recipientName: dto.recipientName,
+              recipientPhone: dto.recipientPhone ?? null,
+              handoverNote: dto.note ?? null,
+              handedOverAt: new Date(),
+            },
+            include: HANDOVER_INCLUDE,
+          }),
+        );
         // Nothing moves a READY order but this, so a miss means data drift;
         // it rolls the handover back rather than ship out of order.
         await tx.order.update({
           where: { id: orderId, status: OrderStatus.READY },
           data: { status: OrderStatus.SHIPPED },
         });
+        return handedOver;
       });
+      return formatHandover(handover);
     } catch (error) {
       if (isRecordNotFound(error)) {
         throw new ConflictException('Order is no longer ready for handover');
       }
       throw error;
     }
-    return this.findOne(agent, orderId);
+  }
+
+  /**
+   * Runs an update whose where carries the expected status, so the check and
+   * the write are one statement. Its P2025 is translated here, before
+   * complete()'s outer catch could misread it as the order leaving READY.
+   */
+  private async guarded<T>(
+    agent: Agent,
+    orderId: string,
+    message: string,
+    write: Promise<T>,
+  ): Promise<T> {
+    try {
+      return await write;
+    } catch (error) {
+      if (isRecordNotFound(error)) {
+        return this.refuse(agent, orderId, message);
+      }
+      throw error;
+    }
   }
 
   /** After a guarded write missed: 404 if not the agent's, else 409. */
