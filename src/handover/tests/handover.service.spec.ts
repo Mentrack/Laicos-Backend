@@ -11,6 +11,11 @@ import { HandoverService } from '../handover.service';
 
 const agent = { id: 'agent-1', isVerified: true } as Agent;
 const orderId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
+const notFound = () =>
+  new Prisma.PrismaClientKnownRequestError('boom', {
+    code: 'P2025',
+    clientVersion: 'test',
+  });
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -53,7 +58,7 @@ describe('HandoverService', () => {
     findMany: jest.fn(),
     count: jest.fn(),
     findFirst: jest.fn(),
-    updateMany: jest.fn(),
+    update: jest.fn(),
   };
   const order = { update: jest.fn() };
   const tx = { orderHandover, order };
@@ -68,7 +73,7 @@ describe('HandoverService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     orderHandover.findFirst.mockResolvedValue(row());
-    orderHandover.updateMany.mockResolvedValue({ count: 1 });
+    orderHandover.update.mockResolvedValue(row());
   });
 
   it('lists only the agent’s own handovers', async () => {
@@ -96,20 +101,31 @@ describe('HandoverService', () => {
   });
 
   describe('verify', () => {
-    it('moves a pending handover to VERIFIED', async () => {
-      await service.verify(agent, orderId, { note: 'All bags weighed' });
-      expect(orderHandover.updateMany).toHaveBeenCalledWith({
-        where: { orderId, agentId: agent.id, status: HandoverStatus.PENDING },
-        data: {
-          status: HandoverStatus.VERIFIED,
-          verificationNote: 'All bags weighed',
-          verifiedAt: expect.any(Date),
-        },
+    it('moves a pending handover to VERIFIED and returns it', async () => {
+      orderHandover.update.mockResolvedValue(
+        row({ status: HandoverStatus.VERIFIED }),
+      );
+      const result = await service.verify(agent, orderId, {
+        note: 'All bags weighed',
+      });
+      expect(orderHandover.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { orderId, agentId: agent.id, status: HandoverStatus.PENDING },
+          data: {
+            status: HandoverStatus.VERIFIED,
+            verificationNote: 'All bags weighed',
+            verifiedAt: expect.any(Date),
+          },
+        }),
+      );
+      expect(result).toMatchObject({
+        orderId,
+        status: HandoverStatus.VERIFIED,
       });
     });
 
     it('409s a handover already verified', async () => {
-      orderHandover.updateMany.mockResolvedValue({ count: 0 });
+      orderHandover.update.mockRejectedValue(notFound());
       orderHandover.findFirst.mockResolvedValue(
         row({ status: HandoverStatus.VERIFIED }),
       );
@@ -119,7 +135,7 @@ describe('HandoverService', () => {
     });
 
     it('404s when the guarded write missed another agent’s handover', async () => {
-      orderHandover.updateMany.mockResolvedValue({ count: 0 });
+      orderHandover.update.mockRejectedValue(notFound());
       orderHandover.findFirst.mockResolvedValue(null);
       await expect(service.verify(agent, orderId, {})).rejects.toBeInstanceOf(
         NotFoundException,
@@ -131,16 +147,29 @@ describe('HandoverService', () => {
     const dto = { recipientName: 'Musa Ibrahim' };
 
     it('records the recipient and ships the READY order', async () => {
-      await service.complete(agent, orderId, dto);
-      expect(orderHandover.updateMany).toHaveBeenCalledWith({
-        where: { orderId, agentId: agent.id, status: HandoverStatus.VERIFIED },
-        data: {
-          status: HandoverStatus.HANDED_OVER,
-          recipientName: 'Musa Ibrahim',
-          recipientPhone: null,
-          handoverNote: null,
-          handedOverAt: expect.any(Date),
-        },
+      orderHandover.update.mockResolvedValue(
+        row({ status: HandoverStatus.HANDED_OVER }),
+      );
+      const result = await service.complete(agent, orderId, dto);
+      expect(orderHandover.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            orderId,
+            agentId: agent.id,
+            status: HandoverStatus.VERIFIED,
+          },
+          data: {
+            status: HandoverStatus.HANDED_OVER,
+            recipientName: 'Musa Ibrahim',
+            recipientPhone: null,
+            handoverNote: null,
+            handedOverAt: expect.any(Date),
+          },
+        }),
+      );
+      expect(result).toMatchObject({
+        orderId,
+        status: HandoverStatus.HANDED_OVER,
       });
       expect(order.update).toHaveBeenCalledWith({
         where: { id: orderId, status: OrderStatus.READY },
@@ -149,7 +178,7 @@ describe('HandoverService', () => {
     });
 
     it('refuses to hand over an unverified order', async () => {
-      orderHandover.updateMany.mockResolvedValue({ count: 0 });
+      orderHandover.update.mockRejectedValue(notFound());
       await expect(service.complete(agent, orderId, dto)).rejects.toThrow(
         'Verify the order before handing it over; this one is PENDING',
       );
@@ -157,12 +186,7 @@ describe('HandoverService', () => {
     });
 
     it('409s when the order is no longer READY', async () => {
-      order.update.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('boom', {
-          code: 'P2025',
-          clientVersion: 'test',
-        }),
-      );
+      order.update.mockRejectedValue(notFound());
       await expect(
         service.complete(agent, orderId, dto),
       ).rejects.toBeInstanceOf(ConflictException);
