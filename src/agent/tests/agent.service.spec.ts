@@ -3,11 +3,18 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { Role, type User } from '../../../generated/client';
+import {
+  HandoverStatus,
+  ProduceType,
+  Role,
+  VerificationTaskStatus,
+  type User,
+} from '../../../generated/client';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { AgentService } from '../agent.service';
+import { AgentTaskType } from '../dto';
 
 const user = { id: 'user-1', role: Role.EXTENSION_AGENT } as User;
 
@@ -34,9 +41,13 @@ function row(overrides: Record<string, unknown> = {}) {
 describe('AgentService', () => {
   const agent = { findUnique: jest.fn(), update: jest.fn() };
   const farm = { findMany: jest.fn(), count: jest.fn() };
+  const farmVerification = { findMany: jest.fn() };
+  const orderHandover = { findMany: jest.fn() };
   const database = {
     agent,
     farm,
+    farmVerification,
+    orderHandover,
     $transaction: (queries: Promise<unknown>[]) => Promise.all(queries),
   };
   const storage = {
@@ -122,5 +133,117 @@ describe('AgentService', () => {
         where: { cluster: { agent: { userId: user.id } } },
       }),
     );
+  });
+
+  describe('findTasks', () => {
+    const farmRow = {
+      id: 'farm-1',
+      farmCode: 'LF-000001',
+      name: 'Alao Cassava Farm',
+      location: 'Sango Community',
+      state: { id: 'state-1', name: 'Abia' },
+      lga: { id: 'lga-1', stateId: 'state-1', name: 'Aba North' },
+      size: 5,
+      unit: 'ha',
+      mainProduce: 'Cassava',
+    };
+    const round = {
+      id: 'round-1',
+      status: VerificationTaskStatus.ASSIGNED,
+      startedAt: null,
+      decidedAt: null,
+      createdAt: new Date('2026-09-01'),
+      farm: farmRow,
+    };
+    const handover = {
+      orderId: 'order-1',
+      status: HandoverStatus.PENDING,
+      verificationNote: null,
+      verifiedAt: null,
+      recipientName: null,
+      recipientPhone: null,
+      handoverNote: null,
+      handedOverAt: null,
+      createdAt: new Date('2026-09-02'),
+      order: {
+        id: 'order-1',
+        orderNumber: 'ORD-000001',
+        produceName: 'Maize',
+        quantity: 12.5,
+        type: ProduceType.LOCAL,
+        produce: { unit: 'tons' },
+        farm: farmRow,
+      },
+    };
+
+    beforeEach(() => {
+      farmVerification.findMany.mockResolvedValue([round]);
+      orderHandover.findMany.mockResolvedValue([handover]);
+    });
+
+    it('merges open verifications and handovers, newest first', async () => {
+      const { data, metaData } = await service.findTasks(user, {});
+      expect(farmVerification.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            agent: { userId: user.id },
+            status: {
+              in: [
+                VerificationTaskStatus.ASSIGNED,
+                VerificationTaskStatus.IN_PROGRESS,
+              ],
+            },
+          },
+        }),
+      );
+      expect(orderHandover.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            agent: { userId: user.id },
+            status: { in: [HandoverStatus.PENDING, HandoverStatus.VERIFIED] },
+          },
+        }),
+      );
+      expect(data.map(({ type, id }) => [type, id])).toEqual([
+        [AgentTaskType.ORDER_HANDOVER, 'order-1'],
+        [AgentTaskType.FARM_VERIFICATION, 'round-1'],
+      ]);
+      expect(data[0]).toMatchObject({
+        verification: null,
+        handover: { orderNumber: 'ORD-000001', quantity: 12.5, unit: 'tons' },
+      });
+      expect(data[1]).toMatchObject({
+        handover: null,
+        verification: { id: 'round-1', farm: { name: 'Alao Cassava Farm' } },
+      });
+      expect(metaData).toEqual({
+        page: 1,
+        perPage: 20,
+        total: 2,
+        totalPages: 1,
+      });
+    });
+
+    it('queries only the requested type', async () => {
+      const { data } = await service.findTasks(user, {
+        type: AgentTaskType.FARM_VERIFICATION,
+      });
+      expect(orderHandover.findMany).not.toHaveBeenCalled();
+      expect(data).toHaveLength(1);
+    });
+
+    it('pages the merged list', async () => {
+      const { data, metaData } = await service.findTasks(user, {
+        page: 2,
+        perPage: 1,
+      });
+      expect(data.map(({ id }) => id)).toEqual(['round-1']);
+      expect(metaData).toEqual({
+        page: 2,
+        perPage: 1,
+        total: 2,
+        totalPages: 2,
+      });
+    });
   });
 });

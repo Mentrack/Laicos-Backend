@@ -48,3 +48,12 @@ export function paginationMeta(
 ): PaginationMetaDto {
   return { page, perPage, total, totalPages: Math.ceil(total / perPage) };
 }
+
+/** For lists merged from several queries, which no single `skip` can page. */
+export function paginateInMemory<T>(items: T[], query: PaginationQueryDto) {
+  const { page, perPage, skip, take } = resolvePagination(query);
+  return {
+    data: items.slice(skip, skip + take),
+    metaData: paginationMeta(page, perPage, items.length),
+  };
+}

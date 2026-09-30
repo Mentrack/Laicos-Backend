@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { IdentityDto, UpdateIdentityDto } from '../../common/dto/identity.dto';
+import { PaginationQueryDto } from '../../common/pagination';
+import { HandoverDto } from '../../handover/dto';
 import { LgaDto, StateDto } from '../../location/dto';
+import { VerificationSummaryDto } from '../../verification/dto';
 
 export class ClusterSummaryDto {
   @ApiProperty({ format: 'uuid' })
@@ -55,4 +58,38 @@ export class UpdateAgentDto extends UpdateIdentityDto {
   @IsOptional()
   @IsUUID()
   lgaId?: string;
+}
+
+export enum AgentTaskType {
+  FARM_VERIFICATION = 'FARM_VERIFICATION',
+  ORDER_HANDOVER = 'ORDER_HANDOVER',
+}
+
+export class AgentTaskQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: AgentTaskType, enumName: 'AgentTaskType' })
+  @IsOptional()
+  @IsEnum(AgentTaskType)
+  type?: AgentTaskType;
+}
+
+// One of verification or handover is set, matching `type`.
+export class AgentTaskDto {
+  @ApiProperty({ enum: AgentTaskType, enumName: 'AgentTaskType' })
+  type: AgentTaskType;
+
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'What the task’s own routes take: the verification id, or the order id for a handover',
+  })
+  id: string;
+
+  @ApiProperty({ description: 'When the task was opened' })
+  createdAt: Date;
+
+  @ApiProperty({ type: VerificationSummaryDto, nullable: true })
+  verification: VerificationSummaryDto | null;
+
+  @ApiProperty({ type: HandoverDto, nullable: true })
+  handover: HandoverDto | null;
 }
