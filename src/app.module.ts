@@ -6,6 +6,7 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { requireConfig } from './common/config';
 import { FarmModule } from './farm/farm.module';
+import { HandoverModule } from './handover/handover.module';
 import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProduceModule } from './produce/produce.module';
@@ -45,6 +46,7 @@ import { VerificationModule } from './verification/verification.module';
     AgentModule,
     LocationModule,
     VerificationModule,
+    HandoverModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -254,7 +254,8 @@ export class OrderService {
     }
   }
 
-  // Shipping and fulfilment belong to other roles and aren't handled here.
+  // READY hands the order to an agent (HandoverService), whose handover ships
+  // it. Fulfilment belongs to other roles and isn't handled here.
   async markReady(user: User, id: string) {
     const order = await this.findOne(user, id);
     if (order.status !== OrderStatus.PREPARING) {
@@ -269,6 +270,13 @@ export class OrderService {
         `Complete the preparation checklist first; unticked: ${unticked.join(', ')}`,
       );
     }
+    // The agent whose cluster holds the farm takes the order from here. A farm
+    // out of every cluster (mid re-verification) leaves it unassigned until
+    // its next round is approved.
+    const farm = await this.database.farm.findUniqueOrThrow({
+      where: { id: order.farmId },
+      select: { cluster: { select: { agentId: true } } },
+    });
     try {
       return await this.database.order.update({
         where: {
@@ -276,7 +284,10 @@ export class OrderService {
           status: OrderStatus.PREPARING,
           checklist: { is: CHECKLIST_COMPLETE },
         },
-        data: { status: OrderStatus.READY },
+        data: {
+          status: OrderStatus.READY,
+          handover: { create: { agentId: farm.cluster?.agentId ?? null } },
+        },
       });
     } catch (error) {
       throw mapOrderRaceError(error);

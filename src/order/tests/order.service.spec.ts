@@ -44,7 +44,8 @@ describe('OrderService', () => {
     findFirst: jest.fn(),
     update: jest.fn(),
   };
-  const tx = { produce, order, orderChecklist };
+  const farm = { findUniqueOrThrow: jest.fn() };
+  const tx = { produce, order, orderChecklist, farm };
   const database = {
     ...tx,
     // A plain function, not jest.fn, so resetAllMocks keeps it. Array form
@@ -371,6 +372,12 @@ describe('OrderService', () => {
   });
 
   describe('markReady', () => {
+    beforeEach(() =>
+      farm.findUniqueOrThrow.mockResolvedValue({
+        cluster: { agentId: 'agent-1' },
+      }),
+    );
+
     it('moves a fully prepared order to READY, re-checking the checklist', async () => {
       order.findFirst.mockResolvedValue(preparing);
       orderChecklist.findFirst.mockResolvedValue(ticked);
@@ -388,8 +395,30 @@ describe('OrderService', () => {
             },
           },
         },
-        data: { status: OrderStatus.READY },
+        data: {
+          status: OrderStatus.READY,
+          handover: { create: { agentId: 'agent-1' } },
+        },
       });
+    });
+
+    it('leaves the handover unassigned when the farm is in no cluster', async () => {
+      order.findFirst.mockResolvedValue({ ...preparing, farmId: 'farm-1' });
+      orderChecklist.findFirst.mockResolvedValue(ticked);
+      farm.findUniqueOrThrow.mockResolvedValue({ cluster: null });
+      await service.markReady(farmer, orderId);
+      expect(farm.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: 'farm-1' },
+        select: { cluster: { select: { agentId: true } } },
+      });
+      expect(order.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: {
+            status: OrderStatus.READY,
+            handover: { create: { agentId: null } },
+          },
+        }),
+      );
     });
 
     it('names the unticked items', async () => {

@@ -25,7 +25,12 @@ import {
 } from '../common/upload-pipes';
 import { FarmDto } from '../farm/dto';
 import { AgentService } from './agent.service';
-import { AgentProfileDto, UpdateAgentDto } from './dto';
+import {
+  AgentProfileDto,
+  AgentTaskDto,
+  AgentTaskQueryDto,
+  UpdateAgentDto,
+} from './dto';
 
 // Profile routes work before an admin verifies the agent: that is when the
 // agent fills them in.
@@ -87,5 +92,20 @@ export class AgentController {
   ) {
     const { data, metaData } = await this.agents.findClusterFarms(user, query);
     return { data, message: 'Cluster farms retrieved', metaData };
+  }
+
+  @Get('tasks')
+  @ApiOperation({
+    summary: 'List my open tasks',
+    description:
+      'Farm verifications (ASSIGNED or IN_PROGRESS) and order handovers (PENDING or VERIFIED), newest first. Filter by type.',
+  })
+  @ApiEnvelope(AgentTaskDto, { paginated: true })
+  async findTasks(
+    @CurrentUser() user: User,
+    @Query() query: AgentTaskQueryDto,
+  ) {
+    const { data, metaData } = await this.agents.findTasks(user, query);
+    return { data, message: 'Tasks retrieved', metaData };
   }
 }

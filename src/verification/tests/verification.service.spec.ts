@@ -7,6 +7,7 @@ import {
   CheckResult,
   EvidenceKind,
   FarmVerificationStatus,
+  HandoverStatus,
   PhotoSlot,
   VerificationCheckKey,
   VerificationTaskStatus,
@@ -100,6 +101,7 @@ describe('VerificationService', () => {
   const assignmentDecline = { create: jest.fn() };
   const cluster = { findUniqueOrThrow: jest.fn() };
   const farm = { update: jest.fn() };
+  const orderHandover = { updateMany: jest.fn() };
   const tx = {
     farmVerification,
     verificationCheck,
@@ -107,6 +109,7 @@ describe('VerificationService', () => {
     assignmentDecline,
     cluster,
     farm,
+    orderHandover,
   };
   const database = {
     ...tx,
@@ -419,6 +422,14 @@ describe('VerificationService', () => {
           clusterId: 'cluster-1',
           isClustered: true,
         },
+      });
+      expect(orderHandover.updateMany).toHaveBeenCalledWith({
+        where: {
+          agentId: null,
+          status: { in: [HandoverStatus.PENDING, HandoverStatus.VERIFIED] },
+          order: { farmId: 'farm-1' },
+        },
+        data: { agentId: agent.id },
       });
     });
   });
