@@ -2254,6 +2254,252 @@
           "Agents"
         ]
       }
+    },
+    "/agents/me/tasks": {
+      "get": {
+        "description": "Farm verifications (ASSIGNED or IN_PROGRESS) and order handovers (PENDING or VERIFIED), newest first. Filter by type.",
+        "operationId": "AgentController_findTasks",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/AgentTaskType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTaskListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my open tasks",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/handovers": {
+      "get": {
+        "description": "READY orders from my cluster. Filter by status, e.g. PENDING for orders still to verify.",
+        "operationId": "HandoverController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/HandoverStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my order handovers",
+        "tags": [
+          "Handovers"
+        ]
+      }
+    },
+    "/handovers/{orderId}": {
+      "get": {
+        "operationId": "HandoverController_findOne",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get an order handover",
+        "tags": [
+          "Handovers"
+        ]
+      }
+    },
+    "/handovers/{orderId}/verify": {
+      "post": {
+        "description": "PENDING -> VERIFIED, after checking the goods at the farm.",
+        "operationId": "HandoverController_verify",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyHandoverDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Verify the order’s goods",
+        "tags": [
+          "Handovers"
+        ]
+      }
+    },
+    "/handovers/{orderId}/complete": {
+      "post": {
+        "description": "VERIFIED -> HANDED_OVER, recording who took the goods. The order becomes SHIPPED.",
+        "operationId": "HandoverController_complete",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteHandoverDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Hand the order over to logistics",
+        "tags": [
+          "Handovers"
+        ]
+      }
     }
   },
   "info": {
@@ -3227,7 +3473,7 @@
           "REJECTED"
         ]
       },
-      "VerificationFarmSummaryDto": {
+      "FarmSummaryDto": {
         "type": "object",
         "properties": {
           "id": {
@@ -3294,7 +3540,7 @@
             ]
           },
           "farm": {
-            "$ref": "#/components/schemas/VerificationFarmSummaryDto"
+            "$ref": "#/components/schemas/FarmSummaryDto"
           },
           "startedAt": {
             "format": "date-time",
@@ -4572,6 +4818,258 @@
             "description": "Cannot change once the agent is verified"
           }
         }
+      },
+      "AgentTaskType": {
+        "type": "string",
+        "enum": [
+          "FARM_VERIFICATION",
+          "ORDER_HANDOVER"
+        ]
+      },
+      "HandoverStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "VERIFIED",
+          "HANDED_OVER"
+        ]
+      },
+      "HandoverDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The order’s id"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HandoverStatus"
+              }
+            ]
+          },
+          "produceName": {
+            "type": "string",
+            "example": "Maize"
+          },
+          "quantity": {
+            "type": "number",
+            "example": 12.5,
+            "description": "In `unit`"
+          },
+          "unit": {
+            "type": "string",
+            "example": "tons"
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceType"
+              }
+            ]
+          },
+          "farm": {
+            "$ref": "#/components/schemas/FarmSummaryDto"
+          },
+          "verificationNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "verifiedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "recipientName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Musa Ibrahim"
+          },
+          "recipientPhone": {
+            "type": "string",
+            "nullable": true,
+            "example": "+2348012345678"
+          },
+          "handoverNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "handedOverAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the order was marked READY"
+          }
+        },
+        "required": [
+          "orderId",
+          "orderNumber",
+          "status",
+          "produceName",
+          "quantity",
+          "unit",
+          "type",
+          "farm",
+          "verificationNote",
+          "verifiedAt",
+          "recipientName",
+          "recipientPhone",
+          "handoverNote",
+          "handedOverAt",
+          "createdAt"
+        ]
+      },
+      "AgentTaskDto": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentTaskType"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "What the task’s own routes take: the verification id, or the order id for a handover"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the task was opened"
+          },
+          "verification": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationSummaryDto"
+              }
+            ]
+          },
+          "handover": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HandoverDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "createdAt",
+          "verification",
+          "handover"
+        ]
+      },
+      "AgentTaskListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentTaskDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "HandoverListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandoverDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "HandoverResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/HandoverDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "VerifyHandoverDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Bags counted and weighed; quality good"
+          }
+        }
+      },
+      "CompleteHandoverDto": {
+        "type": "object",
+        "properties": {
+          "recipientName": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Musa Ibrahim",
+            "description": "Who took the goods"
+          },
+          "recipientPhone": {
+            "type": "string",
+            "maxLength": 30,
+            "example": "+2348012345678"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Loaded onto truck KJA-123-XY"
+          }
+        },
+        "required": [
+          "recipientName"
+        ]
       },
       "ErrorDetailDto": {
         "type": "object",

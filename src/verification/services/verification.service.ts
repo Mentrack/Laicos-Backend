@@ -17,6 +17,7 @@ import {
   IMAGE_SIGNATURES,
   type StorageUploadFile,
 } from '../../common/upload-pipes';
+import { OPEN_HANDOVER_STATUSES } from '../../handover/formatters/handover.formatter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import {
@@ -257,6 +258,15 @@ export class VerificationService {
           clusterId: cluster.id,
           isClustered: true,
         },
+      });
+      // Orders that went READY while the farm was out of every cluster.
+      await tx.orderHandover.updateMany({
+        where: {
+          agentId: null,
+          status: { in: OPEN_HANDOVER_STATUSES },
+          order: { farmId },
+        },
+        data: { agentId: agent.id },
       });
     });
     return this.findOne(agent, id);
