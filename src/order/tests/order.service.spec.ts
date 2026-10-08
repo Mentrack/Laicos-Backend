@@ -109,6 +109,16 @@ describe('OrderService', () => {
       expect(String(data.totalPrice)).toBe('1051.5');
     });
 
+    it('places a Buy Now order with no checkout', async () => {
+      produce.updateMany.mockResolvedValue({ count: 1 });
+      produce.findUnique.mockResolvedValue(published);
+      await service.create(buyer, { produceId, quantity: 1 });
+      const [[{ data }]] = order.create.mock.calls as [
+        [{ data: Record<string, unknown> }],
+      ];
+      expect(data.checkoutId).toBeUndefined();
+    });
+
     it('flips the listing to SOLD_OUT once the last unit is reserved', async () => {
       produce.updateMany.mockResolvedValue({ count: 1 });
       produce.findUnique.mockResolvedValue({

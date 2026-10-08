@@ -35,6 +35,7 @@ import {
 import {
   CreateFarmDto,
   FarmDto,
+  FarmProfileDto,
   FarmerDto,
   FarmerProfileDto,
   FarmerSignupDto,
@@ -42,6 +43,7 @@ import {
   RegisteredFarmerDto,
   UpdateFarmDto,
 } from './dto';
+import { FarmProfileService } from './services/farm-profile.service';
 import { FarmService, type FarmDocuments } from './services/farm.service';
 import { FarmerRegistrationService } from './services/farmer-registration.service';
 import { FarmerService } from './services/farmer.service';
@@ -76,6 +78,7 @@ export class FarmController {
     private readonly farms: FarmService,
     private readonly farmers: FarmerService,
     private readonly registration: FarmerRegistrationService,
+    private readonly farmProfiles: FarmProfileService,
   ) {}
 
   @Post('farms')
@@ -142,6 +145,23 @@ export class FarmController {
   ) {
     const data = await this.farms.findOne(user, id);
     return { data, message: 'Farm retrieved' };
+  }
+
+  @Get('farms/:id/profile')
+  @ApiOperation({
+    summary: 'Get a farm’s public profile',
+    description:
+      'Any signed-in user. Verified farms only, except to their owner; never includes the address.',
+  })
+  @Auth()
+  @ApiTags('Farms')
+  @ApiEnvelope(FarmProfileDto)
+  async findFarmProfile(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.farmProfiles.findOne(user, id);
+    return { data, message: 'Farm profile retrieved' };
   }
 
   @Patch('farms/:id')

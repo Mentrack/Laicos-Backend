@@ -4,6 +4,7 @@ import { Role } from '../../../generated/client';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth.service';
+import { EmailOtpService } from '../email-otp.service';
 import { FirebaseService } from '../firebase/firebase.service';
 
 const tokens = {
@@ -36,6 +37,7 @@ describe.each([Role.FARMER, Role.EXTENSION_AGENT])(
       firebase as unknown as FirebaseService,
       {} as ConfigService,
       {} as MailService,
+      {} as EmailOtpService,
     );
 
     beforeEach(() => {

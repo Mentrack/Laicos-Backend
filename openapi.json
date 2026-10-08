@@ -23,7 +23,7 @@
     },
     "/auth/register": {
       "post": {
-        "description": "Creates the Firebase account and the local user, and signs them in. Buyers and riders only; farmers and agents have their own signup.",
+        "description": "Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Buyers and riders only; farmers and agents have their own signup.",
         "operationId": "AuthController_register",
         "parameters": [],
         "requestBody": {
@@ -42,7 +42,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AuthSessionResponseDto"
+                  "$ref": "#/components/schemas/MessageResponseDto"
                 }
               }
             }
@@ -54,8 +54,75 @@
         ]
       }
     },
+    "/auth/verify-email": {
+      "post": {
+        "description": "400 INVALID_VERIFICATION_CODE for any failure: wrong, expired or used code, or unknown email. The 5th wrong guess also kills the code, so the user must request a new one.",
+        "operationId": "AuthController_verifyEmail",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify the email with the emailed code and sign in",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/verify-email/resend": {
+      "post": {
+        "description": "Always the same answer. Sends nothing within 60 seconds of the last code, past 10 codes a day, or when the email needs no verifying.",
+        "operationId": "AuthController_resendVerification",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Email a new verification code",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
     "/auth/login": {
       "post": {
+        "description": "403 EMAIL_NOT_VERIFIED for a buyer or rider who has not verified: open the code screen and call POST /auth/verify-email/resend.",
         "operationId": "AuthController_login",
         "parameters": [],
         "requestBody": {
@@ -555,6 +622,43 @@
           }
         ],
         "summary": "Delete one of my farms",
+        "tags": [
+          "Farms"
+        ]
+      }
+    },
+    "/farms/{id}/profile": {
+      "get": {
+        "description": "Any signed-in user. Verified farms only, except to their owner; never includes the address.",
+        "operationId": "FarmController_findFarmProfile",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a farm’s public profile",
         "tags": [
           "Farms"
         ]
@@ -1606,6 +1710,7 @@
             "name": "status",
             "required": false,
             "in": "query",
+            "description": "Defaults to PUBLISHED for everyone but farmers, so buyers only see what they can order.",
             "schema": {
               "$ref": "#/components/schemas/ProduceStatus"
             }
@@ -1619,12 +1724,81 @@
             }
           },
           {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceCategory"
+            }
+          },
+          {
             "name": "farmId",
             "required": false,
             "in": "query",
             "schema": {
               "format": "uuid",
               "type": "string"
+            }
+          },
+          {
+            "name": "stateId",
+            "required": false,
+            "in": "query",
+            "description": "The farm's state",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "lgaId",
+            "required": false,
+            "in": "query",
+            "description": "The farm's LGA",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive match on the name",
+            "schema": {
+              "maxLength": 120,
+              "example": "cassava",
+              "type": "string"
+            }
+          },
+          {
+            "name": "minPrice",
+            "required": false,
+            "in": "query",
+            "description": "Lowest pricePerUnit",
+            "schema": {
+              "minimum": 0,
+              "example": 100,
+              "type": "number"
+            }
+          },
+          {
+            "name": "maxPrice",
+            "required": false,
+            "in": "query",
+            "description": "Highest pricePerUnit",
+            "schema": {
+              "minimum": 0,
+              "example": 500,
+              "type": "number"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceSort"
             }
           }
         ],
@@ -1634,7 +1808,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProduceListResponseDto"
+                  "$ref": "#/components/schemas/ProduceListingListResponseDto"
                 }
               }
             }
@@ -1725,7 +1899,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProduceResponseDto"
+                  "$ref": "#/components/schemas/ProduceListingResponseDto"
                 }
               }
             }
@@ -2320,6 +2494,237 @@
         "summary": "Cancel an order",
         "tags": [
           "Orders"
+        ]
+      }
+    },
+    "/cart": {
+      "get": {
+        "description": "Not paginated: capped at 50 items and checked out whole. Lines use current prices; items that can no longer be ordered stay, flagged by `issue`.",
+        "operationId": "CartController_find",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my cart",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/cart/items": {
+      "post": {
+        "description": "Adds to the quantity if the produce is already in the cart. Reserves nothing; checkout does.",
+        "operationId": "CartController_addItem",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCartItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartItemResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Add to my cart",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/cart/items/{id}": {
+      "patch": {
+        "operationId": "CartController_updateItem",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCartItemDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartItemResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a cart item’s quantity",
+        "tags": [
+          "Cart"
+        ]
+      },
+      "delete": {
+        "operationId": "CartController_removeItem",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartItemResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a cart item",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/cart/checkout": {
+      "post": {
+        "description": "All or nothing: places one PENDING order per item under one checkout and empties the cart. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when current prices no longer total expectedTotal. Retrying with the same Idempotency-Key returns the original checkout.",
+        "operationId": "CartController_checkout",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A UUID the client generates once per checkout attempt",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCheckoutDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Check out my cart",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/checkouts/{id}": {
+      "get": {
+        "description": "Buyers see their own; admins see any.",
+        "operationId": "CheckoutController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a checkout and its orders",
+        "tags": [
+          "Cart"
         ]
       }
     },
@@ -3011,6 +3416,43 @@
           "role"
         ]
       },
+      "MessageResponseDto": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "nullable": true,
+            "example": null
+          },
+          "message": {
+            "type": "string",
+            "example": "OK"
+          }
+        },
+        "required": [
+          "data",
+          "message"
+        ]
+      },
+      "VerifyEmailDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "code": {
+            "type": "string",
+            "example": "0427",
+            "description": "The code from the email"
+          }
+        },
+        "required": [
+          "email",
+          "code"
+        ]
+      },
       "Role": {
         "type": "string",
         "enum": [
@@ -3141,6 +3583,19 @@
           "data"
         ]
       },
+      "ResendVerificationDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
       "LoginDto": {
         "type": "object",
         "properties": {
@@ -3263,24 +3718,6 @@
         },
         "required": [
           "email"
-        ]
-      },
-      "MessageResponseDto": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "nullable": true,
-            "example": null
-          },
-          "message": {
-            "type": "string",
-            "example": "OK"
-          }
-        },
-        "required": [
-          "data",
-          "message"
         ]
       },
       "ConfirmForgotPasswordDto": {
@@ -3628,6 +4065,74 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "FarmProfileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123"
+          },
+          "verificationStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmVerificationStatus"
+              }
+            ]
+          },
+          "country": {
+            "type": "string",
+            "example": "NG"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          },
+          "primaryProduce": {
+            "example": [
+              "Cassava",
+              "Groundnut",
+              "Sesame Seeds",
+              "Yam"
+            ],
+            "description": "The declared main produce, then the names of its listings, deduplicated",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "verificationStatus",
+          "country",
+          "state",
+          "lga",
+          "primaryProduce"
+        ]
+      },
+      "FarmProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/FarmProfileDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "UpdateFarmDto": {
@@ -4752,6 +5257,20 @@
           "EXPORT"
         ]
       },
+      "ProduceCategory": {
+        "type": "string",
+        "enum": [
+          "GRAINS",
+          "TUBERS",
+          "LEGUMES",
+          "OILSEEDS",
+          "VEGETABLES",
+          "FRUITS",
+          "NUTS",
+          "SPICES",
+          "OTHER"
+        ]
+      },
       "CreateProduceDto": {
         "type": "object",
         "properties": {
@@ -4797,6 +5316,23 @@
                 "$ref": "#/components/schemas/ProduceType"
               }
             ]
+          },
+          "category": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCategory"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Freshly harvested premium cassava tubers."
+          },
+          "specs": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Grade A — Fresh Harvest"
           }
         },
         "required": [
@@ -4863,6 +5399,23 @@
               }
             ]
           },
+          "category": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCategory"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "specs": {
+            "type": "string",
+            "nullable": true,
+            "example": "Grade A — Fresh Harvest"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -4884,6 +5437,9 @@
           "imageUrl",
           "status",
           "type",
+          "category",
+          "description",
+          "specs",
           "createdAt",
           "updatedAt"
         ]
@@ -4904,7 +5460,159 @@
           "data"
         ]
       },
-      "ProduceListResponseDto": {
+      "ProduceSort": {
+        "type": "string",
+        "enum": [
+          "NEWEST",
+          "PRICE_ASC",
+          "PRICE_DESC",
+          "STOCK_DESC"
+        ]
+      },
+      "ProduceFarmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123"
+          },
+          "verificationStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmVerificationStatus"
+              }
+            ]
+          },
+          "country": {
+            "type": "string",
+            "example": "NG"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "verificationStatus",
+          "country",
+          "state",
+          "lga"
+        ]
+      },
+      "ProduceListingDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Yellow maize"
+          },
+          "quantity": {
+            "type": "number",
+            "example": 500,
+            "description": "Original stock listed, in `unit`. Immutable after creation."
+          },
+          "actualQuantity": {
+            "type": "number",
+            "example": 500,
+            "description": "Stock not yet committed to a CONFIRMED order, in `unit`"
+          },
+          "floatingQuantity": {
+            "type": "number",
+            "example": 450,
+            "description": "Stock still orderable: actual minus PENDING orders"
+          },
+          "unit": {
+            "type": "string",
+            "example": "kg"
+          },
+          "pricePerUnit": {
+            "type": "string",
+            "example": "350.50"
+          },
+          "imageUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceStatus"
+              }
+            ]
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceType"
+              }
+            ]
+          },
+          "category": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCategory"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "specs": {
+            "type": "string",
+            "nullable": true,
+            "example": "Grade A — Fresh Harvest"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "farm": {
+            "$ref": "#/components/schemas/ProduceFarmDto"
+          }
+        },
+        "required": [
+          "id",
+          "farmId",
+          "name",
+          "quantity",
+          "actualQuantity",
+          "floatingQuantity",
+          "unit",
+          "pricePerUnit",
+          "imageUrl",
+          "status",
+          "type",
+          "category",
+          "description",
+          "specs",
+          "createdAt",
+          "updatedAt",
+          "farm"
+        ]
+      },
+      "ProduceListingListResponseDto": {
         "type": "object",
         "properties": {
           "message": {
@@ -4914,7 +5622,7 @@
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ProduceDto"
+              "$ref": "#/components/schemas/ProduceListingDto"
             }
           },
           "metaData": {
@@ -4925,6 +5633,22 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "ProduceListingResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProduceListingDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "UpdateProduceDto": {
@@ -4967,6 +5691,23 @@
                 "$ref": "#/components/schemas/ProduceType"
               }
             ]
+          },
+          "category": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCategory"
+              }
+            ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Freshly harvested premium cassava tubers."
+          },
+          "specs": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Grade A — Fresh Harvest"
           }
         }
       },
@@ -5061,6 +5802,12 @@
             "nullable": true,
             "description": "Set when the order is CANCELLED"
           },
+          "checkoutId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "The cart checkout that placed this order; null for Buy Now orders"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -5082,6 +5829,7 @@
           "status",
           "type",
           "cancellationReason",
+          "checkoutId",
           "createdAt",
           "updatedAt"
         ]
@@ -5324,6 +6072,277 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "CartItemIssue": {
+        "type": "string",
+        "enum": [
+          "UNAVAILABLE",
+          "INSUFFICIENT_STOCK"
+        ],
+        "description": "Why checkout would refuse this item; null when it can be ordered"
+      },
+      "CartProduceFarmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode"
+        ]
+      },
+      "CartProduceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Premium Cassava"
+          },
+          "imageUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "example": "Tuber"
+          },
+          "pricePerUnit": {
+            "type": "string",
+            "example": "4500.00",
+            "description": "Current price"
+          },
+          "floatingQuantity": {
+            "type": "number",
+            "example": 500,
+            "description": "Stock still orderable"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceStatus"
+              }
+            ]
+          },
+          "farm": {
+            "$ref": "#/components/schemas/CartProduceFarmDto"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "imageUrl",
+          "unit",
+          "pricePerUnit",
+          "floatingQuantity",
+          "status",
+          "farm"
+        ]
+      },
+      "CartItemDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "number",
+            "example": 10,
+            "description": "In the produce's `unit`"
+          },
+          "lineTotal": {
+            "type": "string",
+            "example": "45000.00",
+            "description": "Current price × quantity"
+          },
+          "issue": {
+            "nullable": true,
+            "description": "Why checkout would refuse this item; null when it can be ordered",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CartItemIssue"
+              }
+            ]
+          },
+          "produce": {
+            "$ref": "#/components/schemas/CartProduceDto"
+          }
+        },
+        "required": [
+          "id",
+          "quantity",
+          "lineTotal",
+          "issue",
+          "produce"
+        ]
+      },
+      "CartDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "Newest first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItemDto"
+            }
+          },
+          "itemCount": {
+            "type": "number",
+            "example": 2
+          },
+          "total": {
+            "type": "string",
+            "example": "45000.00",
+            "description": "Sum of lineTotal over items with no issue"
+          }
+        },
+        "required": [
+          "items",
+          "itemCount",
+          "total"
+        ]
+      },
+      "CartResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CartDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "AddCartItemDto": {
+        "type": "object",
+        "properties": {
+          "produceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A PUBLISHED produce"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 1,
+            "example": 50,
+            "description": "In the produce's `unit`"
+          }
+        },
+        "required": [
+          "produceId",
+          "quantity"
+        ]
+      },
+      "CartItemResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CartItemDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "UpdateCartItemDto": {
+        "type": "object",
+        "properties": {
+          "quantity": {
+            "type": "number",
+            "minimum": 1,
+            "example": 50,
+            "description": "In the produce's `unit`"
+          }
+        },
+        "required": [
+          "quantity"
+        ]
+      },
+      "CreateCheckoutDto": {
+        "type": "object",
+        "properties": {
+          "expectedTotal": {
+            "type": "number",
+            "minimum": 0,
+            "example": 45000,
+            "description": "The cart total the buyer saw. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
+          }
+        },
+        "required": [
+          "expectedTotal"
+        ]
+      },
+      "CheckoutDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkoutNumber": {
+            "type": "string",
+            "example": "CHK-000123"
+          },
+          "totalPrice": {
+            "type": "string",
+            "example": "45000.00"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "orders": {
+            "description": "One per cart item",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "checkoutNumber",
+          "totalPrice",
+          "createdAt",
+          "orders"
+        ]
+      },
+      "CheckoutResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CheckoutDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "AgentSignupDto": {

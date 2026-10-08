@@ -7,6 +7,7 @@ export { RefreshTokenDto } from './refresh-token.dto';
 export { UserDto } from './user.dto';
 export { TokenPairDto, AuthSessionDto } from './token-pair.dto';
 export { GoogleLoginDto, GoogleRegisterDto } from './google-auth.dto';
+export { VerifyEmailDto, ResendVerificationDto } from './verify-email.dto';
 export { CreateLocalUserDto } from './create-local-user.dto';
 export {
   FirebaseAuthTokensDto,

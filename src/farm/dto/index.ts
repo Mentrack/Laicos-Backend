@@ -9,3 +9,4 @@ export {
   RegisteredFarmerDto,
   SignupContactDto,
 } from './farmer-signup.dto';
+export { FarmProfileDto } from './farm-profile.dto';

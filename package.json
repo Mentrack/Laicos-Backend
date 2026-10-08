@@ -17,7 +17,7 @@
     "test": "cross-env NODE_OPTIONS=--experimental-vm-modules jest",
     "test:watch": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --watch",
     "test:cov": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "cross-env NODE_OPTIONS=--experimental-vm-modules jest --config ./test/jest-e2e.json",
     "gen:openapi": "nest build && node dist/src/scripts/generate-openapi.js",
     "gen:api": "pnpm gen:openapi && pnpm --dir ../webapp run gen:api",
     "db:generate": "prisma generate",

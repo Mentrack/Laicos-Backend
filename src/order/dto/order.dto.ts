@@ -47,6 +47,15 @@ export class OrderDto {
   })
   cancellationReason: string | null;
 
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description:
+      'The cart checkout that placed this order; null for Buy Now orders',
+  })
+  checkoutId: string | null;
+
   @ApiProperty()
   createdAt: Date;
 

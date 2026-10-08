@@ -3,6 +3,7 @@ import type { User } from '../../../generated/client';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth.service';
+import { EmailOtpService } from '../email-otp.service';
 import { FirebaseService } from '../firebase/firebase.service';
 
 describe('AuthService password change', () => {
@@ -18,6 +19,7 @@ describe('AuthService password change', () => {
     firebase as unknown as FirebaseService,
     {} as ConfigService,
     {} as MailService,
+    {} as EmailOtpService,
   );
   const dto = { currentPassword: 'Temp-pass', newPassword: 'NewPassword1!' };
 

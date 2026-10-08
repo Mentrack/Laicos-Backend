@@ -11,7 +11,11 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { ProduceStatus, ProduceType } from '../../../generated/client';
+import {
+  ProduceCategory,
+  ProduceStatus,
+  ProduceType,
+} from '../../../generated/client';
 
 // The route is multipart (it carries the produce photo), so every field
 // arrives as a string. The global ValidationPipe transforms but does not
@@ -66,4 +70,24 @@ export class CreateProduceDto {
   @IsOptional()
   @IsEnum(ProduceType)
   type?: ProduceType;
+
+  @ApiPropertyOptional({ enum: ProduceCategory, enumName: 'ProduceCategory' })
+  @IsOptional()
+  @IsEnum(ProduceCategory)
+  category?: ProduceCategory;
+
+  @ApiPropertyOptional({
+    example: 'Freshly harvested premium cassava tubers.',
+    maxLength: 1000,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @ApiPropertyOptional({ example: 'Grade A — Fresh Harvest', maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  specs?: string;
 }

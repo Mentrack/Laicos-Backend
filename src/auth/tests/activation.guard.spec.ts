@@ -2,10 +2,14 @@ import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Role } from '../../../generated/client';
 import { ActivationGuard } from '../guards/activation.guard';
 
-function contextFor(role: Role, activatedAt: Date | null): ExecutionContext {
+function contextFor(
+  role: Role,
+  activatedAt: Date | null,
+  isVerified = true,
+): ExecutionContext {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ user: { role, activatedAt } }),
+      getRequest: () => ({ user: { role, activatedAt, isVerified } }),
     }),
   } as unknown as ExecutionContext;
 }
@@ -51,4 +55,20 @@ describe('ActivationGuard', () => {
       message: 'Your profile is awaiting verification',
     });
   });
+
+  it.each([Role.BUYER, Role.RIDER])(
+    'stops an unverified %s whose token came straight from Firebase',
+    (role) => {
+      let error: unknown;
+      try {
+        guard.canActivate(contextFor(role, null, false));
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toMatchObject({
+        code: 'EMAIL_NOT_VERIFIED',
+      });
+    },
+  );
 });

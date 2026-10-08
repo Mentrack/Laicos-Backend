@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -8,6 +9,7 @@ import {
   FarmVerificationStatus,
   Prisma,
   ProduceStatus,
+  Role,
   type User,
 } from '../../generated/client';
 import { farmOwnedBy } from '../common/ownership';
@@ -20,7 +22,12 @@ import { IMAGE_SIGNATURES, matchSignature } from '../common/upload-pipes';
 import type { StorageUploadFile } from '../common/upload-pipes';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { CreateProduceDto, ProduceQueryDto, UpdateProduceDto } from './dto';
+import {
+  CreateProduceDto,
+  ProduceQueryDto,
+  ProduceSort,
+  UpdateProduceDto,
+} from './dto';
 import { deriveProduceStatus } from './utils/produce-status';
 
 /** Writes are scoped to the owning farmer; reads hide other farmers' drafts. */
@@ -90,17 +97,33 @@ export class ProduceService {
   }
 
   async findAll(user: User, query: ProduceQueryDto) {
+    const { minPrice, maxPrice } = query;
+    if (
+      minPrice !== undefined &&
+      maxPrice !== undefined &&
+      minPrice > maxPrice
+    ) {
+      throw new BadRequestException('minPrice cannot exceed maxPrice');
+    }
     const { page, perPage, skip, take } = resolvePagination(query);
     const where: Prisma.ProduceWhereInput = {
       ...visibleTo(user),
-      status: query.status,
+      status: query.status ?? defaultStatusFor(user),
       type: query.type,
+      category: query.category,
       farmId: query.farmId,
+      farm: { stateId: query.stateId, lgaId: query.lgaId },
+      name: query.search
+        ? { contains: query.search, mode: 'insensitive' }
+        : undefined,
+      pricePerUnit: { gte: minPrice, lte: maxPrice },
     };
     const [data, total] = await this.database.$transaction([
       this.database.produce.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        include: LISTING_INCLUDE,
+        // id breaks ties so offset paging never repeats or skips a row.
+        orderBy: [SORT_ORDER[query.sort ?? ProduceSort.NEWEST], { id: 'desc' }],
         skip,
         take,
       }),
@@ -112,6 +135,7 @@ export class ProduceService {
   async findOne(user: User, id: string) {
     const produce = await this.database.produce.findFirst({
       where: { id, ...visibleTo(user) },
+      include: LISTING_INCLUDE,
     });
     if (!produce) {
       throw new NotFoundException('Produce not found');
@@ -181,6 +205,33 @@ export class ProduceService {
       contentType,
     );
   }
+}
+
+const LISTING_INCLUDE = {
+  farm: {
+    select: {
+      id: true,
+      farmCode: true,
+      verificationStatus: true,
+      country: true,
+      state: { select: { id: true, name: true } },
+      lga: { select: { id: true, stateId: true, name: true } },
+    },
+  },
+} satisfies Prisma.ProduceInclude;
+
+const SORT_ORDER: Record<ProduceSort, Prisma.ProduceOrderByWithRelationInput> =
+  {
+    [ProduceSort.NEWEST]: { createdAt: 'desc' },
+    [ProduceSort.PRICE_ASC]: { pricePerUnit: 'asc' },
+    [ProduceSort.PRICE_DESC]: { pricePerUnit: 'desc' },
+    [ProduceSort.STOCK_DESC]: { floatingQuantity: 'desc' },
+  };
+
+// Farmers manage their own listings, sold out or not; everyone else shops,
+// so they only see what can still be ordered unless they ask otherwise.
+function defaultStatusFor(user: User): ProduceStatus | undefined {
+  return user.role === Role.FARMER ? undefined : ProduceStatus.PUBLISHED;
 }
 
 // A farmer sees all their own produce. Everyone else sees only listings

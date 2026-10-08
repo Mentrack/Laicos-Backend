@@ -3,6 +3,7 @@ import { Role } from '../../../generated/client';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth.service';
+import { EmailOtpService } from '../email-otp.service';
 import { FirebaseService } from '../firebase/firebase.service';
 
 describe('AuthService forgot password', () => {
@@ -14,6 +15,7 @@ describe('AuthService forgot password', () => {
     firebase as unknown as FirebaseService,
     new ConfigService({ FRONTEND_WEBAPP_URL: 'https://app.laicos.ng' }),
     mail as unknown as MailService,
+    {} as EmailOtpService,
   );
 
   beforeEach(() => {

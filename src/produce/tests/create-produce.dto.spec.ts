@@ -46,4 +46,48 @@ describe('CreateProduceDto', () => {
 
     expect(errors.map((error) => error.property)).toContain('imageUrl');
   });
+
+  it('accepts an optional category', async () => {
+    const dto = plainToInstance(CreateProduceDto, {
+      ...multipartBody,
+      category: 'GRAINS',
+    });
+
+    await expect(validate(dto, pipeOptions)).resolves.toEqual([]);
+  });
+
+  it('rejects an unknown category', async () => {
+    const dto = plainToInstance(CreateProduceDto, {
+      ...multipartBody,
+      category: 'CARS',
+    });
+
+    const errors = await validate(dto, pipeOptions);
+
+    expect(errors.map((error) => error.property)).toContain('category');
+  });
+
+  it('accepts an optional description and specs', async () => {
+    const dto = plainToInstance(CreateProduceDto, {
+      ...multipartBody,
+      description: 'Freshly harvested premium cassava tubers.',
+      specs: 'Grade A — Fresh Harvest',
+    });
+
+    await expect(validate(dto, pipeOptions)).resolves.toEqual([]);
+  });
+
+  it('caps description at 1000 characters and specs at 120', async () => {
+    const dto = plainToInstance(CreateProduceDto, {
+      ...multipartBody,
+      description: 'x'.repeat(1001),
+      specs: 'x'.repeat(121),
+    });
+
+    const errors = await validate(dto, pipeOptions);
+
+    expect(errors.map((error) => error.property)).toEqual(
+      expect.arrayContaining(['description', 'specs']),
+    );
+  });
 });

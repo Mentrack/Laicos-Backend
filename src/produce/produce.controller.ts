@@ -28,6 +28,7 @@ import {
 import {
   CreateProduceDto,
   ProduceDto,
+  ProduceListingDto,
   ProduceQueryDto,
   UpdateProduceDto,
 } from './dto';
@@ -86,7 +87,7 @@ export class ProduceController {
       'Farmers also see their own drafts and listings on unverified farms; everyone else sees only published listings on verified farms.',
   })
   @Auth()
-  @ApiEnvelope(ProduceDto, { paginated: true })
+  @ApiEnvelope(ProduceListingDto, { paginated: true })
   async findAll(@CurrentUser() user: User, @Query() query: ProduceQueryDto) {
     const { data, metaData } = await this.produce.findAll(user, query);
     return { data, message: 'Produce retrieved', metaData };
@@ -95,7 +96,7 @@ export class ProduceController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a produce listing' })
   @Auth()
-  @ApiEnvelope(ProduceDto)
+  @ApiEnvelope(ProduceListingDto)
   async findOne(
     @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,

@@ -125,6 +125,26 @@ export class FirebaseService {
     };
   }
 
+  /** A session for a user who proved who they are some other way (an OTP). */
+  async signInWithCustomToken(uid: string): Promise<FirebaseAuthTokensDto> {
+    const token = await this.auth.createCustomToken(uid);
+    const body = await this.postToGoogle<Partial<FirebaseAuthTokensDto>>(
+      `${IDENTITY_TOOLKIT_URL}/accounts:signInWithCustomToken`,
+      { token, returnSecureToken: true },
+    );
+
+    // Our own token was refused: a server fault, not the user's.
+    if (!body.idToken || !body.refreshToken) {
+      throw new Error('Custom token sign-in returned no session');
+    }
+    return {
+      idToken: body.idToken,
+      refreshToken: body.refreshToken,
+      localId: uid,
+      expiresIn: body.expiresIn ?? DEFAULT_EXPIRES_IN,
+    };
+  }
+
   /** The Firebase account for an email, or `null` when there is none. */
   getUserByEmail(email: string): Promise<UserRecord | null> {
     return this.nullIfUserNotFound(() => this.auth.getUserByEmail(email));

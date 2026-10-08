@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { CartModule } from './cart/cart.module';
 import { requireConfig } from './common/config';
 import { FarmModule } from './farm/farm.module';
 import { HandoverModule } from './handover/handover.module';
@@ -48,6 +49,7 @@ import { VerificationModule } from './verification/verification.module';
     FarmModule,
     ProduceModule,
     OrderModule,
+    CartModule,
     StorageModule,
     AgentModule,
     LocationModule,
