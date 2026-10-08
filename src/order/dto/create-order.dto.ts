@@ -1,18 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsPositive, IsUUID } from 'class-validator';
+import { IntersectionType } from '@nestjs/swagger';
+// Straight from the file, not the cart barrel: cart/dto/index loads
+// checkout.dto, which loads order.dto, and a barrel import would cycle.
+import { CreateCheckoutDto } from '../../cart/dto/create-checkout.dto';
+import { OrderLineDto } from './order-line.dto';
 
-export class CreateOrderDto {
-  @ApiProperty({ format: 'uuid', description: 'A PUBLISHED produce' })
-  @IsUUID()
-  produceId: string;
-
-  // Produce is sold in whole units: no one buys half a tuber.
-  @ApiProperty({
-    type: 'integer',
-    example: 50,
-    description: "Whole units of the produce's `unit`",
-  })
-  @IsInt()
-  @IsPositive()
-  quantity: number;
-}
+/** Buy Now: one line plus everything a checkout needs. */
+export class CreateOrderDto extends IntersectionType(
+  OrderLineDto,
+  CreateCheckoutDto,
+) {}

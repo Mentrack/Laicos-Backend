@@ -1,6 +1,6 @@
 import type { Prisma } from '../../../generated/client';
 
-// Every cart write and checkout serialise per buyer. Without it, checkout
+// Every cart write, cart checkout and Buy Now serialise per buyer. Without it, checkout
 // could empty an item added after it read the cart, and two adds of one
 // produce could both try to insert it (or both slip past the item cap).
 export async function lockCart(

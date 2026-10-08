@@ -325,7 +325,7 @@ model Order {
   // Snapshot of the produce's type at order time, so lists can tag and filter
   // local vs export orders without joining Produce.
   type               ProduceType
-  // Null for Buy Now orders (POST /orders) and those placed before checkout.
+  // Null only for orders placed before checkouts existed.
   checkoutId         String?
   checkout           Checkout?       @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
   // Required whenever status is CANCELLED.

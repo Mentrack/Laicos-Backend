@@ -8,6 +8,8 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { addDays, lagosToday } from '../../common/dates';
+import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrderService } from '../order.service';
 
@@ -45,7 +47,17 @@ describe('OrderService', () => {
     update: jest.fn(),
   };
   const farm = { findUniqueOrThrow: jest.fn() };
-  const tx = { produce, order, orderChecklist, farm };
+  const checkout = { findUnique: jest.fn(), create: jest.fn() };
+  const address = { findFirst: jest.fn() };
+  const tx = {
+    $executeRaw: jest.fn(),
+    produce,
+    order,
+    orderChecklist,
+    farm,
+    checkout,
+    address,
+  };
   const database = {
     ...tx,
     // A plain function, not jest.fn, so resetAllMocks keeps it. Array form
@@ -54,7 +66,10 @@ describe('OrderService', () => {
       arg: Promise<unknown>[] | ((client: typeof tx) => Promise<unknown>),
     ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
   };
-  const service = new OrderService(database as unknown as PrismaService);
+  const service = new OrderService(
+    database as unknown as PrismaService,
+    testCheckoutConfig(),
+  );
   const published = {
     id: produceId,
     farmId: 'farm-1',
@@ -78,94 +93,108 @@ describe('OrderService', () => {
 
   beforeEach(() => jest.resetAllMocks());
 
-  describe('create', () => {
-    it('reserves floating stock and prices the order', async () => {
-      produce.updateMany.mockResolvedValue({ count: 1 });
-      produce.findUnique.mockResolvedValue({
-        ...published,
-        floatingQuantity: 97,
+  describe('create (Buy Now)', () => {
+    const key = '3f6c1d2e-8a4b-4c5d-9e6f-0a1b2c3d4e5f';
+    const dto = {
+      produceId,
+      quantity: 10,
+      addressId: 'address-1',
+      deliveryDate: addDays(lagosToday(), 2),
+      expectedTotal: 0, // set per test
+    };
+    const placed = {
+      id: 'checkout-1',
+      checkoutNumber: 'CHK-000001',
+      buyerId: buyer.id,
+      status: 'AWAITING_PAYMENT',
+      subtotal: new Prisma.Decimal('0'),
+      deliveryFee: new Prisma.Decimal('3500'),
+      totalPrice: new Prisma.Decimal('3500'),
+      expiresAt: new Date(),
+      paidAt: null,
+      deliveryDate: new Date('2026-10-10T00:00:00.000Z'),
+      deliveryLabel: 'Warehouse A',
+      deliveryStreet: '1 Road',
+      deliveryState: 'Kano',
+      deliveryLga: 'Nassarawa',
+      deliveryContactName: null,
+      deliveryContactPhone: null,
+      createdAt: new Date(),
+      orders: [],
+    };
+
+    beforeEach(() => {
+      tx.checkout.findUnique.mockResolvedValue(null);
+      tx.address.findFirst.mockResolvedValue({
+        label: 'Warehouse A',
+        street: '1 Road',
+        contactName: null,
+        contactPhone: null,
+        state: { name: 'Kano' },
+        lga: { name: 'Nassarawa' },
       });
-      await service.create(buyer, { produceId, quantity: 3 });
-      expect(produce.updateMany).toHaveBeenCalledWith({
-        where: {
-          id: produceId,
-          status: ProduceStatus.PUBLISHED,
-          floatingQuantity: { gte: 3 },
-          farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
-        },
-        data: { floatingQuantity: { decrement: 3 } },
-      });
-      const [[{ data }]] = order.create.mock.calls as [
-        [{ data: Record<string, unknown> }],
-      ];
-      expect(data).toMatchObject({
-        produceId,
-        farmId: 'farm-1',
-        buyerId: buyer.id,
-        quantity: 3,
-        produceName: 'Premium Sesame Seeds',
-        type: ProduceType.EXPORT,
-      });
-      expect(String(data.totalPrice)).toBe('1051.5');
+      tx.checkout.create.mockResolvedValue(placed);
     });
 
-    it('places a Buy Now order with no checkout', async () => {
+    it('places a one-line checkout awaiting payment under the cart lock', async () => {
       produce.updateMany.mockResolvedValue({ count: 1 });
       produce.findUnique.mockResolvedValue(published);
-      await service.create(buyer, { produceId, quantity: 1 });
-      const [[{ data }]] = order.create.mock.calls as [
-        [{ data: Record<string, unknown> }],
-      ];
-      expect(data.checkoutId).toBeUndefined();
-    });
-
-    it('flips the listing to SOLD_OUT once the last unit is reserved', async () => {
-      produce.updateMany.mockResolvedValue({ count: 1 });
-      produce.findUnique.mockResolvedValue({
-        ...published,
-        floatingQuantity: 0,
-      });
-      await service.create(buyer, { produceId, quantity: 100 });
-      expect(produce.update).toHaveBeenCalledWith({
-        where: { id: produceId },
-        data: { status: ProduceStatus.SOLD_OUT },
-      });
-    });
-
-    it('treats a draft as not found', async () => {
-      produce.updateMany.mockResolvedValue({ count: 0 });
-      produce.findUnique.mockResolvedValue({
-        ...published,
-        status: ProduceStatus.DRAFT,
-      });
+      const total = published.pricePerUnit.mul(10).add(3500).toNumber();
       await expect(
-        service.create(buyer, { produceId, quantity: 1 }),
-      ).rejects.toBeInstanceOf(NotFoundException);
+        service.create(buyer, key, { ...dto, expectedTotal: total }),
+      ).resolves.toMatchObject({
+        id: 'checkout-1',
+        status: 'AWAITING_PAYMENT',
+      });
+      expect(tx.$executeRaw).toHaveBeenCalledWith(
+        expect.anything(),
+        `cart:${buyer.id}`,
+      );
+      expect(tx.checkout.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            orders: {
+              create: [
+                expect.objectContaining({
+                  produceId,
+                  quantity: 10,
+                  status: OrderStatus.AWAITING_PAYMENT,
+                }),
+              ],
+            },
+          }) as unknown,
+        }),
+      );
       expect(order.create).not.toHaveBeenCalled();
     });
 
-    it('reports the floating stock when there is not enough', async () => {
-      produce.updateMany.mockResolvedValue({ count: 0 });
-      produce.findUnique.mockResolvedValue({
-        ...published,
-        floatingQuantity: 2,
-      });
+    it('replays an earlier Buy Now with the same key', async () => {
+      tx.checkout.findUnique.mockResolvedValue(placed);
       await expect(
-        service.create(buyer, { produceId, quantity: 3 }),
-      ).rejects.toThrow('Only 2 kg available');
-      expect(order.create).not.toHaveBeenCalled();
+        service.create(buyer, key, { ...dto, expectedTotal: 1 }),
+      ).resolves.toMatchObject({ id: 'checkout-1' });
+      expect(produce.updateMany).not.toHaveBeenCalled();
     });
 
-    it('404s produce on a farm no agent has verified', async () => {
+    it('refuses an unknown address before reserving', async () => {
+      tx.address.findFirst.mockResolvedValue(null);
+      await expect(
+        service.create(buyer, key, { ...dto, expectedTotal: 1 }),
+      ).rejects.toMatchObject({
+        response: { code: 'ADDRESS_NOT_FOUND' },
+      });
+      expect(produce.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses sold-out produce with the Buy Now message', async () => {
       produce.updateMany.mockResolvedValue({ count: 0 });
       produce.findUnique.mockResolvedValue({
         ...published,
-        farm: { verificationStatus: FarmVerificationStatus.PENDING },
+        status: ProduceStatus.SOLD_OUT,
       });
       await expect(
-        service.create(buyer, { produceId, quantity: 3 }),
-      ).rejects.toBeInstanceOf(NotFoundException);
-      expect(order.create).not.toHaveBeenCalled();
+        service.create(buyer, key, { ...dto, expectedTotal: 1 }),
+      ).rejects.toMatchObject({ response: { code: 'PRODUCE_UNAVAILABLE' } });
     });
   });
 

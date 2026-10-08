@@ -10,11 +10,13 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CheckoutDto } from '../cart/dto/checkout.dto';
 import { ApiEnvelope } from '../common/dto/envelope';
+import { IdempotencyKey, idempotencyKeyPipe } from '../common/idempotency-key';
 import {
   CancelOrderDto,
   CreateOrderDto,
@@ -35,14 +37,23 @@ export class OrderController {
 
   @Post()
   @ApiOperation({
-    summary: 'Place an order',
+    summary: 'Buy Now',
     description:
-      'Buyers only. Reserves the quantity from the listing. 404 for listings the buyer cannot see, including those on unverified farms.',
+      'Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description: 'A UUID the client generates once per attempt',
   })
   @Auth(Role.BUYER)
-  @ApiEnvelope(OrderDto, { status: HttpStatus.CREATED })
-  async create(@CurrentUser() user: User, @Body() dto: CreateOrderDto) {
-    const data = await this.orders.create(user, dto);
+  @ApiEnvelope(CheckoutDto, { status: HttpStatus.CREATED })
+  async create(
+    @CurrentUser() user: User,
+    @IdempotencyKey(idempotencyKeyPipe()) idempotencyKey: string,
+    @Body() dto: CreateOrderDto,
+  ) {
+    const data = await this.orders.create(user, idempotencyKey, dto);
     return { data, message: 'Order placed' };
   }
 

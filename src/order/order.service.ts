@@ -10,9 +10,17 @@ import {
   type Order,
   type User,
 } from '../../generated/client';
+import { formatCheckout } from '../cart/formatters/checkout.formatter';
+import { lockCart } from '../cart/utils/cart-lock';
+import {
+  createCheckout,
+  findReplay,
+  resolveDelivery,
+} from '../cart/utils/place-checkout';
 import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
+import { CheckoutConfig } from '../payment/checkout-config';
 import { PrismaService } from '../prisma/prisma.service';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
 import { orderLine, reserveProduce } from './utils/reservation';
@@ -63,14 +71,40 @@ const CHECKLIST_COMPLETE: Prisma.OrderChecklistWhereInput = Object.fromEntries(
  */
 @Injectable()
 export class OrderService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly config: CheckoutConfig,
+  ) {}
 
-  async create(user: User, dto: CreateOrderDto) {
+  /** Buy Now: a one-line checkout that leaves the cart alone. */
+  create(user: User, idempotencyKey: string, dto: CreateOrderDto) {
     return this.database.$transaction(async (tx) => {
+      // The cart's lock, so Buy Now and cart checkout share one replay check.
+      await lockCart(tx, user.id);
+      const replay = await findReplay(tx, user.id, idempotencyKey);
+      if (replay) {
+        return formatCheckout(replay);
+      }
+      const delivery = await resolveDelivery(
+        tx,
+        user.id,
+        dto.addressId,
+        dto.deliveryDate,
+        this.config,
+      );
       const produce = await reserveProduce(tx, dto.produceId, dto.quantity);
-      return tx.order.create({
-        data: { ...orderLine(produce, dto.quantity), buyerId: user.id },
-      });
+      const checkout = await createCheckout(
+        tx,
+        {
+          buyerId: user.id,
+          idempotencyKey,
+          lines: [orderLine(produce, dto.quantity)],
+          delivery,
+          expectedTotal: dto.expectedTotal,
+        },
+        this.config,
+      );
+      return formatCheckout(checkout);
     });
   }
 

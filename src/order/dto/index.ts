@@ -1,4 +1,5 @@
 export { CreateOrderDto } from './create-order.dto';
+export { OrderLineDto } from './order-line.dto';
 export { CancelOrderDto } from './cancel-order.dto';
 export { OrderFilterDto, OrderQueryDto } from './order-query.dto';
 export { OrderDto } from './order.dto';
