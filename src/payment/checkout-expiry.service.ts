@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { CheckoutStatus } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockCheckout } from './utils/checkout-lock';
+import { CHECKOUT_TRANSACTION } from './utils/checkout-transaction';
 import { releaseCheckout } from './utils/release-checkout';
 
 // Bounds one sweep; the next run (a minute later) takes the rest.
@@ -61,6 +62,6 @@ export class CheckoutExpiryService {
         'Payment not received',
       );
       return true;
-    });
+    }, CHECKOUT_TRANSACTION);
   }
 }

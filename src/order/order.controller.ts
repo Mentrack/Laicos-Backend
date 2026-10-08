@@ -196,7 +196,7 @@ export class OrderController {
   @ApiOperation({
     summary: 'Delete my pending order',
     description:
-      'Buyers only, and only while it is still PENDING; otherwise cancel it.',
+      'Buyers only, and only a legacy order placed without a checkout while it is still PENDING; a paid order (409 ORDER_PAID) or one past PENDING must be cancelled instead.',
   })
   @Auth(Role.BUYER)
   @ApiEnvelope(OrderDto)

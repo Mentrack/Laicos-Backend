@@ -21,6 +21,10 @@ import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
 import { CheckoutConfig } from '../payment/checkout-config';
+import {
+  CHECKOUT_TRANSACTION,
+  busyAsConflict,
+} from '../payment/utils/checkout-transaction';
 import { PrismaService } from '../prisma/prisma.service';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
 import { orderLine, releaseStock, reserveProduce } from './utils/reservation';
@@ -78,6 +82,10 @@ export class OrderService {
 
   /** Buy Now: a one-line checkout that leaves the cart alone. */
   create(user: User, idempotencyKey: string, dto: CreateOrderDto) {
+    return busyAsConflict(() => this.buyNow(user, idempotencyKey, dto));
+  }
+
+  private buyNow(user: User, idempotencyKey: string, dto: CreateOrderDto) {
     return this.database.$transaction(async (tx) => {
       // The cart's lock, so Buy Now and cart checkout share one replay check.
       await lockCart(tx, user.id);
@@ -105,7 +113,7 @@ export class OrderService {
         this.config,
       );
       return formatCheckout(checkout);
-    });
+    }, CHECKOUT_TRANSACTION);
   }
 
   async findAll(user: User, query: OrderQueryDto) {
@@ -328,6 +336,14 @@ export class OrderService {
   async remove(user: User, id: string) {
     const order = await this.findOne(user, id);
     assertNotAwaitingPayment(order);
+    // Deleting would erase a sale its checkout still records as PAID. Only
+    // legacy orders, placed before checkouts, have none.
+    if (order.checkoutId !== null) {
+      throw new ConflictException({
+        message: 'This order was paid for; cancel it instead',
+        code: 'ORDER_PAID',
+      });
+    }
     // Once a farmer has acted on an order it is history; cancel it instead.
     if (order.buyerId !== user.id || order.status !== OrderStatus.PENDING) {
       throw new ConflictException('Only a pending order can be deleted');
@@ -346,7 +362,6 @@ export class OrderService {
   }
 }
 
-// Runs after a failed reservation to say why it failed.
 function isSeller(user: User) {
   return user.role === Role.FARMER || user.role === Role.ADMIN;
 }

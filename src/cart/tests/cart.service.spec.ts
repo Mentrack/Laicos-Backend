@@ -11,11 +11,26 @@ import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture'
 import { PrismaService } from '../../prisma/prisma.service';
 import { CartService } from '../cart.service';
 import { CartItemIssue } from '../dto';
+import type { CartItemRow } from '../formatters/cart.formatter';
 
 const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const itemId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
-const produce = {
+// Typed from the row, not inferred, so overrides can set any status.
+type ProduceFixture = Pick<
+  CartItemRow['produce'],
+  | 'id'
+  | 'farmId'
+  | 'name'
+  | 'unit'
+  | 'imageUrl'
+  | 'pricePerUnit'
+  | 'floatingQuantity'
+  | 'status'
+  | 'type'
+  | 'farm'
+>;
+const produce: ProduceFixture = {
   id: produceId,
   farmId: 'farm-1',
   name: 'Premium Cassava',
@@ -32,7 +47,7 @@ const produce = {
   },
 };
 
-function cartRow(quantity: number, overrides: Partial<typeof produce> = {}) {
+function cartRow(quantity: number, overrides: Partial<ProduceFixture> = {}) {
   return {
     id: itemId,
     buyerId: buyer.id,

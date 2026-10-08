@@ -17,7 +17,7 @@ export class AdminPaymentController {
   @ApiOperation({
     summary: 'Confirm a payment by hand',
     description:
-      'For bank transfers seen in the escrow account (and, until a card provider is integrated, card payments). Marks the checkout PAID and releases its orders to the farmers. Repeating it returns the payment. 409 CHECKOUT_EXPIRED if the checkout expired first: refund the buyer.',
+      'For bank transfers seen in the escrow account (and, until a card provider is integrated, card payments). Marks the checkout PAID and releases its orders to the farmers. Repeating it returns the payment. 409 CHECKOUT_EXPIRED if the checkout expired or was cancelled first: refund the buyer. An attempt is abandoned when the buyer starts another, and only the checkout’s current PENDING attempt can be confirmed (409 PAYMENT_NOT_PENDING otherwise): for a transfer made against an abandoned attempt, confirm the current one if the amount is the same, or refund.',
   })
   @Auth(Role.ADMIN)
   @ApiEnvelope(PaymentDto)

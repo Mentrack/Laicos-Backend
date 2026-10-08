@@ -21,6 +21,7 @@ import {
 } from './providers/payment-provider';
 import { checkoutNotFound } from './utils/checkout-errors';
 import { lockCheckout } from './utils/checkout-lock';
+import { CHECKOUT_TRANSACTION } from './utils/checkout-transaction';
 
 const HOUR_MS = 3_600_000;
 
@@ -101,7 +102,7 @@ export class PaymentService {
         }
       }
       return formatPayment(payment);
-    });
+    }, CHECKOUT_TRANSACTION);
   }
 
   async confirm(reference: string, confirmedBy: User | null) {
@@ -125,18 +126,20 @@ export class PaymentService {
       if (payment.status === PaymentStatus.SUCCEEDED) {
         return formatPayment(payment);
       }
-      if (payment.status !== PaymentStatus.PENDING) {
-        throw new ConflictException({
-          message: `This payment is ${payment.status} and can't be confirmed`,
-          code: 'PAYMENT_NOT_PENDING',
-        });
-      }
       // Status, not expiresAt: until the sweep releases it, the stock is
-      // still held, so money that lands in that gap still pays.
+      // still held, so money that lands in that gap still pays. Checked
+      // before the payment's status because releasing a checkout abandons
+      // its attempt, and the caller must learn the buyer needs a refund.
       if (payment.checkout.status !== CheckoutStatus.AWAITING_PAYMENT) {
         throw new ConflictException({
           message: 'This checkout expired before payment was confirmed',
           code: 'CHECKOUT_EXPIRED',
+        });
+      }
+      if (payment.status !== PaymentStatus.PENDING) {
+        throw new ConflictException({
+          message: `This payment is ${payment.status} and can't be confirmed`,
+          code: 'PAYMENT_NOT_PENDING',
         });
       }
       const paidAt = new Date();
@@ -160,6 +163,6 @@ export class PaymentService {
         data: { status: OrderStatus.PENDING },
       });
       return formatPayment(paid);
-    });
+    }, CHECKOUT_TRANSACTION);
   }
 }

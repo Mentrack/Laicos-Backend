@@ -9,10 +9,13 @@ import {
   tryReserveProduce,
   type OrderLine,
 } from '../order/utils/reservation';
-import { isTransactionTimeout } from '../common/prisma-errors';
 import { CheckoutConfig } from '../payment/checkout-config';
 import { checkoutNotFound } from '../payment/utils/checkout-errors';
 import { lockCheckout } from '../payment/utils/checkout-lock';
+import {
+  CHECKOUT_TRANSACTION,
+  busyAsConflict,
+} from '../payment/utils/checkout-transaction';
 import { releaseCheckout } from '../payment/utils/release-checkout';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutDto } from './dto';
@@ -33,11 +36,6 @@ import {
   resolveDelivery,
 } from './utils/place-checkout';
 
-// Up to 50 items at ~3 statements each, plus time queued on the cart lock or
-// on other buyers' produce row locks, can outrun Prisma's 5s default and
-// surface as a bare 500.
-const CHECKOUT_TRANSACTION = { timeout: 15_000, maxWait: 5_000 };
-
 /**
  * Turns a buyer's cart into orders awaiting payment, all or nothing.
  */
@@ -48,21 +46,8 @@ export class CheckoutService {
     private readonly config: CheckoutConfig,
   ) {}
 
-  async checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
-    try {
-      return await this.placeOrders(user, idempotencyKey, dto);
-    } catch (error) {
-      // Rolled back, so a retry with the same key is safe. A 409 rather than
-      // a 503: HttpExceptionFilter hides every 5xx behind a generic message,
-      // and the client needs this code to know it can retry.
-      if (isTransactionTimeout(error)) {
-        throw new ConflictException({
-          message: 'Checkout is busy; please try again',
-          code: 'CHECKOUT_BUSY',
-        });
-      }
-      throw error;
-    }
+  checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
+    return busyAsConflict(() => this.placeOrders(user, idempotencyKey, dto));
   }
 
   private placeOrders(
@@ -149,6 +134,10 @@ export class CheckoutService {
   }
 
   cancel(user: User, id: string) {
+    return busyAsConflict(() => this.release(user, id));
+  }
+
+  private release(user: User, id: string) {
     return this.database.$transaction(async (tx) => {
       await lockCheckout(tx, id);
       const checkout = await tx.checkout.findFirst({
@@ -170,7 +159,7 @@ export class CheckoutService {
         'Cancelled by buyer',
       );
       return formatCheckout(released);
-    });
+    }, CHECKOUT_TRANSACTION);
   }
 }
 

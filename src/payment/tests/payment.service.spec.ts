@@ -68,10 +68,16 @@ describe('PaymentService', () => {
     },
     order: { updateMany: jest.fn() },
   };
+  let transactionOptions: unknown;
   const database = {
     payment: { findUnique: jest.fn() },
-    $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
-      callback(tx),
+    $transaction: (
+      callback: (client: typeof tx) => Promise<unknown>,
+      options?: unknown,
+    ) => {
+      transactionOptions = options;
+      return callback(tx);
+    },
   };
   const provider = {
     provider: PaymentProvider.STUB,
@@ -131,6 +137,7 @@ describe('PaymentService', () => {
         },
       });
       expect(provider.initiate).toHaveBeenCalledWith(created);
+      expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
       expect(tx.payment.update).toHaveBeenCalledWith({
         where: { id: 'pay-1' },
         data: {
@@ -234,6 +241,7 @@ describe('PaymentService', () => {
         where: { checkoutId, status: OrderStatus.AWAITING_PAYMENT },
         data: { status: OrderStatus.PENDING },
       });
+      expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
     });
 
     it('still pays a checkout past its hold that the sweep has not reached', async () => {
@@ -277,7 +285,7 @@ describe('PaymentService', () => {
     });
 
     it.each([PaymentStatus.ABANDONED, PaymentStatus.FAILED])(
-      'refuses a %s payment',
+      'refuses a %s payment on a checkout still awaiting payment',
       async (status) => {
         tx.payment.findUniqueOrThrow.mockResolvedValue({
           ...payment({ status }),
@@ -292,11 +300,13 @@ describe('PaymentService', () => {
       },
     );
 
+    // Releasing a checkout abandons its pending attempt, so a transfer that
+    // lands afterwards finds both rows moved on; the buyer needs a refund.
     it.each([CheckoutStatus.EXPIRED, CheckoutStatus.CANCELLED])(
       'refuses to pay a %s checkout',
       async (status) => {
         tx.payment.findUniqueOrThrow.mockResolvedValue({
-          ...payment(),
+          ...payment({ status: PaymentStatus.ABANDONED }),
           checkout: checkout({ status }),
         });
         await expect(

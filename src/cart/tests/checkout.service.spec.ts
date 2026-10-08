@@ -438,6 +438,22 @@ describe('CheckoutService', () => {
           }) as unknown,
         }),
       );
+      expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
+    });
+
+    it('asks the buyer to retry when the transaction times out', async () => {
+      tx.checkout.findFirst.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Transaction already closed', {
+          code: 'P2028',
+          clientVersion: 'test',
+        }),
+      );
+      await expect(
+        errorBody(service.cancel(buyer, checkoutId)),
+      ).resolves.toEqual({
+        message: 'Checkout is busy; please try again',
+        code: 'CHECKOUT_BUSY',
+      });
     });
 
     it.each([

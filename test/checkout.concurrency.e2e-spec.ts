@@ -16,8 +16,9 @@ import { addDays, lagosToday } from '../src/common/dates';
 import { testCheckoutConfig } from '../src/payment/tests/checkout-config.fixture';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-// Runs against the docker compose Postgres. Every row is tagged with this
-// run's id and removed in afterAll.
+// Runs against the docker compose Postgres; test/e2e-guard.ts refuses any
+// non-local DATABASE_URL. Every row is tagged with this run's id and removed
+// in afterAll.
 const run = randomUUID().slice(0, 8);
 
 describe('Checkout concurrency (real Postgres)', () => {

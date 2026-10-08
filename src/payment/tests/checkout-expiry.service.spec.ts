@@ -13,10 +13,16 @@ describe('CheckoutExpiryService', () => {
     payment: { updateMany: jest.fn() },
     produce: { update: jest.fn() },
   };
+  let transactionOptions: unknown;
   const database = {
     checkout: { findMany: jest.fn() },
-    $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
-      callback(tx),
+    $transaction: (
+      callback: (client: typeof tx) => Promise<unknown>,
+      options?: unknown,
+    ) => {
+      transactionOptions = options;
+      return callback(tx);
+    },
   };
   const service = new CheckoutExpiryService(
     database as unknown as PrismaService,
@@ -63,6 +69,7 @@ describe('CheckoutExpiryService', () => {
     expect(tx.checkout.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { status: CheckoutStatus.EXPIRED } }),
     );
+    expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
   });
 
   it.each([

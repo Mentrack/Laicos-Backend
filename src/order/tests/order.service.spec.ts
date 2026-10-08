@@ -58,13 +58,18 @@ describe('OrderService', () => {
     checkout,
     address,
   };
+  let transactionOptions: unknown;
   const database = {
     ...tx,
     // A plain function, not jest.fn, so resetAllMocks keeps it. Array form
     // for batched reads; callback form runs against the same mocks.
     $transaction: (
       arg: Promise<unknown>[] | ((client: typeof tx) => Promise<unknown>),
-    ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
+      options?: unknown,
+    ) => {
+      transactionOptions = options;
+      return typeof arg === 'function' ? arg(tx) : Promise.all(arg);
+    },
   };
   const service = new OrderService(
     database as unknown as PrismaService,
@@ -89,6 +94,7 @@ describe('OrderService', () => {
     buyerId: buyer.id,
     quantity: 5,
     status: OrderStatus.PENDING,
+    checkoutId: null,
   };
 
   beforeEach(() => {
@@ -170,6 +176,19 @@ describe('OrderService', () => {
         }),
       );
       expect(order.create).not.toHaveBeenCalled();
+      expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
+    });
+
+    it('asks the buyer to retry when the transaction times out', async () => {
+      tx.address.findFirst.mockRejectedValue(prismaError('P2028'));
+      await expect(
+        service.create(buyer, key, { ...dto, expectedTotal: 1 }),
+      ).rejects.toMatchObject({
+        response: {
+          message: 'Checkout is busy; please try again',
+          code: 'CHECKOUT_BUSY',
+        },
+      });
     });
 
     it('replays an earlier Buy Now with the same key', async () => {
@@ -662,6 +681,21 @@ describe('OrderService', () => {
           floatingQuantity: { increment: 5 },
         },
       });
+    });
+
+    it('refuses a paid order, whose checkout stays PAID', async () => {
+      order.findFirst.mockResolvedValue({
+        ...pending,
+        checkoutId: 'checkout-1',
+      });
+      await expect(service.remove(buyer, orderId)).rejects.toMatchObject({
+        response: {
+          message: 'This order was paid for; cancel it instead',
+          code: 'ORDER_PAID',
+        },
+      });
+      expect(order.delete).not.toHaveBeenCalled();
+      expect(produce.update).not.toHaveBeenCalled();
     });
 
     it('refuses once the order has left PENDING', async () => {

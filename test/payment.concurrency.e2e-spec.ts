@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import {
@@ -22,8 +23,9 @@ import { StubPaymentProvider } from '../src/payment/providers/stub-payment.provi
 import { testCheckoutConfig } from '../src/payment/tests/checkout-config.fixture';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-// Runs against the docker compose Postgres. Every row is tagged with this
-// run's id and removed in afterAll.
+// Runs against the docker compose Postgres; test/e2e-guard.ts refuses any
+// non-local DATABASE_URL. Every row is tagged with this run's id and removed
+// in afterAll.
 const run = randomUUID().slice(0, 8);
 
 describe('Payment concurrency (real Postgres)', () => {
@@ -154,7 +156,7 @@ describe('Payment concurrency (real Postgres)', () => {
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
-    await Promise.allSettled([
+    const [confirmed] = await Promise.allSettled([
       payments.confirm(payment.reference, admin),
       expiry.expireOverdue(),
     ]);
@@ -167,11 +169,21 @@ describe('Payment concurrency (real Postgres)', () => {
       where: { id: listing.id },
     });
     if (after.status === CheckoutStatus.PAID) {
+      expect(confirmed.status).toBe('fulfilled');
       expect(after.orders.map((o) => o.status)).toEqual([OrderStatus.PENDING]);
       expect(after.payments[0].status).toBe(PaymentStatus.SUCCEEDED);
       expect(stock.floatingQuantity).toBe(6);
     } else {
       expect(after.status).toBe(CheckoutStatus.EXPIRED);
+      expect(confirmed.status).toBe('rejected');
+      const reason: unknown =
+        confirmed.status === 'rejected' ? confirmed.reason : null;
+      expect(reason).toBeInstanceOf(ConflictException);
+      if (reason instanceof ConflictException) {
+        expect(reason.getResponse()).toMatchObject({
+          code: 'CHECKOUT_EXPIRED',
+        });
+      }
       expect(after.orders.map((o) => o.status)).toEqual([
         OrderStatus.CANCELLED,
       ]);
@@ -195,11 +207,18 @@ describe('Payment concurrency (real Postgres)', () => {
       PaymentStatus.SUCCEEDED,
       PaymentStatus.SUCCEEDED,
     ]);
+    expect(results[1].id).toBe(results[0].id);
     await expect(
       db.payment.count({
         where: { checkoutId: checkout.id, status: PaymentStatus.SUCCEEDED },
       }),
     ).resolves.toBe(1);
+    const after = await db.checkout.findUniqueOrThrow({
+      where: { id: checkout.id },
+      include: { orders: true },
+    });
+    expect(after.status).toBe(CheckoutStatus.PAID);
+    expect(after.orders.map((o) => o.status)).toEqual([OrderStatus.PENDING]);
   });
 
   it('restores stock when the hold runs out, even while another buyer reserves', async () => {
