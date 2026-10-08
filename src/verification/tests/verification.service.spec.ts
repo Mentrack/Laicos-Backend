@@ -14,9 +14,11 @@ import {
   type Agent,
 } from '../../../generated/client';
 import type { StorageUploadFile } from '../../common/upload-pipes';
+import { FarmerActivationService } from '../../auth/farmer-activation.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { AssignmentService } from '../services/assignment.service';
+import { FarmDocumentsService } from '../services/farm-documents.service';
 import { VerificationService } from '../services/verification.service';
 
 const agent = { id: 'agent-1', isVerified: true } as Agent;
@@ -128,10 +130,14 @@ describe('VerificationService', () => {
     ),
   };
   const assignment = { resetRound: jest.fn(), assign: jest.fn() };
+  const activation = { activate: jest.fn(), notifyRejection: jest.fn() };
+  const documents = { replace: jest.fn() };
   const service = new VerificationService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
     assignment as unknown as AssignmentService,
+    activation as unknown as FarmerActivationService,
+    documents as unknown as FarmDocumentsService,
   );
 
   // The service reads the round in three shapes: the open-check select, the
@@ -145,6 +151,10 @@ describe('VerificationService', () => {
     );
     farmVerification.updateMany.mockResolvedValue({ count: 1 });
     cluster.findUniqueOrThrow.mockResolvedValue({ id: 'cluster-1' });
+    farm.update.mockResolvedValue({
+      name: 'Green Acres',
+      owner: { userId: 'farmer-user-1' },
+    });
   });
 
   it('lists only the agent’s rounds', async () => {
@@ -380,6 +390,38 @@ describe('VerificationService', () => {
       expect(farm.update).not.toHaveBeenCalled();
     });
 
+    it('refuses while the farmer’s ID or ownership document is missing', async () => {
+      const base = detail();
+      current = detail({
+        farm: {
+          ...base.farm,
+          ownershipDocumentKey: null,
+          owner: { ...base.farm.owner, idDocumentKey: null },
+        },
+      });
+      const error: unknown = await service
+        .approve(agent, roundId)
+        .catch((caught: unknown) => caught);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        message: expect.arrayContaining([
+          'Farmer ID document is required',
+          'Ownership document is required',
+        ]) as unknown,
+      });
+      expect(farmVerification.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            farm: {
+              select: {
+                ownershipDocumentKey: true,
+                owner: { select: { idDocumentKey: true } },
+              },
+            },
+          }) as unknown,
+        }),
+      );
+    });
+
     it('verifies the farm into the agent’s cluster', async () => {
       current = detail({
         locationMatches: true,
@@ -422,7 +464,9 @@ describe('VerificationService', () => {
           clusterId: 'cluster-1',
           isClustered: true,
         },
+        select: { name: true, owner: { select: { userId: true } } },
       });
+      expect(activation.activate).toHaveBeenCalledWith('farmer-user-1');
       expect(orderHandover.updateMany).toHaveBeenCalledWith({
         where: {
           agentId: null,
@@ -431,6 +475,44 @@ describe('VerificationService', () => {
         },
         data: { agentId: agent.id },
       });
+    });
+  });
+
+  describe('uploadDocuments', () => {
+    const file = {
+      buffer: Buffer.from('%PDF-1.4'),
+      mimetype: 'application/pdf',
+      size: 8,
+    };
+
+    it('replaces documents on the farm of the agent’s open round', async () => {
+      await service.uploadDocuments(agent, roundId, { idDocument: file });
+      expect(documents.replace).toHaveBeenCalledWith(
+        'farm-1',
+        {
+          verifications: {
+            some: {
+              id: roundId,
+              agentId: agent.id,
+              status: {
+                in: [
+                  VerificationTaskStatus.ASSIGNED,
+                  VerificationTaskStatus.IN_PROGRESS,
+                ],
+              },
+            },
+          },
+        },
+        { idDocument: file },
+      );
+    });
+
+    it('409s on a decided round before touching storage', async () => {
+      current = detail({ status: VerificationTaskStatus.APPROVED });
+      await expect(
+        service.uploadDocuments(agent, roundId, { idDocument: file }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(documents.replace).not.toHaveBeenCalled();
     });
   });
 
@@ -451,6 +533,12 @@ describe('VerificationService', () => {
         clusterId: null,
         isClustered: false,
       },
+      select: { name: true, owner: { select: { userId: true } } },
     });
+    expect(activation.notifyRejection).toHaveBeenCalledWith(
+      'farmer-user-1',
+      'Green Acres',
+      'No farm at the address',
+    );
   });
 });

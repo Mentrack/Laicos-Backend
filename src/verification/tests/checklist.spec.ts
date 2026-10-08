@@ -28,6 +28,7 @@ function complete(): ChecklistState {
     evidence: [PhotoSlot.ENTRANCE, PhotoSlot.FARM_AREA, PhotoSlot.PRODUCE].map(
       (photoSlot) => ({ kind: EvidenceKind.PHOTO, checkKey: null, photoSlot }),
     ),
+    farm: { ownershipDocumentKey: 'own', owner: { idDocumentKey: 'id' } },
   };
 }
 
@@ -78,6 +79,18 @@ describe('evidenceShapeError', () => {
 describe('checklistGaps', () => {
   it('is empty for a complete checklist', () => {
     expect(checklistGaps(complete())).toEqual([]);
+  });
+
+  it('requires the farmer’s ID and the ownership document', () => {
+    expect(
+      checklistGaps({
+        ...complete(),
+        farm: { ownershipDocumentKey: null, owner: { idDocumentKey: null } },
+      }),
+    ).toEqual([
+      'Farmer ID document is required',
+      'Ownership document is required',
+    ]);
   });
 
   it('lists everything missing from an untouched round', () => {

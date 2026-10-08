@@ -58,7 +58,7 @@ export async function formatVerification(
   const { owner } = farm;
   const [ownershipDocumentUrl, chiefConfirmationUrl, identity, evidence] =
     await Promise.all([
-      storage.getPresignedUrl(farm.ownershipDocumentKey),
+      storage.presignedUrlOrNull(farm.ownershipDocumentKey),
       storage.presignedUrlOrNull(farm.chiefConfirmationKey),
       formatIdentity(storage, owner),
       Promise.all(

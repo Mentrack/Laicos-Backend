@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { Farmer, User } from '../../../generated/client';
+import type { User } from '../../../generated/client';
 import type { UpdateIdentityDto } from '../../common/dto/identity.dto';
 import { formatIdentity, replaceIdDocument } from '../../common/identity';
 import {
@@ -10,7 +10,8 @@ import {
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
-import type { FarmerDto, FarmerProfileDto } from '../dto';
+import type { FarmerProfileDto } from '../dto';
+import { toFarmerDto } from '../formatters/farmer.formatter';
 
 // Farmer rows are created with their FARMER user (AuthService.createLocalUser)
 // and deleted with it (onDelete: Cascade), so there is no create or delete here.
@@ -89,16 +90,4 @@ export class FarmerService {
     }
     return farmer;
   }
-}
-
-// Picks fields rather than returning the row: the row carries the farmer's
-// ID number and document key, which other users must never see.
-function toFarmerDto(farmer: Farmer): FarmerDto {
-  return {
-    id: farmer.id,
-    farmerId: farmer.farmerId,
-    userId: farmer.userId,
-    createdAt: farmer.createdAt,
-    updatedAt: farmer.updatedAt,
-  };
 }

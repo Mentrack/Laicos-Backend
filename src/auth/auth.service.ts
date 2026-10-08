@@ -20,8 +20,19 @@ import {
 } from './dto';
 import { firebaseErrorCode } from './firebase/firebase.errors';
 import { FirebaseService } from './firebase/firebase.service';
+import {
+  isPendingActivation,
+  verificationPendingError,
+} from './utils/pending-access';
+import { webappUrl } from '../common/config';
+import { MailService } from '../mail/mail.service';
+import { passwordResetEmail } from '../mail/templates';
 import { PrismaService } from '../prisma/prisma.service';
-import { Role, type User as UserModel } from '../../generated/client';
+import {
+  Role,
+  type Prisma,
+  type User as UserModel,
+} from '../../generated/client';
 import { isUniqueViolation } from '../common/prisma-errors';
 
 @Injectable()
@@ -32,6 +43,7 @@ export class AuthService {
     private readonly database: PrismaService,
     private readonly firebase: FirebaseService,
     private readonly config: ConfigService,
+    private readonly mail: MailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -69,6 +81,9 @@ export class AuthService {
         await this.deleteFirebaseUser(google.localId);
       }
       throw new NotFoundException('Account not registered');
+    }
+    if (isPendingActivation(user)) {
+      throw verificationPendingError(user.role);
     }
     await this.saveRefreshToken(user.id, google.refreshToken);
     return { user, ...toTokenPair(google) };
@@ -111,9 +126,11 @@ export class AuthService {
   async forgotPassword(email: string): Promise<void> {
     const user = await this.database.user.findUnique({
       where: { email },
-      select: { firstName: true },
+      select: { firstName: true, role: true, activatedAt: true },
     });
-    if (!user) {
+    // A farmer or agent awaiting verification has no password yet; setting
+    // one here would let them in before verification does.
+    if (!user || isPendingActivation(user)) {
       return;
     }
 
@@ -121,14 +138,28 @@ export class AuthService {
     if (!firebaseLink) {
       return;
     }
+    await this.mail.send(
+      email,
+      passwordResetEmail({
+        firstName: user.firstName,
+        resetUrl: this.webappResetUrl(firebaseLink),
+      }),
+    );
+  }
 
-    // await this.sendEmail(
-    //   email,
-    //   this.emailTemplates.renderPasswordReset({
-    //     firstName: user.firstName,
-    //     resetLink: this.webappResetLink(firebaseLink),
-    //   }),
-    // );
+  /**
+   * Firebase's link opens Firebase's hosted page; the webapp has its own,
+   * which posts the code to POST /auth/forgot-password/confirm.
+   */
+  private webappResetUrl(firebaseLink: string): string {
+    const oobCode = new URL(firebaseLink).searchParams.get('oobCode');
+    if (!oobCode) {
+      throw new Error('Firebase reset link has no oobCode');
+    }
+    return webappUrl(
+      this.config,
+      `/reset-password?oobCode=${encodeURIComponent(oobCode)}`,
+    );
   }
 
   async confirmForgotPassword(dto: ConfirmForgotPasswordDto): Promise<void> {
@@ -147,6 +178,12 @@ export class AuthService {
     await this.firebase.auth.updateUser(user.firebaseUid, {
       password: dto.newPassword,
     });
+    if (user.mustChangePassword) {
+      await this.database.user.update({
+        where: { id: user.id },
+        data: { mustChangePassword: false },
+      });
+    }
     await this.firebase.auth.revokeRefreshTokens(user.firebaseUid);
     await this.deleteRefreshToken(user.id);
   }
@@ -223,7 +260,12 @@ export class AuthService {
     return { user, ...toTokenPair(tokens) };
   }
 
-  private async createFirebaseUser(dto: RegisterDto): Promise<UserRecord> {
+  /** No `password` leaves an account nobody can sign in to: a new farmer. */
+  async createFirebaseUser(
+    dto: Pick<RegisterDto, 'email' | 'firstName' | 'lastName'> & {
+      password?: string;
+    },
+  ): Promise<UserRecord> {
     try {
       return await this.firebase.auth.createUser({
         email: dto.email,
@@ -235,19 +277,21 @@ export class AuthService {
     }
   }
 
-  private async createLocalUser({
-    refreshToken,
-    ...input
-  }: CreateLocalUserDto) {
+  /** Takes `client` so a caller can create the user inside its transaction. */
+  async createLocalUser(
+    { refreshToken, farmer, agent, ...input }: CreateLocalUserDto,
+    client: Prisma.TransactionClient = this.database,
+  ) {
     try {
-      return await this.database.user.create({
+      return await client.user.create({
         data: {
           ...input,
-          farmer: input.role === Role.FARMER ? { create: {} } : undefined,
+          farmer:
+            input.role === Role.FARMER ? { create: farmer ?? {} } : undefined,
           // Every agent owns exactly one cluster, so it is born with them.
           agent:
             input.role === Role.EXTENSION_AGENT
-              ? { create: { cluster: { create: {} } } }
+              ? { create: { cluster: { create: {} }, ...agent } }
               : undefined,
           refreshToken: refreshToken
             ? { create: { token: refreshToken } }
@@ -262,18 +306,22 @@ export class AuthService {
     }
   }
 
-  private async deleteFirebaseUser(firebaseUid: string): Promise<void> {
+  async deleteFirebaseUser(firebaseUid: string): Promise<void> {
     await this.firebase.auth.deleteUser(firebaseUid).catch((error) => {
       this.logger.warn(`Failed to delete Firebase user ${firebaseUid}`, error);
     });
   }
 
+  /** The local user for a sign-in, refusing anyone awaiting verification. */
   private async requireLocalUser(firebaseUid: string) {
     const user = await this.database.user.findUnique({
       where: { firebaseUid },
     });
     if (!user) {
       throw new UnauthorizedException('User not found');
+    }
+    if (isPendingActivation(user)) {
+      throw verificationPendingError(user.role);
     }
     return user;
   }

@@ -23,7 +23,7 @@
     },
     "/auth/register": {
       "post": {
-        "description": "Creates the Firebase account and the local user, and signs them in. Registering as FARMER or EXTENSION_AGENT also creates that profile.",
+        "description": "Creates the Firebase account and the local user, and signs them in. Buyers and riders only; farmers and agents have their own signup.",
         "operationId": "AuthController_register",
         "parameters": [],
         "requestBody": {
@@ -251,7 +251,7 @@
     },
     "/auth/change-password": {
       "patch": {
-        "description": "Signs the user out of every session; they log in again with the new password.",
+        "description": "Signs the user out of every session; they log in again with the new password. Clears mustChangePassword.",
         "operationId": "AuthController_changePassword",
         "parameters": [],
         "requestBody": {
@@ -343,7 +343,7 @@
     },
     "/farms": {
       "post": {
-        "description": "Multipart: the farm fields, a required ownershipDocument and an optional chiefConfirmation (PDF or image, 10 MB each). 400 until the farmer has uploaded their ID. The farm starts PENDING and is assigned to an agent in its LGA for verification.",
+        "description": "Multipart: the farm fields, an optional ownershipDocument and an optional chiefConfirmation (PDF or image, 10 MB each). 400 until the farmer has uploaded their ID. The farm starts PENDING and is assigned to an agent in its LGA for verification.",
         "operationId": "FarmController_createFarm",
         "parameters": [],
         "requestBody": {
@@ -357,9 +357,7 @@
                   },
                   {
                     "type": "object",
-                    "required": [
-                      "ownershipDocument"
-                    ],
+                    "required": [],
                     "properties": {
                       "ownershipDocument": {
                         "type": "string",
@@ -559,6 +557,174 @@
         "summary": "Delete one of my farms",
         "tags": [
           "Farms"
+        ]
+      }
+    },
+    "/farms/{id}/documents": {
+      "post": {
+        "description": "Multipart: ownershipDocument and/or chiefConfirmation (PDF or image, 10 MB each); at least one. Replaces what is stored. 409 once the farm is VERIFIED. An agent cannot approve a farm without its ownership document.",
+        "operationId": "FarmController_replaceFarmDocuments",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "ownershipDocument": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "chiefConfirmation": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload or replace one of my farm’s documents",
+        "tags": [
+          "Farms"
+        ]
+      }
+    },
+    "/farmers/signup": {
+      "post": {
+        "description": "Public, multipart: my details, the farm, and the documents idDocument (my ID), ownershipDocument and chiefConfirmation (PDF or image, 10 MB each). No password: I get access, and a temporary password by email, once an agent verifies the farm. Until then sign-in answers 403 VERIFICATION_PENDING. The agent can collect missing documents on site, but approval needs my ID and the ownership document. 409 when the email is registered.",
+        "operationId": "FarmController_signUp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/FarmerSignupDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "idDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "ownershipDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "chiefConfirmation": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredFarmerResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Sign up as a farmer with my first farm",
+        "tags": [
+          "Farmers"
+        ]
+      }
+    },
+    "/farmers/google-signup": {
+      "post": {
+        "description": "As POST /farmers/signup, with a Google ID token in place of name and email. Google sign-in works once the farm is verified; no password is issued.",
+        "operationId": "FarmController_signUpWithGoogle",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/GoogleFarmerSignupDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "idDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "ownershipDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "chiefConfirmation": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredFarmerResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Sign up as a farmer with Google",
+        "tags": [
+          "Farmers"
         ]
       }
     },
@@ -1058,6 +1224,68 @@
         ]
       }
     },
+    "/verifications/{id}/documents": {
+      "post": {
+        "description": "For documents the farmer could not supply: they have no login until the farm is verified. Multipart: idDocument (the farmer’s ID), ownershipDocument and/or chiefConfirmation (PDF or image, 10 MB each); at least one. Each replaces what is stored. Approval needs the ID and the ownership document.",
+        "operationId": "VerificationController_uploadDocuments",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [],
+                "properties": {
+                  "idDocument": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "ownershipDocument": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "chiefConfirmation": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload the farmer’s or the farm’s documents",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
     "/verifications/{id}/evidence": {
       "post": {
         "description": "Multipart image in `file` (5 MB). CHECK evidence names its checkKey; PHOTO evidence names its photoSlot and replaces that slot’s photo.",
@@ -1214,7 +1442,7 @@
     },
     "/verifications/{id}/approve": {
       "post": {
-        "description": "Verifies the farm and adds it to my cluster. 400 with every gap in error.details while the checklist is incomplete.",
+        "description": "Verifies the farm and adds it to my cluster. 400 with every gap in error.details while the checklist is incomplete or the farmer’s ID or ownership document is missing. A farmer’s first verified farm gives them access and sends their invite.",
         "operationId": "VerificationController_approve",
         "parameters": [
           {
@@ -1251,7 +1479,7 @@
     },
     "/verifications/{id}/reject": {
       "post": {
-        "description": "A reason is required; the checklist does not need to be complete. The farmer can edit the farm to resubmit it.",
+        "description": "A reason is required; the checklist does not need to be complete. The farmer is sent the reason. An active farmer can edit the farm to resubmit it; one still awaiting their first verification cannot log in yet (open question).",
         "operationId": "VerificationController_reject",
         "parameters": [
           {
@@ -2095,6 +2323,104 @@
         ]
       }
     },
+    "/agents/signup": {
+      "post": {
+        "description": "Public, multipart: my details, state and LGA, and idDocument (my ID; PDF or image, 10 MB). No password: I get access once an admin verifies me. Until then sign-in answers 403 VERIFICATION_PENDING. 409 when the email is registered.",
+        "operationId": "AgentSignupController_signUp",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentSignupDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "idDocument"
+                    ],
+                    "properties": {
+                      "idDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredAgentResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Sign up as an extension agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agents/google-signup": {
+      "post": {
+        "description": "As POST /agents/signup, with a Google ID token in place of name and email. Google sign-in works once an admin verifies me; no password is issued.",
+        "operationId": "AgentSignupController_signUpWithGoogle",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/GoogleAgentSignupDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "idDocument"
+                    ],
+                    "properties": {
+                      "idDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredAgentResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Sign up as an extension agent with Google",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
     "/agents/me": {
       "get": {
         "description": "Includes verification status and my cluster’s name and farm count.",
@@ -2250,6 +2576,94 @@
           }
         ],
         "summary": "List the farms in my cluster",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agents/me/cluster/farmers": {
+      "get": {
+        "description": "Farmers with at least one farm in my cluster (so verified), newest first. farmCount counts only those farms.",
+        "operationId": "AgentController_findClusterFarmers",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterFarmerListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the farmers in my cluster",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agents/me/farmers": {
+      "post": {
+        "description": "Verified agents only. Creates the farmer without a password: like self-signup, they get access, and a temporary password by invite, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. Upload the farmer’s ID and the ownership document through POST /verifications/{id}/documents; approval needs both. 409 when the email is registered.",
+        "operationId": "AgentController_onboardFarmer",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardFarmerDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredFarmerResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Onboard a farmer and their first farm",
         "tags": [
           "Agents"
         ]
@@ -2581,14 +2995,12 @@
           },
           "role": {
             "enum": [
-              "FARMER",
               "BUYER",
-              "EXTENSION_AGENT",
               "RIDER"
             ],
             "type": "string",
-            "example": "FARMER",
-            "description": "Account role. Only FARMER or BUYER may self-register."
+            "example": "BUYER",
+            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup instead: they get no password until they are verified."
           }
         },
         "required": [
@@ -2651,6 +3063,16 @@
             "type": "boolean",
             "description": "Mirrors Firebase's emailVerified"
           },
+          "activatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Farmers only: when their first farm was verified. Until then every authenticated route and sign-in answers 403 VERIFICATION_PENDING. Null for other roles."
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "description": "On the temporary password from a farmer’s invite. Every route but GET /auth/me, PATCH /auth/change-password and POST /auth/logout answers 403 PASSWORD_CHANGE_REQUIRED until it is changed."
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -2670,6 +3092,8 @@
           "role",
           "agreedToTerms",
           "isVerified",
+          "activatedAt",
+          "mustChangePassword",
           "createdAt",
           "updatedAt"
         ]
@@ -2751,14 +3175,12 @@
           },
           "role": {
             "enum": [
-              "FARMER",
               "BUYER",
-              "EXTENSION_AGENT",
               "RIDER"
             ],
             "type": "string",
-            "example": "FARMER",
-            "description": "Account role. Only FARMER or BUYER may self-register."
+            "example": "BUYER",
+            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup instead: they get no password until they are verified."
           }
         },
         "required": [
@@ -3101,6 +3523,7 @@
           },
           "ownershipDocumentUrl": {
             "type": "string",
+            "nullable": true,
             "description": "Presigned; expires in 15 min"
           },
           "chiefConfirmationUrl": {
@@ -3259,6 +3682,115 @@
           }
         }
       },
+      "IdType": {
+        "type": "string",
+        "enum": [
+          "NIN",
+          "VOTERS_CARD"
+        ]
+      },
+      "FarmerSignupDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Green Acres"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states/{stateId}/lgas; decides which agents verify the farm"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 255,
+            "example": "12 Market Road",
+            "description": "Street address"
+          },
+          "size": {
+            "type": "number",
+            "minimum": 1,
+            "example": 2.5,
+            "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "ha",
+            "default": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean",
+            "default": false
+          },
+          "referralAgentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Referring Agent.id"
+          },
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          },
+          "agreedToTerms": {
+            "type": "boolean",
+            "example": true,
+            "description": "Must be true"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada",
+            "description": "User first name"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor",
+            "description": "User last name"
+          }
+        },
+        "required": [
+          "name",
+          "stateId",
+          "lgaId",
+          "location",
+          "size",
+          "mainProduce",
+          "phoneNumber",
+          "agreedToTerms",
+          "email",
+          "firstName",
+          "lastName"
+        ]
+      },
       "FarmerDto": {
         "type": "object",
         "properties": {
@@ -3292,6 +3824,131 @@
           "updatedAt"
         ]
       },
+      "RegisteredFarmerDto": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserDto"
+          },
+          "farmer": {
+            "$ref": "#/components/schemas/FarmerDto"
+          },
+          "farm": {
+            "$ref": "#/components/schemas/FarmDto"
+          }
+        },
+        "required": [
+          "user",
+          "farmer",
+          "farm"
+        ]
+      },
+      "RegisteredFarmerResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RegisteredFarmerDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "GoogleFarmerSignupDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Green Acres"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states/{stateId}/lgas; decides which agents verify the farm"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 255,
+            "example": "12 Market Road",
+            "description": "Street address"
+          },
+          "size": {
+            "type": "number",
+            "minimum": 1,
+            "example": 2.5,
+            "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "ha",
+            "default": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean",
+            "default": false
+          },
+          "referralAgentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Referring Agent.id"
+          },
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          },
+          "agreedToTerms": {
+            "type": "boolean",
+            "example": true,
+            "description": "Must be true"
+          },
+          "idToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
+            "description": "Google ID token from Google Identity Services"
+          }
+        },
+        "required": [
+          "name",
+          "stateId",
+          "lgaId",
+          "location",
+          "size",
+          "mainProduce",
+          "phoneNumber",
+          "agreedToTerms",
+          "idToken"
+        ]
+      },
       "FarmerListResponseDto": {
         "type": "object",
         "properties": {
@@ -3313,13 +3970,6 @@
           "message",
           "data",
           "metaData"
-        ]
-      },
-      "IdType": {
-        "type": "string",
-        "enum": [
-          "NIN",
-          "VOTERS_CARD"
         ]
       },
       "FarmerProfileDto": {
@@ -3686,6 +4336,7 @@
           },
           "ownershipDocumentUrl": {
             "type": "string",
+            "nullable": true,
             "description": "Presigned; expires in 15 min"
           },
           "chiefConfirmationUrl": {
@@ -4675,6 +5326,67 @@
           "reason"
         ]
       },
+      "AgentSignupDto": {
+        "type": "object",
+        "properties": {
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          },
+          "agreedToTerms": {
+            "type": "boolean",
+            "example": true,
+            "description": "Must be true"
+          },
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states/{stateId}/lgas; the farms I verify and manage are here"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada",
+            "description": "User first name"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor",
+            "description": "User last name"
+          }
+        },
+        "required": [
+          "phoneNumber",
+          "agreedToTerms",
+          "stateId",
+          "lgaId",
+          "email",
+          "firstName",
+          "lastName"
+        ]
+      },
       "ClusterSummaryDto": {
         "type": "object",
         "properties": {
@@ -4777,6 +5489,86 @@
           "cluster"
         ]
       },
+      "RegisteredAgentDto": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserDto"
+          },
+          "agent": {
+            "$ref": "#/components/schemas/AgentProfileDto"
+          }
+        },
+        "required": [
+          "user",
+          "agent"
+        ]
+      },
+      "RegisteredAgentResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RegisteredAgentDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "GoogleAgentSignupDto": {
+        "type": "object",
+        "properties": {
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          },
+          "agreedToTerms": {
+            "type": "boolean",
+            "example": true,
+            "description": "Must be true"
+          },
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From GET /locations/states/{stateId}/lgas; the farms I verify and manage are here"
+          },
+          "idToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
+            "description": "Google ID token from Google Identity Services"
+          }
+        },
+        "required": [
+          "phoneNumber",
+          "agreedToTerms",
+          "stateId",
+          "lgaId",
+          "idToken"
+        ]
+      },
       "AgentProfileResponseDto": {
         "type": "object",
         "properties": {
@@ -4818,6 +5610,158 @@
             "description": "Cannot change once the agent is verified"
           }
         }
+      },
+      "ClusterFarmerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id"
+          },
+          "farmerId": {
+            "type": "string",
+            "example": "FRM-000123",
+            "description": "Public farmer code"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor"
+          },
+          "email": {
+            "type": "string",
+            "example": "ada@example.com"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "nullable": true
+          },
+          "farmCount": {
+            "type": "number",
+            "example": 2,
+            "description": "Their farms in my cluster"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "farmerId",
+          "firstName",
+          "lastName",
+          "email",
+          "phoneNumber",
+          "farmCount",
+          "createdAt"
+        ]
+      },
+      "ClusterFarmerListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClusterFarmerDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "OnboardFarmDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Green Acres"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 255,
+            "example": "12 Market Road",
+            "description": "Street address"
+          },
+          "size": {
+            "type": "number",
+            "minimum": 1,
+            "example": 2.5,
+            "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "ha",
+            "default": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "name",
+          "location",
+          "size",
+          "mainProduce"
+        ]
+      },
+      "OnboardFarmerDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada",
+            "description": "User first name"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor",
+            "description": "User last name"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          },
+          "farm": {
+            "$ref": "#/components/schemas/OnboardFarmDto"
+          }
+        },
+        "required": [
+          "email",
+          "firstName",
+          "lastName",
+          "phoneNumber",
+          "farm"
+        ]
       },
       "AgentTaskType": {
         "type": "string",

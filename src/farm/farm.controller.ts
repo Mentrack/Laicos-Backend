@@ -37,23 +37,52 @@ import {
   FarmDto,
   FarmerDto,
   FarmerProfileDto,
+  FarmerSignupDto,
+  GoogleFarmerSignupDto,
+  RegisteredFarmerDto,
   UpdateFarmDto,
 } from './dto';
 import { FarmService, type FarmDocuments } from './services/farm.service';
+import { FarmerRegistrationService } from './services/farmer-registration.service';
 import { FarmerService } from './services/farmer.service';
+import type { FarmDocumentUploads } from '../verification/services/farm-documents.service';
+
+// Optional at the API: the agent can collect what the farmer lacks.
+const SIGNUP_FILE_FIELDS = [
+  { name: 'idDocument', required: false },
+  { name: 'ownershipDocument', required: false },
+  { name: 'chiefConfirmation', required: false },
+];
+
+const SIGNUP_FILES = FileFieldsInterceptor(
+  SIGNUP_FILE_FIELDS.map(({ name }) => ({ name, maxCount: 1 })),
+  { limits: { fileSize: DOCUMENT_MAX_BYTES } },
+);
+
+function signupFilesPipe() {
+  return new ParseFileFieldsPipe(
+    {
+      idDocument: { required: false },
+      ownershipDocument: { required: false },
+      chiefConfirmation: { required: false },
+    },
+    documentUploadPipe,
+  );
+}
 
 @Controller()
 export class FarmController {
   constructor(
     private readonly farms: FarmService,
     private readonly farmers: FarmerService,
+    private readonly registration: FarmerRegistrationService,
   ) {}
 
   @Post('farms')
   @ApiOperation({
     summary: 'Create a farm',
     description:
-      'Multipart: the farm fields, a required ownershipDocument and an optional chiefConfirmation (PDF or image, 10 MB each). 400 until the farmer has uploaded their ID. The farm starts PENDING and is assigned to an agent in its LGA for verification.',
+      'Multipart: the farm fields, an optional ownershipDocument and an optional chiefConfirmation (PDF or image, 10 MB each). 400 until the farmer has uploaded their ID. The farm starts PENDING and is assigned to an agent in its LGA for verification.',
   })
   @Auth(Role.FARMER)
   @ApiTags('Farms')
@@ -67,7 +96,7 @@ export class FarmController {
     ),
   )
   @ApiFileUpload(CreateFarmDto, [
-    { name: 'ownershipDocument', required: true },
+    { name: 'ownershipDocument', required: false },
     { name: 'chiefConfirmation', required: false },
   ])
   @ApiEnvelope(FarmDto, { status: HttpStatus.CREATED })
@@ -77,7 +106,7 @@ export class FarmController {
     @UploadedFiles(
       new ParseFileFieldsPipe(
         {
-          ownershipDocument: { required: true },
+          ownershipDocument: { required: false },
           chiefConfirmation: { required: false },
         },
         documentUploadPipe,
@@ -133,6 +162,47 @@ export class FarmController {
     return { data, message: 'Farm updated' };
   }
 
+  @Post('farms/:id/documents')
+  @ApiOperation({
+    summary: 'Upload or replace one of my farm’s documents',
+    description:
+      'Multipart: ownershipDocument and/or chiefConfirmation (PDF or image, 10 MB each); at least one. Replaces what is stored. 409 once the farm is VERIFIED. An agent cannot approve a farm without its ownership document.',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Auth(Role.FARMER)
+  @ApiTags('Farms')
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'ownershipDocument', maxCount: 1 },
+        { name: 'chiefConfirmation', maxCount: 1 },
+      ],
+      { limits: { fileSize: DOCUMENT_MAX_BYTES } },
+    ),
+  )
+  @ApiFileUpload(undefined, [
+    { name: 'ownershipDocument', required: false },
+    { name: 'chiefConfirmation', required: false },
+  ])
+  @ApiEnvelope(FarmDto)
+  async replaceFarmDocuments(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFiles(
+      new ParseFileFieldsPipe(
+        {
+          ownershipDocument: { required: false },
+          chiefConfirmation: { required: false },
+        },
+        documentUploadPipe,
+      ),
+    )
+    documents: FarmDocuments,
+  ) {
+    const data = await this.farms.replaceDocuments(user, id, documents);
+    return { data, message: 'Farm documents updated' };
+  }
+
   @Delete('farms/:id')
   @ApiOperation({
     summary: 'Delete one of my farms',
@@ -147,6 +217,42 @@ export class FarmController {
   ) {
     const data = await this.farms.remove(user, id);
     return { data, message: 'Farm deleted' };
+  }
+
+  @Post('farmers/signup')
+  @ApiOperation({
+    summary: 'Sign up as a farmer with my first farm',
+    description:
+      'Public, multipart: my details, the farm, and the documents idDocument (my ID), ownershipDocument and chiefConfirmation (PDF or image, 10 MB each). No password: I get access, and a temporary password by email, once an agent verifies the farm. Until then sign-in answers 403 VERIFICATION_PENDING. The agent can collect missing documents on site, but approval needs my ID and the ownership document. 409 when the email is registered.',
+  })
+  @ApiTags('Farmers')
+  @UseInterceptors(SIGNUP_FILES)
+  @ApiFileUpload(FarmerSignupDto, SIGNUP_FILE_FIELDS)
+  @ApiEnvelope(RegisteredFarmerDto, { status: HttpStatus.CREATED })
+  async signUp(
+    @Body() dto: FarmerSignupDto,
+    @UploadedFiles(signupFilesPipe()) documents: FarmDocumentUploads,
+  ) {
+    const data = await this.registration.signUp(dto, documents);
+    return { data, message: 'Farm submitted for verification' };
+  }
+
+  @Post('farmers/google-signup')
+  @ApiOperation({
+    summary: 'Sign up as a farmer with Google',
+    description:
+      'As POST /farmers/signup, with a Google ID token in place of name and email. Google sign-in works once the farm is verified; no password is issued.',
+  })
+  @ApiTags('Farmers')
+  @UseInterceptors(SIGNUP_FILES)
+  @ApiFileUpload(GoogleFarmerSignupDto, SIGNUP_FILE_FIELDS)
+  @ApiEnvelope(RegisteredFarmerDto, { status: HttpStatus.CREATED })
+  async signUpWithGoogle(
+    @Body() dto: GoogleFarmerSignupDto,
+    @UploadedFiles(signupFilesPipe()) documents: FarmDocumentUploads,
+  ) {
+    const data = await this.registration.signUpWithGoogle(dto, documents);
+    return { data, message: 'Farm submitted for verification' };
   }
 
   @Get('farmers')

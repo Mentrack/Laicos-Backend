@@ -32,8 +32,10 @@ import {
   AgentTaskDto,
   AgentTaskQueryDto,
   AgentTaskType,
+  ClusterFarmerDto,
   UpdateAgentDto,
 } from './dto';
+import { clusterName } from './utils/cluster-name';
 
 const AGENT_INCLUDE = {
   state: true,
@@ -42,8 +44,8 @@ const AGENT_INCLUDE = {
 } satisfies Prisma.AgentInclude;
 
 // Agent rows (and their clusters) are created with their EXTENSION_AGENT user
-// in AuthService.createLocalUser and deleted with it, so there is no create
-// or delete here. isVerified is an admin's to set, never the agent's.
+// (AgentRegistrationService, through AuthService.createLocalUser) and deleted
+// with it, so there is no create or delete here. isVerified is an admin's to set, never the agent's.
 @Injectable()
 export class AgentService {
   constructor(
@@ -99,7 +101,7 @@ export class AgentService {
       location = {
         state: { connect: { id: stateId } },
         lga: { connect: { id: lgaId } },
-        cluster: { update: { name: `${lga.name} Hub` } },
+        cluster: { update: { name: clusterName(lga.name) } },
       };
     }
     await this.database.agent.update({
@@ -144,6 +146,43 @@ export class AgentService {
       data: await Promise.all(
         farms.map((farm) => formatFarm(this.storage, farm)),
       ),
+      metaData: paginationMeta(page, perPage, total),
+    };
+  }
+
+  /** Cluster farms are all VERIFIED, so these are my verified farmers. */
+  async findClusterFarmers(user: User, query: PaginationQueryDto) {
+    const { page, perPage, skip, take } = resolvePagination(query);
+    const inMyCluster = { cluster: { agent: { userId: user.id } } };
+    const where: Prisma.FarmerWhereInput = { farms: { some: inMyCluster } };
+    const [farmers, total] = await this.database.$transaction([
+      this.database.farmer.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+              phoneNumber: true,
+            },
+          },
+          _count: { select: { farms: { where: inMyCluster } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+      }),
+      this.database.farmer.count({ where }),
+    ]);
+    return {
+      data: farmers.map((farmer): ClusterFarmerDto => ({
+        id: farmer.id,
+        farmerId: farmer.farmerId,
+        ...farmer.user,
+        farmCount: farmer._count.farms,
+        createdAt: farmer.createdAt,
+      })),
       metaData: paginationMeta(page, perPage, total),
     };
   }

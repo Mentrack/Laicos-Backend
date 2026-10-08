@@ -1,6 +1,7 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  ForbiddenException,
   HttpStatus,
   Logger,
   NotFoundException,
@@ -20,6 +21,19 @@ function run(exception: unknown) {
 
 describe('HttpExceptionFilter', () => {
   beforeAll(() => jest.spyOn(Logger.prototype, 'error').mockImplementation());
+
+  it('uses a code the exception names over the status default', () => {
+    const { body } = run(
+      new ForbiddenException({
+        message: 'Change your password to continue',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+      }),
+    );
+    expect(body).toEqual({
+      message: 'Change your password to continue',
+      error: { code: 'PASSWORD_CHANGE_REQUIRED', statusCode: 403 },
+    });
+  });
 
   it('moves validation arrays to details and capitalises the first', () => {
     const { status, body } = run(

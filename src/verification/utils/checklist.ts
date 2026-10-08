@@ -82,7 +82,17 @@ export interface ChecklistState {
     checkKey: VerificationCheckKey | null;
     photoSlot: PhotoSlot | null;
   }[];
+  // Agent-onboarded farms start without these; the farmer uploads them later.
+  farm: {
+    ownershipDocumentKey: string | null;
+    owner: { idDocumentKey: string | null };
+  };
 }
+
+export const CHECKLIST_DOCUMENTS_SELECT = {
+  ownershipDocumentKey: true,
+  owner: { select: { idDocumentKey: true } },
+} satisfies Prisma.FarmSelect;
 
 /**
  * What still stops the agent approving, in checklist order. Empty means the
@@ -126,6 +136,12 @@ export function checklistGaps(round: ChecklistState): string[] {
     if (!hasEvidence(EvidenceKind.CHECK, (item) => item.checkKey === key)) {
       gaps.push(`${key} issue needs evidence`);
     }
+  }
+  if (!round.farm.owner.idDocumentKey) {
+    gaps.push('Farmer ID document is required');
+  }
+  if (!round.farm.ownershipDocumentKey) {
+    gaps.push('Ownership document is required');
   }
   if (!round.identityNote) {
     gaps.push('Identity note is required');

@@ -22,21 +22,23 @@ import {
   isUniqueViolation,
 } from '../../common/prisma-errors';
 import { farmOwnedBy } from '../../common/ownership';
-import {
-  DOCUMENT_SIGNATURES,
-  type StorageUploadFile,
-} from '../../common/upload-pipes';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { AssignmentService } from '../../verification/services/assignment.service';
+import {
+  FarmDocumentsService,
+  type FarmDocumentUploads,
+} from '../../verification/services/farm-documents.service';
 import { CreateFarmDto, UpdateFarmDto } from '../dto';
-import { FARM_INCLUDE, formatFarm } from '../formatters/farm.formatter';
+import {
+  FARM_INCLUDE,
+  formatFarm,
+  type FarmRow,
+} from '../formatters/farm.formatter';
 
-export interface FarmDocuments {
-  ownershipDocument: StorageUploadFile;
-  chiefConfirmation?: StorageUploadFile;
-}
+// The farmer's own ID goes through POST /farmers/me/id-document.
+export type FarmDocuments = Omit<FarmDocumentUploads, 'idDocument'>;
 
 const OPEN_ROUND_STATUSES: VerificationTaskStatus[] = [
   VerificationTaskStatus.UNASSIGNED,
@@ -52,6 +54,7 @@ export class FarmService {
     private readonly storage: StorageService,
     private readonly locations: LocationService,
     private readonly assignment: AssignmentService,
+    private readonly documents: FarmDocumentsService,
   ) {}
 
   /** Creates the farm and opens its first verification round. */
@@ -75,54 +78,48 @@ export class FarmService {
     // Uploads come first to have keys to persist; any failure after them
     // deletes what was uploaded.
     const id = randomUUID();
-    const uploaded: string[] = [];
-    let farm: Prisma.FarmGetPayload<{ include: typeof FARM_INCLUDE }>;
+    const { ownershipDocumentKey, chiefConfirmationKey, uploaded } =
+      await this.documents.uploadAll(farmer.id, id, documents);
+    let farm: FarmRow;
     try {
-      const ownershipDocumentKey = await this.storage.uploadPrivateFile(
-        `farms/${id}/ownership`,
-        documents.ownershipDocument,
-        DOCUMENT_SIGNATURES,
+      farm = await this.database.$transaction((tx) =>
+        this.insertFarm(tx, {
+          id,
+          ownerId: farmer.id,
+          name: dto.name,
+          stateId: dto.stateId,
+          lgaId: dto.lgaId,
+          location: dto.location,
+          size: dto.size,
+          unit: dto.unit,
+          mainProduce: dto.mainProduce,
+          isExporting: dto.isExporting,
+          referralAgentId: dto.referralAgentId,
+          ownershipDocumentKey,
+          chiefConfirmationKey,
+        }),
       );
-      uploaded.push(ownershipDocumentKey);
-      const chiefConfirmationKey = documents.chiefConfirmation
-        ? await this.storage.uploadPrivateFile(
-            `farms/${id}/chief-confirmation`,
-            documents.chiefConfirmation,
-            DOCUMENT_SIGNATURES,
-          )
-        : null;
-      if (chiefConfirmationKey) {
-        uploaded.push(chiefConfirmationKey);
-      }
-      farm = await this.database.$transaction(async (tx) => {
-        await tx.farm.create({
-          data: {
-            id,
-            ownerId: farmer.id,
-            name: dto.name,
-            stateId: dto.stateId,
-            lgaId: dto.lgaId,
-            location: dto.location,
-            size: dto.size,
-            unit: dto.unit,
-            mainProduce: dto.mainProduce,
-            isExporting: dto.isExporting,
-            referralAgentId: dto.referralAgentId,
-            ownershipDocumentKey,
-            chiefConfirmationKey,
-          },
-        });
-        await this.assignment.openRound(tx, id);
-        return tx.farm.findUniqueOrThrow({
-          where: { id },
-          include: FARM_INCLUDE,
-        });
-      });
     } catch (error) {
       await this.storage.deletePrivate(uploaded);
       throw mapFarmSaveError(error);
     }
     return formatFarm(this.storage, farm);
+  }
+
+  /**
+   * Inserts a farm and opens its first verification round, inside `tx`.
+   * Shared by farmer self-service and agent onboarding, which prefers itself
+   * as the round's agent.
+   */
+  async insertFarm(
+    tx: Prisma.TransactionClient,
+    data: Prisma.FarmUncheckedCreateInput,
+    preferredAgentId?: string,
+  ): Promise<FarmRow> {
+    const id = data.id ?? randomUUID();
+    await tx.farm.create({ data: { ...data, id } });
+    await this.assignment.openRound(tx, id, preferredAgentId);
+    return tx.farm.findUniqueOrThrow({ where: { id }, include: FARM_INCLUDE });
   }
 
   async findAll(user: User, query: PaginationQueryDto) {
@@ -238,6 +235,11 @@ export class FarmService {
     return this.findOne(user, id);
   }
 
+  async replaceDocuments(user: User, id: string, documents: FarmDocuments) {
+    await this.documents.replace(id, farmOwnedBy(user), documents);
+    return this.findOne(user, id);
+  }
+
   async remove(user: User, id: string) {
     const farm = await this.findOne(user, id);
     const stored = await this.database.farm.findUniqueOrThrow({
@@ -295,7 +297,7 @@ export class FarmService {
 // Another farmer's farm reads as not found, so ids can't be probed for
 // existence. On create and update the only foreign key the caller controls
 // unchecked is the referral agent.
-function mapFarmSaveError(error: unknown): unknown {
+export function mapFarmSaveError(error: unknown): unknown {
   if (isRecordNotFound(error)) {
     return new NotFoundException('Farm not found');
   }

@@ -13,9 +13,13 @@ import {
   Put,
   Query,
   UploadedFile,
+  UploadedFiles,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  FileFieldsInterceptor,
+  FileInterceptor,
+} from '@nestjs/platform-express';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { VerificationCheckKey, type Agent } from '../../generated/client';
 import {
@@ -23,9 +27,12 @@ import {
   VerifiedAgent,
 } from '../agent/decorators/verified-agent.decorator';
 import { ApiEnvelope, MessageResponseDto } from '../common/dto/envelope';
-import { ApiImageUpload } from '../common/dto/image-upload';
+import { ApiFileUpload, ApiImageUpload } from '../common/dto/image-upload';
 import {
+  DOCUMENT_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  ParseFileFieldsPipe,
+  documentUploadPipe,
   imageUploadPipe,
   type StorageUploadFile,
 } from '../common/upload-pipes';
@@ -39,6 +46,7 @@ import {
   VerificationReasonDto,
   VerificationSummaryDto,
 } from './dto';
+import type { FarmDocumentUploads } from './services/farm-documents.service';
 import { VerificationService } from './services/verification.service';
 
 // Every save returns the whole round, `outstanding` included, so the client
@@ -129,6 +137,48 @@ export class VerificationController {
     return { data, message: 'Verification updated' };
   }
 
+  @Post(':id/documents')
+  @ApiOperation({
+    summary: 'Upload the farmer’s or the farm’s documents',
+    description:
+      'For documents the farmer could not supply: they have no login until the farm is verified. Multipart: idDocument (the farmer’s ID), ownershipDocument and/or chiefConfirmation (PDF or image, 10 MB each); at least one. Each replaces what is stored. Approval needs the ID and the ownership document.',
+  })
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: 'idDocument', maxCount: 1 },
+        { name: 'ownershipDocument', maxCount: 1 },
+        { name: 'chiefConfirmation', maxCount: 1 },
+      ],
+      { limits: { fileSize: DOCUMENT_MAX_BYTES } },
+    ),
+  )
+  @ApiFileUpload(undefined, [
+    { name: 'idDocument', required: false },
+    { name: 'ownershipDocument', required: false },
+    { name: 'chiefConfirmation', required: false },
+  ])
+  @ApiEnvelope(VerificationDto)
+  async uploadDocuments(
+    @CurrentAgent() agent: Agent,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFiles(
+      new ParseFileFieldsPipe(
+        {
+          idDocument: { required: false },
+          ownershipDocument: { required: false },
+          chiefConfirmation: { required: false },
+        },
+        documentUploadPipe,
+      ),
+    )
+    uploads: FarmDocumentUploads,
+  ) {
+    const data = await this.verifications.uploadDocuments(agent, id, uploads);
+    return { data, message: 'Documents uploaded' };
+  }
+
   @Post(':id/evidence')
   @ApiOperation({
     summary: 'Upload an evidence photo',
@@ -183,7 +233,7 @@ export class VerificationController {
   @ApiOperation({
     summary: 'Approve the farm',
     description:
-      'Verifies the farm and adds it to my cluster. 400 with every gap in error.details while the checklist is incomplete.',
+      'Verifies the farm and adds it to my cluster. 400 with every gap in error.details while the checklist is incomplete or the farmer’s ID or ownership document is missing. A farmer’s first verified farm gives them access and sends their invite.',
   })
   @HttpCode(HttpStatus.OK)
   @ApiEnvelope(VerificationDto)
@@ -199,7 +249,7 @@ export class VerificationController {
   @ApiOperation({
     summary: 'Reject the farm',
     description:
-      'A reason is required; the checklist does not need to be complete. The farmer can edit the farm to resubmit it.',
+      'A reason is required; the checklist does not need to be complete. The farmer is sent the reason. An active farmer can edit the farm to resubmit it; one still awaiting their first verification cannot log in yet (open question).',
   })
   @HttpCode(HttpStatus.OK)
   @ApiEnvelope(VerificationDto)

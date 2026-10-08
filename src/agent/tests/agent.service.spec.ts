@@ -41,11 +41,13 @@ function row(overrides: Record<string, unknown> = {}) {
 describe('AgentService', () => {
   const agent = { findUnique: jest.fn(), update: jest.fn() };
   const farm = { findMany: jest.fn(), count: jest.fn() };
+  const farmer = { findMany: jest.fn(), count: jest.fn() };
   const farmVerification = { findMany: jest.fn() };
   const orderHandover = { findMany: jest.fn() };
   const database = {
     agent,
     farm,
+    farmer,
     farmVerification,
     orderHandover,
     $transaction: (queries: Promise<unknown>[]) => Promise.all(queries),
@@ -133,6 +135,60 @@ describe('AgentService', () => {
         where: { cluster: { agent: { userId: user.id } } },
       }),
     );
+  });
+
+  it('lists farmers with a farm in my cluster, counting only those farms', async () => {
+    const inMyCluster = { cluster: { agent: { userId: user.id } } };
+    farmer.findMany.mockResolvedValue([
+      {
+        id: 'farmer-1',
+        farmerId: 'FRM-000001',
+        idNumber: 'secret',
+        createdAt: new Date('2026-09-01'),
+        user: {
+          firstName: 'Ada',
+          lastName: 'Okafor',
+          email: 'ada@example.com',
+          phoneNumber: null,
+        },
+        _count: { farms: 2 },
+      },
+    ]);
+    farmer.count.mockResolvedValue(1);
+
+    const result = await service.findClusterFarmers(user, {});
+
+    expect(farmer.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { farms: { some: inMyCluster } },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+              phoneNumber: true,
+            },
+          },
+          _count: { select: { farms: { where: inMyCluster } } },
+        },
+      }),
+    );
+    expect(result).toEqual({
+      data: [
+        {
+          id: 'farmer-1',
+          farmerId: 'FRM-000001',
+          firstName: 'Ada',
+          lastName: 'Okafor',
+          email: 'ada@example.com',
+          phoneNumber: null,
+          farmCount: 2,
+          createdAt: new Date('2026-09-01'),
+        },
+      ],
+      metaData: expect.objectContaining({ total: 1 }) as unknown,
+    });
   });
 
   describe('findTasks', () => {
