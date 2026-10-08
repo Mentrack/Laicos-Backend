@@ -1,6 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, Role } from '../../../generated/client';
+import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth.service';
 import { FirebaseGoogleSignInDto } from '../dto';
@@ -35,6 +36,7 @@ describe('AuthService Google sign-in', () => {
     database as unknown as PrismaService,
     firebase as unknown as FirebaseService,
     {} as ConfigService,
+    {} as MailService,
   );
 
   beforeEach(() => {
@@ -92,7 +94,7 @@ describe('AuthService Google sign-in', () => {
       user.create.mockResolvedValue({ id: 'user-1' });
 
       await expect(
-        service.googleRegister({ idToken: 'google-token', role: Role.FARMER }),
+        service.googleRegister({ idToken: 'google-token', role: Role.BUYER }),
       ).resolves.toEqual({ user: { id: 'user-1' }, ...tokens });
       expect(user.create).toHaveBeenCalledWith({
         data: {
@@ -101,9 +103,9 @@ describe('AuthService Google sign-in', () => {
           firstName: 'Ada',
           lastName: 'Okafor',
           phoneNumber: undefined,
-          role: Role.FARMER,
+          role: Role.BUYER,
           isVerified: true,
-          farmer: { create: {} },
+          farmer: undefined,
           refreshToken: { create: { token: 'firebase-refresh-token' } },
         },
       });

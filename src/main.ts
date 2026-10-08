@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { requireConfig } from './common/config';
+import { webappOrigins } from './common/config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { buildOpenApiDocument } from './openapi';
 
@@ -12,11 +12,10 @@ async function bootstrap() {
 
   // Explicit allowlist, never a wildcard. Auth is a bearer header, not a
   // cookie, so credentials stay off.
-  const origins = requireConfig(app.get(ConfigService), 'FRONTEND_WEBAPP_URL')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  app.enableCors({ origin: origins, credentials: false });
+  app.enableCors({
+    origin: webappOrigins(app.get(ConfigService)),
+    credentials: false,
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

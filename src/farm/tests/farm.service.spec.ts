@@ -14,6 +14,7 @@ import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { AssignmentService } from '../../verification/services/assignment.service';
+import { FarmDocumentsService } from '../../verification/services/farm-documents.service';
 import { FarmService } from '../services/farm.service';
 
 const user = { id: 'user-1', role: Role.FARMER } as User;
@@ -107,6 +108,10 @@ describe('FarmService', () => {
     storage as unknown as StorageService,
     locations as unknown as LocationService,
     assignment as unknown as AssignmentService,
+    new FarmDocumentsService(
+      database as unknown as PrismaService,
+      storage as unknown as StorageService,
+    ),
   );
 
   beforeEach(() => {
@@ -139,7 +144,7 @@ describe('FarmService', () => {
         ownershipDocumentKey: `farms/${data.id}/ownership/x.pdf`,
         chiefConfirmationKey: `farms/${data.id}/chief-confirmation/x.pdf`,
       });
-      expect(assignment.openRound).toHaveBeenCalledWith(tx, data.id);
+      expect(assignment.openRound).toHaveBeenCalledWith(tx, data.id, undefined);
       expect(result).toMatchObject({
         farmCode: 'LF-000001',
         verificationStatus: FarmVerificationStatus.PENDING,
@@ -147,6 +152,23 @@ describe('FarmService', () => {
         chiefConfirmationUrl: null,
       });
       expect(result).not.toHaveProperty('ownershipDocumentKey');
+    });
+
+    it('creates a farm without any documents', async () => {
+      farm.findUniqueOrThrow.mockResolvedValue({
+        ...row,
+        ownershipDocumentKey: null,
+      });
+      const result = await service.create(user, dto, {});
+      const [[{ data }]] = farm.create.mock.calls as [
+        [{ data: Record<string, unknown> }],
+      ];
+      expect(data).toMatchObject({
+        ownershipDocumentKey: null,
+        chiefConfirmationKey: null,
+      });
+      expect(storage.uploadPrivateFile).not.toHaveBeenCalled();
+      expect(result.ownershipDocumentUrl).toBeNull();
     });
 
     it('refuses a farmer without an ID document before uploading', async () => {
@@ -322,6 +344,28 @@ describe('FarmService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(farm.update).not.toHaveBeenCalled();
     });
+  });
+
+  it('opens the inserted farm’s round with the preferred agent', async () => {
+    farm.create.mockResolvedValue(undefined);
+    await service.insertFarm(
+      tx as unknown as Prisma.TransactionClient,
+      { ...dto, ownerId: 'farmer-1' },
+      'agent-1',
+    );
+    const [[{ data }]] = farm.create.mock.calls as [[{ data: { id: string } }]];
+    expect(assignment.openRound).toHaveBeenCalledWith(tx, data.id, 'agent-1');
+  });
+
+  it('replaces documents only on a farm the user owns', async () => {
+    const replace = jest
+      .spyOn(FarmDocumentsService.prototype, 'replace')
+      .mockResolvedValue(undefined);
+    await service.replaceDocuments(user, farmId, { ownershipDocument: pdf });
+    expect(replace).toHaveBeenCalledWith(farmId, owned, {
+      ownershipDocument: pdf,
+    });
+    replace.mockRestore();
   });
 
   describe('remove', () => {

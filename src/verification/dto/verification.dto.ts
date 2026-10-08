@@ -30,8 +30,12 @@ export class VerificationFarmDto extends FarmSummaryDto {
   @ApiProperty()
   isExporting: boolean;
 
-  @ApiProperty({ description: 'Presigned; expires in 15 min' })
-  ownershipDocumentUrl: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Presigned; expires in 15 min',
+  })
+  ownershipDocumentUrl: string | null;
 
   @ApiProperty({
     type: String,

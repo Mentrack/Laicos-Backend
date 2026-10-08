@@ -13,6 +13,7 @@ import { ProduceModule } from './produce/produce.module';
 import { StorageModule } from './storage/storage.module';
 import { AgentModule } from './agent/agent.module';
 import { LocationModule } from './location/location.module';
+import { MailModule } from './mail/mail.module';
 import { VerificationModule } from './verification/verification.module';
 
 @Module({
@@ -42,6 +43,7 @@ import { VerificationModule } from './verification/verification.module';
       },
     }),
     PrismaModule,
+    MailModule,
     AuthModule,
     FarmModule,
     ProduceModule,

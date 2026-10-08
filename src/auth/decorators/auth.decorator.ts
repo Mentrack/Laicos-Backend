@@ -1,7 +1,9 @@
 import { applyDecorators, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import type { Role } from '../../../generated/client';
+import { ActivationGuard } from '../guards/activation.guard';
 import { FirebaseAuthGuard } from '../guards/firebase-auth.guard';
+import { PasswordChangeGuard } from '../guards/password-change.guard';
 import { RequireLocalUserGuard } from '../guards/require-local-user.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from './roles.decorator';
@@ -10,6 +12,12 @@ import { Roles } from './roles.decorator';
 export const Auth = (...roles: Role[]) =>
   applyDecorators(
     ApiBearerAuth(),
-    UseGuards(FirebaseAuthGuard, RequireLocalUserGuard, RolesGuard),
+    UseGuards(
+      FirebaseAuthGuard,
+      RequireLocalUserGuard,
+      ActivationGuard,
+      PasswordChangeGuard,
+      RolesGuard,
+    ),
     Roles(roles),
   );

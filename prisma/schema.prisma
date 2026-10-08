@@ -9,22 +9,29 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(uuid())
-  firebaseUid   String        @unique
-  firstName     String
-  lastName      String
-  email         String        @unique
-  phoneNumber   String?
-  role          Role
-  agreedToTerms Boolean       @default(false)
+  id                 String        @id @default(uuid())
+  firebaseUid        String        @unique
+  firstName          String
+  lastName           String
+  email              String        @unique
+  phoneNumber        String?
+  role               Role
+  agreedToTerms      Boolean       @default(false)
   // Mirrors Firebase's emailVerified;
-  isVerified    Boolean       @default(false)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  farmer        Farmer?
-  agent         Agent?
-  orders        Order[]
-  refreshToken  RefreshToken?
+  isVerified         Boolean       @default(false)
+  // Farmers and agents only: set when a farmer's first farm is verified, or
+  // (once the admin flow exists) when an admin verifies an agent. Until then
+  // ActivationGuard locks them out. Other roles leave it null.
+  activatedAt        DateTime?
+  // Set with the temporary password sent in a farmer's invite;
+  // PasswordChangeGuard blocks most routes until changePassword clears it.
+  mustChangePassword Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  farmer             Farmer?
+  agent              Agent?
+  orders             Order[]
+  refreshToken       RefreshToken?
 }
 
 model RefreshToken {
@@ -75,8 +82,9 @@ model Farm {
   unit                 String                 @default("ha")
   mainProduce          String
   isExporting          Boolean                @default(false)
-  // Private-bucket keys, uploaded with the farm.
-  ownershipDocumentKey String
+  // Private-bucket keys, uploaded with the farm. Ownership is optional only
+  // temporarily; restore NOT NULL once it is required again.
+  ownershipDocumentKey String?
   chiefConfirmationKey String?
   // Denormalised from the latest FarmVerification and always written in the
   // same transaction, so lists filter on it without a join.

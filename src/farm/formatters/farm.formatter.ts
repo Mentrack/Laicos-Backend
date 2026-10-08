@@ -13,7 +13,7 @@ export const FARM_INCLUDE = {
   },
 } satisfies Prisma.FarmInclude;
 
-type FarmRow = Prisma.FarmGetPayload<{ include: typeof FARM_INCLUDE }>;
+export type FarmRow = Prisma.FarmGetPayload<{ include: typeof FARM_INCLUDE }>;
 
 /** Storage keys never leave the server; documents go out as presigned URLs. */
 export async function formatFarm(
@@ -21,7 +21,7 @@ export async function formatFarm(
   farm: FarmRow,
 ): Promise<FarmDto> {
   const [ownershipDocumentUrl, chiefConfirmationUrl] = await Promise.all([
-    storage.getPresignedUrl(farm.ownershipDocumentKey),
+    storage.presignedUrlOrNull(farm.ownershipDocumentKey),
     storage.presignedUrlOrNull(farm.chiefConfirmationKey),
   ]);
   return {

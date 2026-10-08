@@ -11,6 +11,16 @@ import {
   MaxLength,
 } from 'class-validator';
 
+/**
+ * Converts a multipart "true"/"false". Only the exact strings convert;
+ * anything else reaches the boolean validator and fails there, rather than
+ * silently reading as false.
+ */
+export const MultipartBoolean = () =>
+  Transform(({ value }: { value: unknown }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  );
+
 // Create is multipart (it carries the ownership documents), so every field
 // arrives as a string. The global ValidationPipe transforms but does not
 // convert implicitly, so numbers and booleans declare their own conversion.
@@ -61,11 +71,7 @@ export class CreateFarmDto {
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
-  // Only the exact strings convert; anything else reaches IsBoolean and fails
-  // there, rather than silently reading as false.
-  @Transform(({ value }: { value: unknown }) =>
-    value === 'true' ? true : value === 'false' ? false : value,
-  )
+  @MultipartBoolean()
   @IsBoolean()
   isExporting?: boolean;
 

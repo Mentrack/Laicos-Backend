@@ -54,7 +54,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     const error = {
-      code: CODES[status] ?? 'REQUEST_FAILED',
+      code: exceptionCode(exception) ?? CODES[status] ?? 'REQUEST_FAILED',
       statusCode: status,
     };
     const message = exceptionMessage(exception);
@@ -83,6 +83,14 @@ function exceptionMessage(exception: HttpException): string | string[] {
     return message.filter((m): m is string => typeof m === 'string');
   }
   return exception.message;
+}
+
+/** A `code` thrown in the body, for errors a client must tell apart. */
+function exceptionCode(exception: HttpException): string | undefined {
+  const body = exception.getResponse();
+  const code: unknown =
+    typeof body === 'object' && 'code' in body ? body.code : undefined;
+  return typeof code === 'string' ? code : undefined;
 }
 
 function capitalise(text: string): string {

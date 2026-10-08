@@ -11,6 +11,7 @@ import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { User } from '../../generated/client';
 import { ApiEnvelope, MessageResponseDto } from '../common/dto/envelope';
 import { AuthService } from './auth.service';
+import { AllowPendingPasswordChange } from './decorators/allow-pending-password-change.decorator';
 import { Auth } from './decorators/auth.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import {
@@ -36,7 +37,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register with email and password',
     description:
-      'Creates the Firebase account and the local user, and signs them in. Registering as FARMER or EXTENSION_AGENT also creates that profile.',
+      'Creates the Firebase account and the local user, and signs them in. Buyers and riders only; farmers and agents have their own signup.',
   })
   @ApiEnvelope(AuthSessionDto, { status: HttpStatus.CREATED })
   async register(@Body() dto: RegisterDto) {
@@ -121,9 +122,10 @@ export class AuthController {
   @ApiOperation({
     summary: 'Change the signed-in user’s password',
     description:
-      'Signs the user out of every session; they log in again with the new password.',
+      'Signs the user out of every session; they log in again with the new password. Clears mustChangePassword.',
   })
   @Auth()
+  @AllowPendingPasswordChange()
   @ApiOkResponse({ type: MessageResponseDto })
   async changePassword(
     @CurrentUser() user: User,
@@ -137,6 +139,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Log out of every session' })
   @HttpCode(HttpStatus.OK)
   @Auth()
+  @AllowPendingPasswordChange()
   @ApiOkResponse({ type: MessageResponseDto })
   async logout(@CurrentUser() user: User) {
     await this.auth.logout(user);
@@ -146,6 +149,7 @@ export class AuthController {
   @Get('me')
   @ApiOperation({ summary: 'Get the signed-in user' })
   @Auth()
+  @AllowPendingPasswordChange()
   @ApiEnvelope(UserDto)
   async getCurrentUser(@CurrentUser() user: User) {
     const data = await this.auth.getCurrentUser(user);

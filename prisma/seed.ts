@@ -1,10 +1,15 @@
 /**
- * Dev seed: 5 farmers (one farm each), 3 extension agents, 2 buyers and an
+ * Dev seed: 5 farmers (one farm each), 5 extension agents, 2 buyers and an
  * admin, plus the verification rounds, produce and orders between them.
+ *
+ * Farmers and agents follow the password-less signup flows. A farmer is
+ * active (can sign in with the seed password) once a round of their farm was
+ * approved; the rest are pending, with no password. agent-1..3 are verified
+ * by an admin and active; agent-4..5 have just signed up and are pending.
  *
  * Safe to re-run, including after a DB reset. Every user is a real Firebase
  * account (found by email, else created with a fixed uid) and its local row is
- * upserted on firebaseUid. Every other row has a stable id hashed from a seed
+ * upserted on email. Every other row has a stable id hashed from a seed
  * key, so a re-run updates the same rows instead of duplicating them.
  *
  * Storage keys point at objects that were never uploaded: presigned URLs for
@@ -32,6 +37,7 @@ import {
   VerificationCheckKey,
   VerificationTaskStatus,
 } from '../generated/client';
+import { clusterName } from '../src/agent/utils/cluster-name';
 import { firebaseErrorCode } from '../src/auth/firebase/firebase.errors';
 import { deriveProduceStatus } from '../src/produce/utils/produce-status';
 import {
@@ -63,13 +69,16 @@ interface SeedIdentity {
   idNumber: string;
 }
 
-type AgentKey = 'agent-1' | 'agent-2' | 'agent-3';
+type AgentKey = 'agent-1' | 'agent-2' | 'agent-3' | 'agent-4' | 'agent-5';
 type BuyerKey = 'buyer-1' | 'buyer-2';
 
 interface SeedAgent extends SeedUser, SeedIdentity {
   key: AgentKey;
   state: string;
   lga: string;
+  // Signed up through POST /agents/signup and not yet verified by an admin:
+  // no password, isVerified false, locked out by ActivationGuard.
+  pending?: boolean;
 }
 
 interface SeedCheck {
@@ -175,6 +184,31 @@ const AGENTS: SeedAgent[] = [
     idNumber: '10000000103',
     state: 'Kaduna',
     lga: 'Zaria',
+  },
+  {
+    key: 'agent-4',
+    email: 'agent4@laicos.test',
+    firstName: 'Ngozi',
+    lastName: 'Terver',
+    phoneNumber: '+2348030000104',
+    idType: IdType.NIN,
+    idNumber: '10000000104',
+    // Makurdi has no verified agent, which is why farm-5 waits unassigned.
+    state: 'Benue',
+    lga: 'Makurdi',
+    pending: true,
+  },
+  {
+    key: 'agent-5',
+    email: 'agent5@laicos.test',
+    firstName: 'Kunle',
+    lastName: 'Oladipo',
+    phoneNumber: '+2348030000105',
+    idType: IdType.VOTERS_CARD,
+    idNumber: '90E1F2A3B4C5D6E7F8',
+    state: 'Oyo',
+    lga: 'Ibadan North',
+    pending: true,
   },
 ];
 
@@ -479,18 +513,8 @@ const FARMERS: SeedFarmer[] = [
           ],
         },
       ],
-      produce: [
-        {
-          key: 'produce-5',
-          name: 'Puna Yam',
-          quantity: 500,
-          unit: 'tuber',
-          pricePerUnit: '1500.00',
-          status: ProduceStatus.DRAFT,
-          type: ProduceType.LOCAL,
-          orders: [],
-        },
-      ],
+      // Never approved, so the farmer is pending and can't have listed any.
+      produce: [],
     },
   },
   {
@@ -615,6 +639,22 @@ function isOpen(status: VerificationTaskStatus): boolean {
   );
 }
 
+/** When an admin verified the agent, which lets them in; null while pending. */
+function agentActivatedAt(agent: SeedAgent): Date | null {
+  return agent.pending ? null : daysAgo(30);
+}
+
+/**
+ * When the farmer's first round was approved, which is when
+ * FarmerActivationService lets them in; null while no round has been.
+ */
+function farmerActivatedAt(farmer: SeedFarmer): Date | null {
+  const approved = farmer.farm.rounds.find(
+    (round) => round.status === VerificationTaskStatus.APPROVED,
+  );
+  return approved ? daysAgo(approved.daysAgo) : null;
+}
+
 function farmStatusOf(round: SeedRound): FarmVerificationStatus {
   switch (round.status) {
     case VerificationTaskStatus.APPROVED:
@@ -632,40 +672,64 @@ function farmStatusOf(round: SeedRound): FarmVerificationStatus {
 
 /**
  * The Firebase account for `user`, created with a fixed uid if the email has
- * none. An existing account keeps its uid (the local row follows it) and gets
- * the seed password back, so seeded logins always work.
+ * none. An active user gets the seed password (back), so seeded logins always
+ * work. A pending one has no password, as after a password-less signup.
  */
 async function ensureFirebaseUser(
   auth: Auth,
   user: SeedUser,
-  password: string,
+  password: string | null,
 ): Promise<UserRecord> {
   const profile = {
     email: user.email,
-    password,
     displayName: `${user.firstName} ${user.lastName}`,
-    emailVerified: true,
+    // Signup leaves the email unverified; the seeded active users are not.
+    emailVerified: password !== null,
   };
+  let existing: UserRecord | null = null;
   try {
-    const existing = await auth.getUserByEmail(user.email);
-    return await auth.updateUser(existing.uid, profile);
+    existing = await auth.getUserByEmail(user.email);
   } catch (error) {
     if (firebaseErrorCode(error) !== 'auth/user-not-found') {
       throw error;
     }
   }
-  return auth.createUser({ uid: `seed-${user.key}`, ...profile });
+  if (existing && password) {
+    return auth.updateUser(existing.uid, { ...profile, password });
+  }
+  const hasPassword = existing?.providerData.some(
+    (provider) => provider.providerId === 'password',
+  );
+  if (existing && !hasPassword) {
+    return auth.updateUser(existing.uid, profile);
+  }
+  // Firebase can't take a password off an account, so a pending user whose
+  // account has one (from an earlier seed) is recreated without it.
+  if (existing) {
+    await auth.deleteUser(existing.uid);
+  }
+  return auth.createUser({
+    uid: `seed-${user.key}`,
+    ...profile,
+    ...(password ? { password } : {}),
+  });
 }
 
+/**
+ * `access.activatedAt` is null for a pending farmer or agent, and for roles
+ * that don't use it. Upserted on email: recreating a pending user's Firebase
+ * account changes its uid.
+ */
 async function upsertUser(
   prisma: PrismaClient,
   auth: Auth,
-  password: string,
   user: SeedUser,
   role: Role,
+  access: { password: string | null; activatedAt: Date | null },
 ) {
-  const firebaseUser = await ensureFirebaseUser(auth, user, password);
+  const firebaseUser = await ensureFirebaseUser(auth, user, access.password);
   const data = {
+    firebaseUid: firebaseUser.uid,
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
@@ -673,10 +737,12 @@ async function upsertUser(
     role,
     agreedToTerms: true,
     isVerified: firebaseUser.emailVerified,
+    activatedAt: access.activatedAt,
+    mustChangePassword: false,
   };
   return prisma.user.upsert({
-    where: { firebaseUid: firebaseUser.uid },
-    create: { firebaseUid: firebaseUser.uid, ...data },
+    where: { email: user.email },
+    create: data,
     update: data,
   });
 }
@@ -698,16 +764,15 @@ async function seedAgent(
   agent: SeedAgent,
 ) {
   const lga = await findLga(prisma, agent.state, agent.lga);
-  // Same name AgentService gives the cluster when the agent sets their LGA.
-  const clusterName = `${lga.name} Hub`;
+  const name = clusterName(lga.name);
   const data = {
     stateId: lga.stateId,
     lgaId: lga.id,
     idType: agent.idType,
     idNumber: agent.idNumber,
     idDocumentKey: seedKey(`agents/${seedId(agent.key)}/id`, agent.key, 'pdf'),
-    isVerified: true,
-    verifiedAt: daysAgo(30),
+    isVerified: !agent.pending,
+    verifiedAt: agentActivatedAt(agent),
   };
   return prisma.agent.upsert({
     where: { userId },
@@ -715,14 +780,14 @@ async function seedAgent(
       id: seedId(agent.key),
       userId,
       ...data,
-      cluster: { create: { name: clusterName } },
+      cluster: { create: { name } },
     },
     update: {
       ...data,
       cluster: {
         upsert: {
-          create: { name: clusterName },
-          update: { name: clusterName },
+          create: { name },
+          update: { name },
         },
       },
     },
@@ -838,6 +903,11 @@ function assertApprovable(round: SeedRound) {
       checkKey: item.checkKey ?? null,
       photoSlot: item.photoSlot ?? null,
     })),
+    // Every seeded farmer and farm gets both documents (seedFarmers/seedFarms).
+    farm: {
+      ownershipDocumentKey: 'seeded',
+      owner: { idDocumentKey: 'seeded' },
+    },
   });
   if (gaps.length > 0) {
     throw new Error(
@@ -1008,6 +1078,13 @@ async function seedFarmer(
     await seedRound(prisma, farmId, round, agentIds);
   }
 
+  // A pending farmer can't sign in, so can't have listed produce: drop any
+  // an earlier seed gave them. Ordered produce stays, as orders are history.
+  if (!farmerActivatedAt(farmer)) {
+    await prisma.produce.deleteMany({
+      where: { farmId, orders: { none: {} } },
+    });
+  }
   for (const produce of farm.produce) {
     await seedProduce(prisma, farmId, produce, buyerIds);
   }
@@ -1037,23 +1114,30 @@ async function main() {
   );
 
   try {
-    await upsertUser(prisma, auth, password, ADMIN, Role.ADMIN);
+    // Buyers and the admin use the old password signup; activatedAt doesn't
+    // apply to them.
+    const passwordOnly = { password, activatedAt: null };
+    await upsertUser(prisma, auth, ADMIN, Role.ADMIN, passwordOnly);
 
     const buyerIds = new Map<BuyerKey, string>();
     for (const buyer of BUYERS) {
-      const user = await upsertUser(prisma, auth, password, buyer, Role.BUYER);
+      const user = await upsertUser(
+        prisma,
+        auth,
+        buyer,
+        Role.BUYER,
+        passwordOnly,
+      );
       buyerIds.set(buyer.key, user.id);
     }
 
     const agents = new Map<AgentKey, { id: string; clusterId: string }>();
     for (const agent of AGENTS) {
-      const user = await upsertUser(
-        prisma,
-        auth,
-        password,
-        agent,
-        Role.EXTENSION_AGENT,
-      );
+      const activatedAt = agentActivatedAt(agent);
+      const user = await upsertUser(prisma, auth, agent, Role.EXTENSION_AGENT, {
+        password: activatedAt && password,
+        activatedAt,
+      });
       const row = await seedAgent(prisma, user.id, agent);
       if (!row.cluster) {
         throw new Error(`${agent.key} has no cluster after seeding`);
@@ -1062,19 +1146,31 @@ async function main() {
     }
 
     for (const farmer of FARMERS) {
-      const user = await upsertUser(
-        prisma,
-        auth,
-        password,
-        farmer,
-        Role.FARMER,
-      );
+      const activatedAt = farmerActivatedAt(farmer);
+      const user = await upsertUser(prisma, auth, farmer, Role.FARMER, {
+        password: activatedAt && password,
+        activatedAt,
+      });
       await seedFarmer(prisma, user.id, farmer, agents, buyerIds);
     }
 
-    const users = [ADMIN, ...BUYERS, ...AGENTS, ...FARMERS];
-    console.log(`Seeded ${users.length} users (password: ${password}):`);
-    for (const user of users) {
+    const pending: SeedUser[] = [
+      ...AGENTS.filter((agent) => !agentActivatedAt(agent)),
+      ...FARMERS.filter((farmer) => !farmerActivatedAt(farmer)),
+    ];
+    const active = [ADMIN, ...BUYERS, ...AGENTS, ...FARMERS].filter(
+      (user) => !pending.includes(user),
+    );
+    console.log(
+      `Seeded ${active.length} active users (password: ${password}):`,
+    );
+    for (const user of active) {
+      console.log(`  ${user.email}`);
+    }
+    console.log(
+      `Seeded ${pending.length} pending users (no password; sign-in answers 403 VERIFICATION_PENDING):`,
+    );
+    for (const user of pending) {
       console.log(`  ${user.email}`);
     }
   } finally {

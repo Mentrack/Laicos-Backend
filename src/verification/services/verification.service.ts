@@ -17,6 +17,7 @@ import {
   IMAGE_SIGNATURES,
   type StorageUploadFile,
 } from '../../common/upload-pipes';
+import { FarmerActivationService } from '../../auth/farmer-activation.service';
 import { OPEN_HANDOVER_STATUSES } from '../../handover/formatters/handover.formatter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -35,13 +36,24 @@ import {
   formatVerificationSummary,
 } from '../formatters/verification.formatter';
 import {
+  CHECKLIST_DOCUMENTS_SELECT,
   checklistGaps,
   evidenceShapeError,
   isResultAllowed,
 } from '../utils/checklist';
 import { AssignmentService, OPEN_TASK_STATUSES } from './assignment.service';
+import {
+  FarmDocumentsService,
+  type FarmDocumentUploads,
+} from './farm-documents.service';
 
 type Tx = Prisma.TransactionClient;
+
+// What the farmer's notification needs once the decision commits.
+const FARM_OWNER_SELECT = {
+  name: true,
+  owner: { select: { userId: true } },
+} satisfies Prisma.FarmSelect;
 
 /**
  * An agent's work on the rounds assigned to them. Every method is scoped to
@@ -54,6 +66,8 @@ export class VerificationService {
     private readonly database: PrismaService,
     private readonly storage: StorageService,
     private readonly assignment: AssignmentService,
+    private readonly activation: FarmerActivationService,
+    private readonly documents: FarmDocumentsService,
   ) {}
 
   async findAll(agent: Agent, query: VerificationQueryDto) {
@@ -194,6 +208,32 @@ export class VerificationService {
     return this.findOne(agent, id);
   }
 
+  /**
+   * The farmer's ID or the farm's documents, collected on site when the
+   * farmer couldn't supply them (they have no login before verification).
+   */
+  async uploadDocuments(
+    agent: Agent,
+    id: string,
+    uploads: FarmDocumentUploads,
+  ) {
+    const { farmId } = await this.requireOpen(this.database, agent, id);
+    await this.documents.replace(
+      farmId,
+      {
+        verifications: {
+          some: {
+            id,
+            agentId: agent.id,
+            status: { in: OPEN_TASK_STATUSES },
+          },
+        },
+      },
+      uploads,
+    );
+    return this.findOne(agent, id);
+  }
+
   async removeEvidence(agent: Agent, id: string, evidenceId: string) {
     const storageKey = await this.database.$transaction(async (tx) => {
       await this.record(tx, agent, id, {});
@@ -228,12 +268,19 @@ export class VerificationService {
     await this.storage.deletePrivate(keys);
   }
 
-  /** Verifies the farm and puts it in this agent's cluster. */
+  /**
+   * Verifies the farm and puts it in this agent's cluster. A farmer's first
+   * verified farm activates them (and sends the invite) once this commits.
+   */
   async approve(agent: Agent, id: string) {
-    await this.database.$transaction(async (tx) => {
+    const farmerUserId = await this.database.$transaction(async (tx) => {
       const round = await tx.farmVerification.findFirst({
         where: { id, agentId: agent.id },
-        include: { checks: true, evidence: true },
+        include: {
+          checks: true,
+          evidence: true,
+          farm: { select: CHECKLIST_DOCUMENTS_SELECT },
+        },
       });
       if (!round) {
         throw new NotFoundException('Verification not found');
@@ -251,13 +298,14 @@ export class VerificationService {
         where: { agentId: agent.id },
         select: { id: true },
       });
-      await tx.farm.update({
+      const { owner } = await tx.farm.update({
         where: { id: farmId },
         data: {
           verificationStatus: FarmVerificationStatus.VERIFIED,
           clusterId: cluster.id,
           isClustered: true,
         },
+        select: FARM_OWNER_SELECT,
       });
       // Orders that went READY while the farm was out of every cluster.
       await tx.orderHandover.updateMany({
@@ -268,27 +316,35 @@ export class VerificationService {
         },
         data: { agentId: agent.id },
       });
+      return owner.userId;
     });
+    await this.activation.activate(farmerUserId);
     return this.findOne(agent, id);
   }
 
   /** Needs no completed checklist: agents reject early, e.g. no farm exists. */
   async reject(agent: Agent, id: string, dto: VerificationReasonDto) {
-    await this.database.$transaction(async (tx) => {
+    const rejected = await this.database.$transaction(async (tx) => {
       const { farmId } = await this.transition(tx, agent, id, {
         status: VerificationTaskStatus.REJECTED,
         rejectionReason: dto.reason,
         decidedAt: new Date(),
       });
-      await tx.farm.update({
+      return tx.farm.update({
         where: { id: farmId },
         data: {
           verificationStatus: FarmVerificationStatus.REJECTED,
           clusterId: null,
           isClustered: false,
         },
+        select: FARM_OWNER_SELECT,
       });
     });
+    await this.activation.notifyRejection(
+      rejected.owner.userId,
+      rejected.name,
+      dto.reason,
+    );
     return this.findOne(agent, id);
   }
 

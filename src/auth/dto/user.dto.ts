@@ -29,6 +29,20 @@ export class UserDto {
   @ApiProperty({ description: "Mirrors Firebase's emailVerified" })
   isVerified: boolean;
 
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description:
+      'Farmers only: when their first farm was verified. Until then every authenticated route and sign-in answers 403 VERIFICATION_PENDING. Null for other roles.',
+  })
+  activatedAt: Date | null;
+
+  @ApiProperty({
+    description:
+      'On the temporary password from a farmer’s invite. Every route but GET /auth/me, PATCH /auth/change-password and POST /auth/logout answers 403 PASSWORD_CHANGE_REQUIRED until it is changed.',
+  })
+  mustChangePassword: boolean;
+
   @ApiProperty()
   createdAt: Date;
 

@@ -39,15 +39,12 @@ export class RegisterDto {
   phoneNumber?: string;
 
   @ApiProperty({
-    enum: [Role.FARMER, Role.BUYER, Role.EXTENSION_AGENT, Role.RIDER],
-    example: Role.FARMER,
-    description: 'Account role. Only FARMER or BUYER may self-register.',
+    enum: [Role.BUYER, Role.RIDER],
+    example: Role.BUYER,
+    description:
+      'Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup instead: they get no password until they are verified.',
   })
   @IsNotEmpty()
-  @IsIn([Role.FARMER, Role.BUYER, Role.EXTENSION_AGENT, Role.RIDER])
-  role:
-    | typeof Role.FARMER
-    | typeof Role.BUYER
-    | typeof Role.EXTENSION_AGENT
-    | typeof Role.RIDER;
+  @IsIn([Role.BUYER, Role.RIDER])
+  role: typeof Role.BUYER | typeof Role.RIDER;
 }

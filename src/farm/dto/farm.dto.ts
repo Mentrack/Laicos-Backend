@@ -66,8 +66,12 @@ export class FarmDto {
   @ApiProperty({ format: 'uuid', type: String, nullable: true })
   clusterId: string | null;
 
-  @ApiProperty({ description: 'Presigned; expires in 15 min' })
-  ownershipDocumentUrl: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Presigned; expires in 15 min',
+  })
+  ownershipDocumentUrl: string | null;
 
   @ApiProperty({
     type: String,
