@@ -267,7 +267,7 @@ describe('ProduceService', () => {
   });
 
   describe('update', () => {
-    // 100 on hand, 30 reserved by pending orders.
+    // 100 on hand, 30 reserved by orders.
     const current = {
       id: produceId,
       actualQuantity: 100,
@@ -322,11 +322,11 @@ describe('ProduceService', () => {
       });
     });
 
-    it('refuses to drop below what pending orders reserved', async () => {
+    it('refuses to drop below what orders reserved', async () => {
       produce.findFirst.mockResolvedValue(current);
       await expect(
         service.update(user, produceId, { actualQuantity: 20 }),
-      ).rejects.toThrow('30 kg is reserved by pending orders');
+      ).rejects.toThrow('30 kg is reserved by orders');
       expect(produce.update).not.toHaveBeenCalled();
     });
 

@@ -37,17 +37,21 @@ export function formatCartItem(item: CartItemRow): CartItemDto {
   };
 }
 
-export function formatCart(items: CartItemRow[]): CartDto {
-  const total = items
-    .filter((item) => cartItemIssue(item) === null)
-    .reduce(
-      (sum, item) =>
-        sum.add(linePrice(item.produce.pricePerUnit, item.quantity)),
-      new Prisma.Decimal(0),
-    );
+export function formatCart(
+  items: CartItemRow[],
+  deliveryFee: Prisma.Decimal,
+): CartDto {
+  const orderable = items.filter((item) => cartItemIssue(item) === null);
+  const total = orderable.reduce(
+    (sum, item) => sum.add(linePrice(item.produce.pricePerUnit, item.quantity)),
+    new Prisma.Decimal(0),
+  );
+  const fee = orderable.length > 0 ? deliveryFee : new Prisma.Decimal(0);
   return {
     items: items.map(formatCartItem),
     itemCount: items.length,
     total: total.toFixed(2),
+    deliveryFee: fee.toFixed(2),
+    grandTotal: total.add(fee).toFixed(2),
   };
 }

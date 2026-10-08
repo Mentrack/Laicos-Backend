@@ -1,9 +1,11 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   FarmVerificationStatus,
+  OrderStatus,
   Prisma,
   ProduceStatus,
   type Farm,
+  type Order,
   type Produce,
   type ProduceType,
 } from '../../../generated/client';
@@ -128,6 +130,30 @@ export function orderLine(produce: Produce, quantity: number): OrderLine {
     type: produce.type,
     totalPrice: linePrice(produce.pricePerUnit, quantity),
   };
+}
+
+// Stock an order holds only on the floating side: nothing was committed
+// against actualQuantity until the farmer confirmed.
+const UNCOMMITTED: OrderStatus[] = [
+  OrderStatus.AWAITING_PAYMENT,
+  OrderStatus.PENDING,
+];
+
+/**
+ * Gives back the stock `order` took in the status it was in when read.
+ * Increments rather than writing a re-read quantity, so a reservation
+ * committing at the same moment isn't overwritten.
+ */
+export async function releaseStock(tx: Prisma.TransactionClient, order: Order) {
+  const committed = !UNCOMMITTED.includes(order.status);
+  const produce = await tx.produce.update({
+    where: { id: order.produceId },
+    data: {
+      floatingQuantity: { increment: order.quantity },
+      ...(committed ? { actualQuantity: { increment: order.quantity } } : {}),
+    },
+  });
+  await syncProduceStatus(tx, produce);
 }
 
 // Sets Produce.status to match `produce`'s (already-updated) quantities, if

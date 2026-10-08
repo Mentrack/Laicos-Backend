@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma, User } from '../../generated/client';
 import { isOrderable, orderRefusal } from '../order/utils/reservation';
+import { CheckoutConfig } from '../payment/checkout-config';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddCartItemDto, UpdateCartItemDto } from './dto';
 import {
@@ -23,7 +24,10 @@ const MAX_CART_ITEMS = 50;
  */
 @Injectable()
 export class CartService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly config: CheckoutConfig,
+  ) {}
 
   async find(user: User) {
     const items = await this.database.cartItem.findMany({
@@ -31,7 +35,7 @@ export class CartService {
       include: CART_ITEM_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
-    return formatCart(items);
+    return formatCart(items, this.config.deliveryFee);
   }
 
   addItem(user: User, dto: AddCartItemDto) {

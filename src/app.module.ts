@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AddressModule } from './address/address.module';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { PaymentModule } from './payment/payment.module';
@@ -57,6 +58,7 @@ import { VerificationModule } from './verification/verification.module';
     StorageModule,
     AgentModule,
     LocationModule,
+    AddressModule,
     VerificationModule,
     HandoverModule,
   ],

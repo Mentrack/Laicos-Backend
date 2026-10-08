@@ -56,7 +56,7 @@ export class OrderDto {
     format: 'uuid',
     nullable: true,
     description:
-      'The cart checkout that placed this order; null for Buy Now orders',
+      'The checkout that placed this order; null only for orders placed before checkouts existed',
   })
   checkoutId: string | null;
 

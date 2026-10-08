@@ -1,4 +1,12 @@
-import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
@@ -25,5 +33,22 @@ export class CheckoutController {
   ) {
     const data = await this.checkouts.findOne(user, id);
     return { data, message: 'Checkout retrieved' };
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel my unpaid checkout',
+    description:
+      'Releases its stock at once and cancels its orders. 409 CHECKOUT_NOT_CANCELLABLE once paid, expired or cancelled; a paid order is cancelled per order instead.',
+  })
+  @Auth(Role.BUYER)
+  @ApiEnvelope(CheckoutDto)
+  async cancel(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.checkouts.cancel(user, id);
+    return { data, message: 'Checkout cancelled' };
   }
 }

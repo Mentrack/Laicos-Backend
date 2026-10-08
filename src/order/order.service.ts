@@ -10,12 +10,24 @@ import {
   type Order,
   type User,
 } from '../../generated/client';
+import { formatCheckout } from '../cart/formatters/checkout.formatter';
+import { lockCart } from '../cart/utils/cart-lock';
+import {
+  createCheckout,
+  findReplay,
+  resolveDelivery,
+} from '../cart/utils/place-checkout';
 import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
+import { CheckoutConfig } from '../payment/checkout-config';
+import {
+  CHECKOUT_TRANSACTION,
+  busyAsConflict,
+} from '../payment/utils/checkout-transaction';
 import { PrismaService } from '../prisma/prisma.service';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
-import { orderLine, reserveProduce } from './utils/reservation';
+import { orderLine, releaseStock, reserveProduce } from './utils/reservation';
 import {
   CancelOrderDto,
   CreateOrderDto,
@@ -63,15 +75,45 @@ const CHECKLIST_COMPLETE: Prisma.OrderChecklistWhereInput = Object.fromEntries(
  */
 @Injectable()
 export class OrderService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly config: CheckoutConfig,
+  ) {}
 
-  async create(user: User, dto: CreateOrderDto) {
+  /** Buy Now: a one-line checkout that leaves the cart alone. */
+  create(user: User, idempotencyKey: string, dto: CreateOrderDto) {
+    return busyAsConflict(() => this.buyNow(user, idempotencyKey, dto));
+  }
+
+  private buyNow(user: User, idempotencyKey: string, dto: CreateOrderDto) {
     return this.database.$transaction(async (tx) => {
+      // The cart's lock, so Buy Now and cart checkout share one replay check.
+      await lockCart(tx, user.id);
+      const replay = await findReplay(tx, user.id, idempotencyKey);
+      if (replay) {
+        return formatCheckout(replay);
+      }
+      const delivery = await resolveDelivery(
+        tx,
+        user.id,
+        dto.addressId,
+        dto.deliveryDate,
+        this.config,
+      );
       const produce = await reserveProduce(tx, dto.produceId, dto.quantity);
-      return tx.order.create({
-        data: { ...orderLine(produce, dto.quantity), buyerId: user.id },
-      });
-    });
+      const checkout = await createCheckout(
+        tx,
+        {
+          buyerId: user.id,
+          idempotencyKey,
+          lines: [orderLine(produce, dto.quantity)],
+          delivery,
+          expectedTotal: dto.expectedTotal,
+        },
+        this.config,
+      );
+      return formatCheckout(checkout);
+    }, CHECKOUT_TRANSACTION);
   }
 
   async findAll(user: User, query: OrderQueryDto) {
@@ -97,6 +139,7 @@ export class OrderService {
     });
     // Every status is listed so the client gets zeros rather than missing keys.
     const byStatus: Record<OrderStatus, number> = {
+      AWAITING_PAYMENT: 0,
       PENDING: 0,
       CONFIRMED: 0,
       PREPARING: 0,
@@ -262,6 +305,7 @@ export class OrderService {
 
   async cancel(user: User, id: string, dto: CancelOrderDto) {
     const order = await this.findOne(user, id);
+    assertNotAwaitingPayment(order);
     // Farmers may withdraw an order until it's ready; buyers only one not yet
     // accepted.
     const cancellable = isSeller(user)
@@ -291,6 +335,15 @@ export class OrderService {
 
   async remove(user: User, id: string) {
     const order = await this.findOne(user, id);
+    assertNotAwaitingPayment(order);
+    // Deleting would erase a sale its checkout still records as PAID. Only
+    // legacy orders, placed before checkouts, have none.
+    if (order.checkoutId !== null) {
+      throw new ConflictException({
+        message: 'This order was paid for; cancel it instead',
+        code: 'ORDER_PAID',
+      });
+    }
     // Once a farmer has acted on an order it is history; cancel it instead.
     if (order.buyerId !== user.id || order.status !== OrderStatus.PENDING) {
       throw new ConflictException('Only a pending order can be deleted');
@@ -309,33 +362,19 @@ export class OrderService {
   }
 }
 
-/** Gives back the stock `order` took in the status it was in when read. */
-async function releaseStock(tx: Prisma.TransactionClient, order: Order) {
-  const produce = await tx.produce.findUniqueOrThrow({
-    where: { id: order.produceId },
-  });
-  const floatingQuantity = produce.floatingQuantity + order.quantity;
-  // Only a CONFIRMED (or later) order had committed actual stock.
-  const actualQuantity =
-    order.status === OrderStatus.PENDING
-      ? produce.actualQuantity
-      : produce.actualQuantity + order.quantity;
-  return tx.produce.update({
-    where: { id: produce.id },
-    data: {
-      floatingQuantity,
-      actualQuantity,
-      status: deriveProduceStatus(produce.status, {
-        actualQuantity,
-        floatingQuantity,
-      }),
-    },
-  });
-}
-
-// Runs after a failed reservation to say why it failed.
 function isSeller(user: User) {
   return user.role === Role.FARMER || user.role === Role.ADMIN;
+}
+
+// An unpaid order stands or falls with its checkout, so one checkout can't
+// end up half cancelled.
+function assertNotAwaitingPayment(order: Order) {
+  if (order.status === OrderStatus.AWAITING_PAYMENT) {
+    throw new ConflictException({
+      message: 'Cancel the checkout instead',
+      code: 'ORDER_IN_CHECKOUT',
+    });
+  }
 }
 
 function scopedTo(user: User): Prisma.OrderWhereInput {
@@ -343,7 +382,11 @@ function scopedTo(user: User): Prisma.OrderWhereInput {
     return {};
   }
   if (user.role === Role.FARMER) {
-    return { farm: farmOwnedBy(user) };
+    // NOT, not a status filter: filtered() spreads `status` over this scope.
+    return {
+      farm: farmOwnedBy(user),
+      NOT: { status: OrderStatus.AWAITING_PAYMENT },
+    };
   }
   return { buyerId: user.id };
 }

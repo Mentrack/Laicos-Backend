@@ -157,7 +157,7 @@ export class ProduceService {
     if (floatingQuantity < 0) {
       const reserved = current.actualQuantity - current.floatingQuantity;
       throw new ConflictException(
-        `${reserved} ${current.unit} is reserved by pending orders`,
+        `${reserved} ${current.unit} is reserved by orders`,
       );
     }
     const status = deriveProduceStatus(dto.status ?? current.status, {

@@ -1,6 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 export class OrderStatusCountsDto {
+  @ApiProperty({ example: 0 })
+  AWAITING_PAYMENT: number;
+
   @ApiProperty({ example: 3 })
   PENDING: number;
 
