@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { CheckoutStatus } from '../../../generated/client';
 import { OrderDto } from '../../order/dto/order.dto';
+import { PaymentDto } from '../../payment/dto/payment.dto';
 
 export class ShippingToDto {
   @ApiProperty({ example: 'Warehouse A' })
@@ -68,4 +69,7 @@ export class CheckoutDto {
 
   @ApiProperty({ type: [OrderDto], description: 'One per line' })
   orders: OrderDto[];
+
+  @ApiProperty({ type: [PaymentDto], description: 'Attempts, newest first' })
+  payments: PaymentDto[];
 }

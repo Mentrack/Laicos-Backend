@@ -124,6 +124,7 @@ describe('OrderService', () => {
       deliveryContactPhone: null,
       createdAt: new Date(),
       orders: [],
+      payments: [],
     };
 
     beforeEach(() => {

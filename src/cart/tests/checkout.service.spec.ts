@@ -69,6 +69,7 @@ function checkoutRow(overrides: Record<string, unknown> = {}) {
     deliveryContactPhone: null,
     createdAt: new Date(),
     orders: [],
+    payments: [],
     ...overrides,
   };
 }

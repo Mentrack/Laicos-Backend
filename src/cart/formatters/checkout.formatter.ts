@@ -1,8 +1,10 @@
 import { Prisma } from '../../../generated/client';
 import { fromDateColumn } from '../../common/dates';
+import { formatPayment } from '../../payment/formatters/payment.formatter';
 
 export const CHECKOUT_INCLUDE = {
   orders: { orderBy: { orderNumber: 'asc' } },
+  payments: { orderBy: { createdAt: 'desc' } },
 } satisfies Prisma.CheckoutInclude;
 
 export type CheckoutRow = Prisma.CheckoutGetPayload<{
@@ -31,5 +33,6 @@ export function formatCheckout(checkout: CheckoutRow) {
     },
     createdAt: checkout.createdAt,
     orders: checkout.orders,
+    payments: checkout.payments.map(formatPayment),
   };
 }
