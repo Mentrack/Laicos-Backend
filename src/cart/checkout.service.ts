@@ -4,40 +4,47 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Role, type User } from '../../generated/client';
+import { Role, type User } from '../../generated/client';
 import {
   orderLine,
   tryReserveProduce,
   type OrderLine,
 } from '../order/utils/reservation';
 import { isTransactionTimeout } from '../common/prisma-errors';
+import { CheckoutConfig } from '../payment/checkout-config';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutDto } from './dto';
 import { CART_ITEM_INCLUDE } from './formatters/cart.formatter';
+import {
+  CHECKOUT_INCLUDE,
+  formatCheckout,
+} from './formatters/checkout.formatter';
 import {
   cartItemIssue,
   describeIssue,
   describeLostReservation,
 } from './utils/cart-issue';
 import { lockCart } from './utils/cart-lock';
+import {
+  createCheckout,
+  findReplay,
+  resolveDelivery,
+} from './utils/place-checkout';
 
 // Up to 50 items at ~3 statements each, plus time queued on the cart lock or
 // on other buyers' produce row locks, can outrun Prisma's 5s default and
 // surface as a bare 500.
 const CHECKOUT_TRANSACTION = { timeout: 15_000, maxWait: 5_000 };
 
-const CHECKOUT_INCLUDE = {
-  orders: { orderBy: { orderNumber: 'asc' } },
-} satisfies Prisma.CheckoutInclude;
-
 /**
- * Turns a buyer's cart into PENDING orders, all or nothing. Payment will sit
- * in front of this once Paystack lands; until then checkout reserves stock
- * exactly as Buy Now does.
+ * Turns a buyer's cart into orders awaiting payment, all or nothing.
  */
 @Injectable()
 export class CheckoutService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly config: CheckoutConfig,
+  ) {}
 
   async checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
     try {
@@ -63,12 +70,9 @@ export class CheckoutService {
   ) {
     return this.database.$transaction(async (tx) => {
       await lockCart(tx, user.id);
-      const replay = await tx.checkout.findUnique({
-        where: { buyerId_idempotencyKey: { buyerId: user.id, idempotencyKey } },
-        include: CHECKOUT_INCLUDE,
-      });
+      const replay = await findReplay(tx, user.id, idempotencyKey);
       if (replay) {
-        return replay;
+        return formatCheckout(replay);
       }
 
       // produceId order makes overlapping checkouts lock produce rows in the
@@ -91,6 +95,13 @@ export class CheckoutService {
       if (problems.length > 0) {
         throw needsAttention(problems);
       }
+      const delivery = await resolveDelivery(
+        tx,
+        user.id,
+        dto.addressId,
+        dto.deliveryDate,
+        this.config,
+      );
 
       const lines: OrderLine[] = [];
       for (const item of items) {
@@ -108,32 +119,19 @@ export class CheckoutService {
         }
         lines.push(orderLine(produce, item.quantity));
       }
-      // Priced from the rows reserveProduce just locked, so a farmer's price
-      // edit waits for this commit instead of slipping in after the check.
-      const total = lines.reduce(
-        (sum, line) => sum.add(line.totalPrice),
-        new Prisma.Decimal(0),
-      );
-      if (!total.equals(dto.expectedTotal)) {
-        throw new ConflictException({
-          message: 'Prices in your cart have changed',
-          code: 'CART_PRICE_CHANGED',
-        });
-      }
-
-      const checkout = await tx.checkout.create({
-        data: {
+      const checkout = await createCheckout(
+        tx,
+        {
           buyerId: user.id,
           idempotencyKey,
-          totalPrice: total,
-          orders: {
-            create: lines.map((line) => ({ ...line, buyerId: user.id })),
-          },
+          lines,
+          delivery,
+          expectedTotal: dto.expectedTotal,
         },
-        include: CHECKOUT_INCLUDE,
-      });
+        this.config,
+      );
       await tx.cartItem.deleteMany({ where: { buyerId: user.id } });
-      return checkout;
+      return formatCheckout(checkout);
     }, CHECKOUT_TRANSACTION);
   }
 
@@ -148,7 +146,7 @@ export class CheckoutService {
         code: 'CHECKOUT_NOT_FOUND',
       });
     }
-    return checkout;
+    return formatCheckout(checkout);
   }
 }
 

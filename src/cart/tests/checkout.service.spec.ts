@@ -1,5 +1,6 @@
 import { ConflictException, HttpException } from '@nestjs/common';
 import {
+  CheckoutStatus,
   FarmVerificationStatus,
   Prisma,
   ProduceStatus,
@@ -7,6 +8,8 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { addDays, lagosToday } from '../../common/dates';
+import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckoutService } from '../checkout.service';
 
@@ -45,6 +48,40 @@ function cartRow(produceId: string, quantity: number, overrides = {}) {
   };
 }
 
+function checkoutRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: checkoutId,
+    checkoutNumber: 'CHK-000001',
+    buyerId: buyer.id,
+    idempotencyKey: key,
+    status: CheckoutStatus.AWAITING_PAYMENT,
+    subtotal: new Prisma.Decimal('701.00'),
+    deliveryFee: new Prisma.Decimal('3500.00'),
+    totalPrice: new Prisma.Decimal('4201.00'),
+    expiresAt: new Date(),
+    paidAt: null,
+    deliveryDate: new Date('2026-10-10T00:00:00.000Z'),
+    deliveryLabel: 'Warehouse A',
+    deliveryStreet: '1 Road',
+    deliveryState: 'Kano',
+    deliveryLga: 'Nassarawa',
+    deliveryContactName: null,
+    deliveryContactPhone: null,
+    createdAt: new Date(),
+    orders: [],
+    ...overrides,
+  };
+}
+
+// Computed from today so the date never falls out of the delivery window.
+function body(expectedTotal: number) {
+  return {
+    expectedTotal,
+    addressId: 'address-1',
+    deliveryDate: addDays(lagosToday(), 2),
+  };
+}
+
 // The body HttpExceptionFilter reads `message` and `code` from.
 async function errorBody(promise: Promise<unknown>) {
   const error: unknown = await promise.catch((caught: unknown) => caught);
@@ -56,6 +93,7 @@ describe('CheckoutService', () => {
   const tx = {
     $executeRaw: jest.fn(),
     checkout: { findUnique: jest.fn(), create: jest.fn() },
+    address: { findFirst: jest.fn() },
     cartItem: { findMany: jest.fn(), deleteMany: jest.fn() },
     produce: {
       updateMany: jest.fn(),
@@ -74,7 +112,10 @@ describe('CheckoutService', () => {
       return callback(tx);
     },
   };
-  const service = new CheckoutService(database as unknown as PrismaService);
+  const service = new CheckoutService(
+    database as unknown as PrismaService,
+    testCheckoutConfig(),
+  );
 
   // Reservation succeeds and returns the listing as the locked row.
   function reservable(...rows: ReturnType<typeof cartRow>[]) {
@@ -83,20 +124,32 @@ describe('CheckoutService', () => {
     for (const row of rows) {
       tx.produce.findUnique.mockResolvedValueOnce(row.produce);
     }
-    tx.checkout.create.mockResolvedValue({ id: checkoutId, orders: [] });
+    tx.checkout.create.mockResolvedValue(checkoutRow());
   }
 
   beforeEach(() => {
     jest.resetAllMocks();
+    tx.address.findFirst.mockResolvedValue({
+      id: 'address-1',
+      label: 'Warehouse A',
+      street: '1 Road',
+      contactName: null,
+      contactPhone: null,
+      state: { name: 'Kano' },
+      lga: { name: 'Nassarawa' },
+    });
     tx.checkout.findUnique.mockResolvedValue(null);
   });
 
   it('locks the cart, then replays an earlier checkout with the same key', async () => {
-    const earlier = { id: checkoutId, orders: [] };
-    tx.checkout.findUnique.mockResolvedValue(earlier);
+    tx.checkout.findUnique.mockResolvedValue(checkoutRow());
     await expect(
-      service.checkout(buyer, key, { expectedTotal: 1 }),
-    ).resolves.toBe(earlier);
+      service.checkout(buyer, key, body(1 + 3500)),
+    ).resolves.toMatchObject({
+      id: checkoutId,
+      status: 'AWAITING_PAYMENT',
+      shippingTo: { label: 'Warehouse A' },
+    });
     expect(tx.$executeRaw).toHaveBeenCalledWith(
       expect.anything(),
       `cart:${buyer.id}`,
@@ -116,7 +169,7 @@ describe('CheckoutService', () => {
   it('refuses an empty cart', async () => {
     tx.cartItem.findMany.mockResolvedValue([]);
     await expect(
-      errorBody(service.checkout(buyer, key, { expectedTotal: 0 })),
+      errorBody(service.checkout(buyer, key, body(3500))),
     ).resolves.toEqual({ message: 'Your cart is empty', code: 'CART_EMPTY' });
   });
 
@@ -125,7 +178,7 @@ describe('CheckoutService', () => {
       cartRow('a', 2, { pricePerUnit: new Prisma.Decimal('4500.00') }),
     );
     await expect(
-      service.checkout(buyer, key, { expectedTotal: 9000 }),
+      service.checkout(buyer, key, body(9000 + 3500)),
     ).resolves.toBeDefined();
   });
 
@@ -136,10 +189,10 @@ describe('CheckoutService', () => {
         clientVersion: 'test',
       }),
     );
-    const body = await errorBody(
-      service.checkout(buyer, key, { expectedTotal: 1 }),
+    const response = await errorBody(
+      service.checkout(buyer, key, body(1 + 3500)),
     );
-    expect(body).toEqual({
+    expect(response).toEqual({
       message: 'Checkout is busy; please try again',
       code: 'CHECKOUT_BUSY',
     });
@@ -159,7 +212,7 @@ describe('CheckoutService', () => {
       cartRow('c', 1),
     ]);
     const error: unknown = await service
-      .checkout(buyer, key, { expectedTotal: 1 })
+      .checkout(buyer, key, body(1 + 3500))
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ConflictException);
     expect((error as ConflictException).getResponse()).toEqual({
@@ -174,7 +227,7 @@ describe('CheckoutService', () => {
 
   it('reads the cart in produceId order so reservations never deadlock', async () => {
     reservable(cartRow('a', 1), cartRow('b', 1));
-    await service.checkout(buyer, key, { expectedTotal: 701 });
+    await service.checkout(buyer, key, body(701 + 3500));
     expect(tx.cartItem.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { buyerId: buyer.id },
@@ -190,14 +243,14 @@ describe('CheckoutService', () => {
   it('matches a whole-number expectedTotal against the 2-dp total', async () => {
     reservable(cartRow('a', 3)); // 3 × 350.50 = 1051.50
     await expect(
-      service.checkout(buyer, key, { expectedTotal: 1051.5 }),
+      service.checkout(buyer, key, body(1051.5 + 3500)),
     ).resolves.toBeDefined();
   });
 
   it('rolls back when prices moved since the buyer saw the cart', async () => {
     reservable(cartRow('a', 3));
     const error: unknown = await service
-      .checkout(buyer, key, { expectedTotal: 1000 })
+      .checkout(buyer, key, body(1000 + 3500))
       .catch((caught: unknown) => caught);
     expect((error as ConflictException).getResponse()).toEqual({
       message: 'Prices in your cart have changed',
@@ -208,7 +261,7 @@ describe('CheckoutService', () => {
 
   async function attentionError(expectedTotal: number) {
     const error: unknown = await service
-      .checkout(buyer, key, { expectedTotal })
+      .checkout(buyer, key, body(expectedTotal + 3500))
       .catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ConflictException);
     return (error as ConflictException).getResponse();
@@ -253,19 +306,21 @@ describe('CheckoutService', () => {
 
   it('gives checkout a longer transaction budget than the 5s default', async () => {
     reservable(cartRow('a', 1));
-    await service.checkout(buyer, key, { expectedTotal: 350.5 });
+    await service.checkout(buyer, key, body(350.5 + 3500));
     expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
   });
 
   it('creates the checkout with one order per item, then empties the cart', async () => {
     reservable(cartRow('a', 1), cartRow('b', 2));
-    await service.checkout(buyer, key, { expectedTotal: 1051.5 });
+    await service.checkout(buyer, key, body(1051.5 + 3500));
     expect(tx.checkout.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: {
+        data: expect.objectContaining({
           buyerId: buyer.id,
           idempotencyKey: key,
-          totalPrice: new Prisma.Decimal('1051.50'),
+          subtotal: new Prisma.Decimal('1051.50'),
+          deliveryFee: new Prisma.Decimal('3500.00'),
+          totalPrice: new Prisma.Decimal('4551.50'),
           orders: {
             create: [
               expect.objectContaining({
@@ -280,7 +335,7 @@ describe('CheckoutService', () => {
               }),
             ],
           },
-        },
+        }) as unknown,
       }),
     );
     expect(tx.cartItem.deleteMany).toHaveBeenCalledWith({
@@ -288,9 +343,42 @@ describe('CheckoutService', () => {
     });
   });
 
+  it('reports problem items before checking the address', async () => {
+    tx.cartItem.findMany.mockResolvedValue([
+      cartRow('a', 1, { status: ProduceStatus.SOLD_OUT }),
+    ]);
+    await expect(
+      errorBody(service.checkout(buyer, key, body(3500))),
+    ).resolves.toMatchObject({ code: 'CART_NEEDS_ATTENTION' });
+    expect(tx.address.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unknown address before reserving anything', async () => {
+    tx.cartItem.findMany.mockResolvedValue([cartRow('a', 1)]);
+    tx.address.findFirst.mockResolvedValue(null);
+    await expect(
+      errorBody(service.checkout(buyer, key, body(3850.5))),
+    ).resolves.toMatchObject({ code: 'ADDRESS_NOT_FOUND' });
+    expect(tx.produce.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('places the orders awaiting payment', async () => {
+    reservable(cartRow('a', 2));
+    await service.checkout(buyer, key, body(701 + 3500));
+    expect(tx.checkout.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: CheckoutStatus.AWAITING_PAYMENT,
+          deliveryLabel: 'Warehouse A',
+        }) as unknown,
+      }),
+    );
+    expect(tx.cartItem.deleteMany).toHaveBeenCalled();
+  });
+
   describe('findOne', () => {
     it('scopes a buyer to their own checkouts', async () => {
-      database.checkout.findFirst.mockResolvedValue({ id: checkoutId });
+      database.checkout.findFirst.mockResolvedValue(checkoutRow());
       await service.findOne(buyer, checkoutId);
       expect(database.checkout.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -300,7 +388,7 @@ describe('CheckoutService', () => {
     });
 
     it('lets an admin see any checkout', async () => {
-      database.checkout.findFirst.mockResolvedValue({ id: checkoutId });
+      database.checkout.findFirst.mockResolvedValue(checkoutRow());
       await service.findOne(admin, checkoutId);
       expect(database.checkout.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: checkoutId } }),

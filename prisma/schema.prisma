@@ -34,6 +34,8 @@ model User {
   cartItems             CartItem[]
   checkouts             Checkout[]
   sourcingRequests      SourcingRequest[]
+  addresses             Address[]
+  confirmedPayments     Payment[]              @relation("PaymentConfirmedBy")
   refreshToken          RefreshToken?
   emailVerificationCode EmailVerificationCode?
 }
@@ -129,20 +131,22 @@ model Farm {
 }
 
 model State {
-  id     String  @id @default(uuid())
-  name   String  @unique
-  lgas   Lga[]
-  farms  Farm[]
-  agents Agent[]
+  id        String    @id @default(uuid())
+  name      String    @unique
+  lgas      Lga[]
+  farms     Farm[]
+  agents    Agent[]
+  addresses Address[]
 }
 
 model Lga {
-  id      String  @id @default(uuid())
-  stateId String
-  state   State   @relation(fields: [stateId], references: [id], onDelete: Restrict)
-  name    String
-  farms   Farm[]
-  agents  Agent[]
+  id        String    @id @default(uuid())
+  stateId   String
+  state     State     @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  name      String
+  farms     Farm[]
+  agents    Agent[]
+  addresses Address[]
 
   @@unique([stateId, name])
 }
@@ -389,22 +393,109 @@ model CartItem {
   @@unique([buyerId, produceId])
 }
 
-// One cart checkout: the orders it placed and what they cost together.
-// Paystack will attach its payment here.
+// One placement (cart or Buy Now): its orders, delivery and payment.
 model Checkout {
-  id             String   @id @default(uuid())
+  id                   String         @id @default(uuid())
   // Public code (CHK-000123), backed by a hand-made sequence like Order.orderNumber.
-  checkoutNumber String   @unique @default(dbgenerated("('CHK-'::text || lpad((nextval('\"Checkout_checkoutNumber_seq\"'::regclass))::text, 6, '0'::text))"))
-  buyerId        String
+  checkoutNumber       String         @unique @default(dbgenerated("('CHK-'::text || lpad((nextval('\"Checkout_checkoutNumber_seq\"'::regclass))::text, 6, '0'::text))"))
+  buyerId              String
   // Checkouts are history, like orders.
-  buyer          User     @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  buyer                User           @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   // Client-generated per attempt (Idempotency-Key); a retry replays the original.
-  idempotencyKey String
-  totalPrice     Decimal  @db.Decimal(12, 2)
-  orders         Order[]
-  createdAt      DateTime @default(now())
+  idempotencyKey       String
+  // subtotal + deliveryFee
+  totalPrice           Decimal        @db.Decimal(12, 2)
+  orders               Order[]
+  createdAt            DateTime       @default(now())
+  status               CheckoutStatus
+  subtotal             Decimal        @db.Decimal(12, 2)
+  deliveryFee          Decimal        @db.Decimal(12, 2)
+  // Reserved stock is released once this passes unpaid (CheckoutExpiryService).
+  expiresAt            DateTime
+  paidAt               DateTime?
+  deliveryDate         DateTime       @db.Date
+  // Snapshot of the chosen Address, as names, so later edits don't rewrite history.
+  deliveryLabel        String
+  deliveryStreet       String
+  deliveryState        String
+  deliveryLga          String
+  deliveryContactName  String?
+  deliveryContactPhone String?
+  payments             Payment[]
 
   @@unique([buyerId, idempotencyKey])
+  @@index([status, expiresAt])
+}
+
+// A buyer's saved delivery address. At most one isDefault per buyer, enforced
+// by the hand-written partial unique index Address_buyerId_default_key.
+model Address {
+  id           String   @id @default(uuid())
+  buyerId      String
+  buyer        User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  label        String
+  street       String
+  stateId      String
+  state        State    @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  lgaId        String
+  lga          Lga      @relation(fields: [lgaId], references: [id], onDelete: Restrict)
+  contactName  String?
+  contactPhone String?
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([buyerId])
+}
+
+// One attempt to pay a checkout. At most one SUCCEEDED per checkout, enforced
+// by the hand-written partial unique index Payment_checkoutId_succeeded_key.
+model Payment {
+  id             String          @id @default(uuid())
+  // Public code (PAY-000123), backed by a hand-made sequence like Checkout.checkoutNumber.
+  // Bank transfer buyers quote it as the narration.
+  reference      String          @unique @default(dbgenerated("('PAY-'::text || lpad((nextval('\"Payment_reference_seq\"'::regclass))::text, 6, '0'::text))"))
+  checkoutId     String
+  checkout       Checkout        @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
+  // Client-generated per attempt (Idempotency-Key); a retry replays the original.
+  idempotencyKey String
+  method         PaymentMethod
+  provider       PaymentProvider
+  status         PaymentStatus   @default(PENDING)
+  amount         Decimal         @db.Decimal(12, 2)
+  // What the provider returned on initiate (e.g. transfer instructions).
+  providerData   Json?
+  // Set when an admin confirmed it by hand; null for provider confirmations.
+  confirmedById  String?
+  confirmedBy    User?           @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
+  paidAt         DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([checkoutId, idempotencyKey])
+}
+
+enum CheckoutStatus {
+  AWAITING_PAYMENT
+  PAID
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CARD
+  BANK_TRANSFER
+}
+
+enum PaymentProvider {
+  STUB
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  ABANDONED
 }
 
 // A buyer's request for produce they couldn't find listed. Admin handling is
@@ -537,6 +628,8 @@ enum PhotoSlot {
 }
 
 enum OrderStatus {
+  // Placed but unpaid: hidden from farmers until payment is confirmed.
+  AWAITING_PAYMENT
   PENDING
   CONFIRMED
   PREPARING

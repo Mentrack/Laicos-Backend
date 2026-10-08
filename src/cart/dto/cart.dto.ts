@@ -92,4 +92,18 @@ export class CartDto {
     description: 'Sum of lineTotal over items with no issue',
   })
   total: string;
+
+  @ApiProperty({
+    type: String,
+    example: '3500.00',
+    description: 'Flat delivery fee; 0.00 when nothing can be ordered',
+  })
+  deliveryFee: string;
+
+  @ApiProperty({
+    type: String,
+    example: '48500.00',
+    description: 'total + deliveryFee: what checkout will charge',
+  })
+  grandTotal: string;
 }

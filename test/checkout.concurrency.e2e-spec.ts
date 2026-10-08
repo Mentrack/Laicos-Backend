@@ -12,6 +12,8 @@ import {
   type User,
 } from '../generated/client';
 import { CheckoutService } from '../src/cart/checkout.service';
+import { addDays, lagosToday } from '../src/common/dates';
+import { testCheckoutConfig } from '../src/payment/tests/checkout-config.fixture';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Runs against the docker compose Postgres. Every row is tagged with this
@@ -20,7 +22,7 @@ const run = randomUUID().slice(0, 8);
 
 describe('Checkout concurrency (real Postgres)', () => {
   const db = new PrismaService(new ConfigService());
-  const service = new CheckoutService(db);
+  const service = new CheckoutService(db, testCheckoutConfig());
   const buyerIds: string[] = [];
   let farmerUser: User;
   let state: State;
@@ -66,6 +68,28 @@ describe('Checkout concurrency (real Postgres)', () => {
     return db.cartItem.create({ data: { buyerId, produceId, quantity } });
   }
 
+  async function addressFor(buyerId: string) {
+    return db.address.create({
+      data: {
+        buyerId,
+        label: 'E2E',
+        street: '1 Test Road',
+        stateId: state.id,
+        lgaId: lga.id,
+        isDefault: true,
+      },
+    });
+  }
+
+  async function body(buyerId: string, items: number) {
+    const address = await addressFor(buyerId);
+    return {
+      expectedTotal: items + 3500,
+      addressId: address.id,
+      deliveryDate: addDays(lagosToday(), 2),
+    };
+  }
+
   beforeAll(async () => {
     await db.$connect();
     state = await db.state.create({ data: { name: `E2E State ${run}` } });
@@ -95,6 +119,9 @@ describe('Checkout concurrency (real Postgres)', () => {
     await db.order.deleteMany({ where: { buyerId: { in: buyerIds } } });
     await db.checkout.deleteMany({ where: { buyerId: { in: buyerIds } } });
     await db.cartItem.deleteMany({ where: { buyerId: { in: buyerIds } } });
+    // Addresses would cascade with their buyer, but they restrict the LGA and
+    // state deletes below, so they go explicitly.
+    await db.address.deleteMany({ where: { buyerId: { in: buyerIds } } });
     await db.farm.delete({ where: { id: farm.id } });
     await db.user.deleteMany({
       where: { id: { in: [...buyerIds, farmerUser.id] } },
@@ -109,10 +136,11 @@ describe('Checkout concurrency (real Postgres)', () => {
     const [a, b] = await Promise.all([buyer(), buyer()]);
     await addToCart(a.id, listing.id, 10);
     await addToCart(b.id, listing.id, 10);
+    const [bodyA, bodyB] = [await body(a.id, 1000), await body(b.id, 1000)];
 
     const results = await Promise.allSettled([
-      service.checkout(a, randomUUID(), { expectedTotal: 1000 }),
-      service.checkout(b, randomUUID(), { expectedTotal: 1000 }),
+      service.checkout(a, randomUUID(), bodyA),
+      service.checkout(b, randomUUID(), bodyB),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
@@ -134,10 +162,11 @@ describe('Checkout concurrency (real Postgres)', () => {
     const a = await buyer();
     await addToCart(a.id, listing.id, 5);
     const key = randomUUID();
+    const request = await body(a.id, 500);
 
     const [first, second] = await Promise.all([
-      service.checkout(a, key, { expectedTotal: 500 }),
-      service.checkout(a, key, { expectedTotal: 500 }),
+      service.checkout(a, key, request),
+      service.checkout(a, key, request),
     ]);
 
     expect(second.id).toBe(first.id);
@@ -157,10 +186,11 @@ describe('Checkout concurrency (real Postgres)', () => {
     await addToCart(a.id, y.id, 1);
     await addToCart(b.id, y.id, 1);
     await addToCart(b.id, x.id, 1);
+    const [bodyA, bodyB] = [await body(a.id, 200), await body(b.id, 200)];
 
     const results = await Promise.allSettled([
-      service.checkout(a, randomUUID(), { expectedTotal: 200 }),
-      service.checkout(b, randomUUID(), { expectedTotal: 200 }),
+      service.checkout(a, randomUUID(), bodyA),
+      service.checkout(b, randomUUID(), bodyB),
     ]);
 
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);

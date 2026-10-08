@@ -97,6 +97,7 @@ export class OrderService {
     });
     // Every status is listed so the client gets zeros rather than missing keys.
     const byStatus: Record<OrderStatus, number> = {
+      AWAITING_PAYMENT: 0,
       PENDING: 0,
       CONFIRMED: 0,
       PREPARING: 0,

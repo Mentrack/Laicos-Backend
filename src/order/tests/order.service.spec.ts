@@ -212,6 +212,7 @@ describe('OrderService', () => {
     await expect(service.count(farmer, { produceId })).resolves.toEqual({
       total: 7,
       byStatus: {
+        AWAITING_PAYMENT: 0,
         PENDING: 2,
         CONFIRMED: 0,
         PREPARING: 0,

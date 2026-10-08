@@ -89,7 +89,7 @@ export class CartController {
   @ApiOperation({
     summary: 'Check out my cart',
     description:
-      'All or nothing: places one PENDING order per item under one checkout and empties the cart. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when current prices no longer total expectedTotal. Retrying with the same Idempotency-Key returns the original checkout.',
+      'All or nothing: reserves stock for every item, places the orders AWAITING_PAYMENT under one checkout and empties the cart. Pay with POST /checkouts/{id}/payments before expiresAt or the stock is released. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when items plus delivery no longer total expectedTotal. 404 ADDRESS_NOT_FOUND, 400 INVALID_DELIVERY_DATE. Retrying with the same Idempotency-Key returns the original checkout.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',

@@ -7,6 +7,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CartService } from '../cart.service';
 import { CartItemIssue } from '../dto';
@@ -71,7 +72,10 @@ describe('CartService', () => {
     $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
       callback(tx),
   };
-  const service = new CartService(database as unknown as PrismaService);
+  const service = new CartService(
+    database as unknown as PrismaService,
+    testCheckoutConfig(),
+  );
 
   beforeEach(() => jest.resetAllMocks());
 
@@ -91,6 +95,34 @@ describe('CartService', () => {
       expect(cart.itemCount).toBe(2);
       expect(cart.items[0].lineTotal).toBe('45000.00');
       expect(cart.total).toBe('45000.00');
+    });
+
+    it('adds the delivery fee to the grand total', async () => {
+      cartItem.findMany.mockResolvedValue([cartRow(2)]);
+      await expect(service.find(buyer)).resolves.toMatchObject({
+        total: '9000.00',
+        deliveryFee: '3500.00',
+        grandTotal: '12500.00',
+      });
+    });
+
+    it('charges no fee when nothing can be ordered', async () => {
+      cartItem.findMany.mockResolvedValue([]);
+      await expect(service.find(buyer)).resolves.toMatchObject({
+        total: '0.00',
+        deliveryFee: '0.00',
+        grandTotal: '0.00',
+      });
+    });
+
+    it('charges no fee when every item has an issue', async () => {
+      cartItem.findMany.mockResolvedValue([
+        cartRow(2, { status: ProduceStatus.SOLD_OUT }),
+      ]);
+      await expect(service.find(buyer)).resolves.toMatchObject({
+        deliveryFee: '0.00',
+        grandTotal: '0.00',
+      });
     });
 
     it('flags an item whose farm lost verification instead of dropping it', async () => {
