@@ -91,7 +91,10 @@ describe('OrderService', () => {
     status: OrderStatus.PENDING,
   };
 
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    produce.update.mockResolvedValue(published);
+  });
 
   describe('create (Buy Now)', () => {
     const key = '3f6c1d2e-8a4b-4c5d-9e6f-0a1b2c3d4e5f';
@@ -208,6 +211,7 @@ describe('OrderService', () => {
     });
     const where = {
       farm: { owner: { userId: farmer.id } },
+      NOT: { status: OrderStatus.AWAITING_PAYMENT },
       produceId,
       status: OrderStatus.PENDING,
       type: ProduceType.EXPORT,
@@ -218,6 +222,53 @@ describe('OrderService', () => {
     expect(order.count).toHaveBeenCalledWith({ where });
     expect(result.metaData.total).toBe(4);
   });
+
+  it('hides unpaid orders from farmers even when filtering by status', async () => {
+    order.findMany.mockResolvedValue([]);
+    order.count.mockResolvedValue(0);
+    await service.findAll(farmer, { status: undefined });
+    await service.findAll(farmer, { status: OrderStatus.AWAITING_PAYMENT });
+    for (const [args] of order.findMany.mock.calls as [
+      { where: Prisma.OrderWhereInput },
+    ][]) {
+      expect(args.where.NOT).toEqual({
+        status: OrderStatus.AWAITING_PAYMENT,
+      });
+    }
+  });
+
+  it('shows buyers their unpaid orders', async () => {
+    order.findMany.mockResolvedValue([]);
+    order.count.mockResolvedValue(0);
+    await service.findAll(buyer, {});
+    const [[args]] = order.findMany.mock.calls as [
+      { where: Prisma.OrderWhereInput },
+    ][];
+    expect(args.where.NOT).toBeUndefined();
+  });
+
+  it.each(['cancel', 'remove'] as const)(
+    '%s refuses an order still awaiting payment',
+    async (action) => {
+      order.findFirst.mockResolvedValue({
+        id: orderId,
+        buyerId: buyer.id,
+        status: OrderStatus.AWAITING_PAYMENT,
+      });
+      const call =
+        action === 'cancel'
+          ? service.cancel(buyer, orderId, { reason: 'changed my mind' })
+          : service.remove(buyer, orderId);
+      await expect(call).rejects.toMatchObject({
+        response: {
+          message: 'Cancel the checkout instead',
+          code: 'ORDER_IN_CHECKOUT',
+        },
+      });
+      expect(order.update).not.toHaveBeenCalled();
+      expect(order.delete).not.toHaveBeenCalled();
+    },
+  );
 
   it('scopes a buyer to their own orders', async () => {
     order.findMany.mockResolvedValue([]);
@@ -254,7 +305,10 @@ describe('OrderService', () => {
   });
 
   describe('summary', () => {
-    const scope = { farm: { owner: { userId: farmer.id } } };
+    const scope = {
+      farm: { owner: { userId: farmer.id } },
+      NOT: { status: OrderStatus.AWAITING_PAYMENT },
+    };
 
     it('sums fulfilled orders and counts active ones', async () => {
       order.aggregate.mockResolvedValue({
@@ -385,7 +439,10 @@ describe('OrderService', () => {
       expect(orderChecklist.findFirst).toHaveBeenCalledWith({
         where: {
           orderId,
-          order: { farm: { owner: { userId: farmer.id } } },
+          order: {
+            farm: { owner: { userId: farmer.id } },
+            NOT: { status: OrderStatus.AWAITING_PAYMENT },
+          },
         },
       });
     });
@@ -500,7 +557,6 @@ describe('OrderService', () => {
 
     it('records the reason and returns only floating stock for a pending order', async () => {
       order.findFirst.mockResolvedValue(pending);
-      produce.findUniqueOrThrow.mockResolvedValue(published);
       await service.cancel(farmer, orderId, { reason });
       expect(order.update).toHaveBeenCalledWith({
         where: { id: orderId, status: OrderStatus.PENDING },
@@ -509,9 +565,7 @@ describe('OrderService', () => {
       expect(produce.update).toHaveBeenCalledWith({
         where: { id: produceId },
         data: {
-          floatingQuantity: 105,
-          actualQuantity: 100,
-          status: ProduceStatus.PUBLISHED,
+          floatingQuantity: { increment: 5 },
         },
       });
     });
@@ -521,32 +575,29 @@ describe('OrderService', () => {
         ...pending,
         status: OrderStatus.CONFIRMED,
       });
-      produce.findUniqueOrThrow.mockResolvedValue(published);
       await service.cancel(farmer, orderId, { reason });
       expect(produce.update).toHaveBeenCalledWith({
         where: { id: produceId },
         data: {
-          floatingQuantity: 105,
-          actualQuantity: 105,
-          status: ProduceStatus.PUBLISHED,
+          floatingQuantity: { increment: 5 },
+          actualQuantity: { increment: 5 },
         },
       });
     });
 
     it('flips a SOLD_OUT listing back to PUBLISHED once stock is returned', async () => {
       order.findFirst.mockResolvedValue(pending);
-      produce.findUniqueOrThrow.mockResolvedValue({
+      produce.update.mockResolvedValue({
         ...published,
         actualQuantity: 5,
-        floatingQuantity: 0,
+        floatingQuantity: 5,
         status: ProduceStatus.SOLD_OUT,
       });
       await service.cancel(farmer, orderId, { reason });
-      expect(produce.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({ status: ProduceStatus.PUBLISHED }),
-        }),
-      );
+      expect(produce.update).toHaveBeenLastCalledWith({
+        where: { id: produceId },
+        data: { status: ProduceStatus.PUBLISHED },
+      });
     });
 
     it('does not let a buyer cancel a confirmed order', async () => {
@@ -565,7 +616,6 @@ describe('OrderService', () => {
         ...pending,
         status: OrderStatus.CONFIRMED,
       });
-      produce.findUniqueOrThrow.mockResolvedValue(published);
       order.update.mockResolvedValue({
         ...pending,
         status: OrderStatus.CANCELLED,
@@ -577,14 +627,12 @@ describe('OrderService', () => {
 
     it('lets a farmer cancel mid-preparation, returning actual stock', async () => {
       order.findFirst.mockResolvedValue(preparing);
-      produce.findUniqueOrThrow.mockResolvedValue(published);
       await service.cancel(farmer, orderId, { reason });
       expect(produce.update).toHaveBeenCalledWith({
         where: { id: produceId },
         data: {
-          floatingQuantity: 105,
-          actualQuantity: 105,
-          status: ProduceStatus.PUBLISHED,
+          floatingQuantity: { increment: 5 },
+          actualQuantity: { increment: 5 },
         },
       });
     });
@@ -603,7 +651,6 @@ describe('OrderService', () => {
   describe('remove', () => {
     it('deletes the buyer’s pending order and releases its stock', async () => {
       order.findFirst.mockResolvedValue(pending);
-      produce.findUniqueOrThrow.mockResolvedValue(published);
       await service.remove(buyer, orderId);
       expect(order.delete).toHaveBeenCalledWith({
         where: { id: orderId, status: OrderStatus.PENDING },
@@ -611,9 +658,7 @@ describe('OrderService', () => {
       expect(produce.update).toHaveBeenCalledWith({
         where: { id: produceId },
         data: {
-          floatingQuantity: 105,
-          actualQuantity: 100,
-          status: ProduceStatus.PUBLISHED,
+          floatingQuantity: { increment: 5 },
         },
       });
     });

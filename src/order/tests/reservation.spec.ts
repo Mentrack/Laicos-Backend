@@ -1,9 +1,11 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
   FarmVerificationStatus,
+  OrderStatus,
   Prisma,
   ProduceStatus,
   ProduceType,
+  type Order,
   type Produce,
 } from '../../../generated/client';
 import {
@@ -11,6 +13,7 @@ import {
   linePrice,
   orderLine,
   orderRefusal,
+  releaseStock,
 } from '../utils/reservation';
 
 const produce = {
@@ -83,6 +86,61 @@ describe('reservation', () => {
       produceName: 'Premium Cassava',
       type: ProduceType.LOCAL,
       totalPrice: new Prisma.Decimal('45000'),
+    });
+  });
+});
+
+describe('releaseStock', () => {
+  const tx = { produce: { update: jest.fn() } };
+  const client = tx as unknown as Prisma.TransactionClient;
+  const order = {
+    produceId: 'p1',
+    quantity: 5,
+  } as Order;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    tx.produce.update.mockResolvedValue({
+      id: 'p1',
+      status: ProduceStatus.PUBLISHED,
+      actualQuantity: 50,
+      floatingQuantity: 10,
+    });
+  });
+
+  it.each([OrderStatus.AWAITING_PAYMENT, OrderStatus.PENDING])(
+    'returns only floating stock for a %s order, atomically',
+    async (status) => {
+      await releaseStock(client, { ...order, status });
+      expect(tx.produce.update).toHaveBeenCalledWith({
+        where: { id: 'p1' },
+        data: { floatingQuantity: { increment: 5 } },
+      });
+    },
+  );
+
+  it('returns actual stock too once the order was confirmed', async () => {
+    await releaseStock(client, { ...order, status: OrderStatus.CONFIRMED });
+    expect(tx.produce.update).toHaveBeenCalledWith({
+      where: { id: 'p1' },
+      data: {
+        floatingQuantity: { increment: 5 },
+        actualQuantity: { increment: 5 },
+      },
+    });
+  });
+
+  it('flips a sold-out listing back to published', async () => {
+    tx.produce.update.mockResolvedValueOnce({
+      id: 'p1',
+      status: ProduceStatus.SOLD_OUT,
+      actualQuantity: 50,
+      floatingQuantity: 5,
+    });
+    await releaseStock(client, { ...order, status: OrderStatus.PENDING });
+    expect(tx.produce.update).toHaveBeenLastCalledWith({
+      where: { id: 'p1' },
+      data: { status: ProduceStatus.PUBLISHED },
     });
   });
 });

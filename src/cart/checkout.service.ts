@@ -2,9 +2,8 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
-import { Role, type User } from '../../generated/client';
+import { CheckoutStatus, Role, type User } from '../../generated/client';
 import {
   orderLine,
   tryReserveProduce,
@@ -12,6 +11,9 @@ import {
 } from '../order/utils/reservation';
 import { isTransactionTimeout } from '../common/prisma-errors';
 import { CheckoutConfig } from '../payment/checkout-config';
+import { checkoutNotFound } from '../payment/utils/checkout-errors';
+import { lockCheckout } from '../payment/utils/checkout-lock';
+import { releaseCheckout } from '../payment/utils/release-checkout';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutDto } from './dto';
 import { CART_ITEM_INCLUDE } from './formatters/cart.formatter';
@@ -141,12 +143,34 @@ export class CheckoutService {
       include: CHECKOUT_INCLUDE,
     });
     if (!checkout) {
-      throw new NotFoundException({
-        message: 'Checkout not found',
-        code: 'CHECKOUT_NOT_FOUND',
-      });
+      throw checkoutNotFound();
     }
     return formatCheckout(checkout);
+  }
+
+  cancel(user: User, id: string) {
+    return this.database.$transaction(async (tx) => {
+      await lockCheckout(tx, id);
+      const checkout = await tx.checkout.findFirst({
+        where: { id, buyerId: user.id },
+      });
+      if (!checkout) {
+        throw checkoutNotFound();
+      }
+      if (checkout.status !== CheckoutStatus.AWAITING_PAYMENT) {
+        throw new ConflictException({
+          message: 'Only an unpaid checkout can be cancelled',
+          code: 'CHECKOUT_NOT_CANCELLABLE',
+        });
+      }
+      const released = await releaseCheckout(
+        tx,
+        id,
+        CheckoutStatus.CANCELLED,
+        'Cancelled by buyer',
+      );
+      return formatCheckout(released);
+    });
   }
 }
 

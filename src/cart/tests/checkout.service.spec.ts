@@ -92,7 +92,14 @@ async function errorBody(promise: Promise<unknown>) {
 describe('CheckoutService', () => {
   const tx = {
     $executeRaw: jest.fn(),
-    checkout: { findUnique: jest.fn(), create: jest.fn() },
+    checkout: {
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
+    },
+    order: { findMany: jest.fn(), updateMany: jest.fn() },
+    payment: { updateMany: jest.fn() },
     address: { findFirst: jest.fn() },
     cartItem: { findMany: jest.fn(), deleteMany: jest.fn() },
     produce: {
@@ -403,6 +410,55 @@ describe('CheckoutService', () => {
         message: 'Checkout not found',
         code: 'CHECKOUT_NOT_FOUND',
       });
+    });
+  });
+
+  describe('cancel', () => {
+    it('releases an unpaid checkout under its lock', async () => {
+      tx.checkout.findFirst.mockResolvedValue(checkoutRow());
+      tx.order.findMany.mockResolvedValue([]);
+      tx.checkout.update.mockResolvedValue(
+        checkoutRow({ status: CheckoutStatus.CANCELLED }),
+      );
+      await expect(service.cancel(buyer, checkoutId)).resolves.toMatchObject({
+        status: CheckoutStatus.CANCELLED,
+      });
+      expect(tx.$executeRaw).toHaveBeenCalledWith(
+        expect.anything(),
+        `checkout:${checkoutId}`,
+      );
+      expect(tx.checkout.findFirst).toHaveBeenCalledWith({
+        where: { id: checkoutId, buyerId: buyer.id },
+      });
+      expect(tx.order.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            cancellationReason: 'Cancelled by buyer',
+          }) as unknown,
+        }),
+      );
+    });
+
+    it.each([
+      CheckoutStatus.PAID,
+      CheckoutStatus.EXPIRED,
+      CheckoutStatus.CANCELLED,
+    ])('refuses a %s checkout', async (status) => {
+      tx.checkout.findFirst.mockResolvedValue(checkoutRow({ status }));
+      await expect(
+        errorBody(service.cancel(buyer, checkoutId)),
+      ).resolves.toEqual({
+        message: 'Only an unpaid checkout can be cancelled',
+        code: 'CHECKOUT_NOT_CANCELLABLE',
+      });
+      expect(tx.checkout.update).not.toHaveBeenCalled();
+    });
+
+    it("404s another buyer's checkout", async () => {
+      tx.checkout.findFirst.mockResolvedValue(null);
+      await expect(
+        errorBody(service.cancel(buyer, checkoutId)),
+      ).resolves.toMatchObject({ code: 'CHECKOUT_NOT_FOUND' });
     });
   });
 });
