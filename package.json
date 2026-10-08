@@ -21,7 +21,8 @@
     "gen:openapi": "nest build && node dist/src/scripts/generate-openapi.js",
     "gen:api": "pnpm gen:openapi && pnpm --dir ../webapp run gen:api",
     "db:generate": "prisma generate",
-    "seed": "tsc -p tsconfig.seed.json && node dist/prisma/seed.js"
+    "seed:build": "tsc -p tsconfig.seed.json",
+    "seed": "pnpm seed:build && node dist/prisma/seed.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",

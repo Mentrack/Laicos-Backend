@@ -34,7 +34,11 @@ export class CartProduceDto {
   })
   pricePerUnit: string;
 
-  @ApiProperty({ example: 500, description: 'Stock still orderable' })
+  @ApiProperty({
+    type: 'integer',
+    example: 500,
+    description: 'Stock still orderable',
+  })
   floatingQuantity: number;
 
   @ApiProperty({ enum: ProduceStatus, enumName: 'ProduceStatus' })
@@ -48,7 +52,11 @@ export class CartItemDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty({ example: 10, description: "In the produce's `unit`" })
+  @ApiProperty({
+    type: 'integer',
+    example: 10,
+    description: "Whole units of the produce's `unit`",
+  })
   quantity: number;
 
   @ApiProperty({

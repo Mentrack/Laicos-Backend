@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -32,11 +33,12 @@ export class CreateProduceDto {
   name: string;
 
   @ApiProperty({
+    type: 'integer',
     example: 500,
     description:
-      'Stock on hand, in `unit`. floatingQuantity starts equal to it and is managed by orders.',
+      'Whole units of stock on hand, in `unit`. floatingQuantity starts equal to it and is managed by orders.',
   })
-  @IsNumber({ allowNaN: false, allowInfinity: false })
+  @IsInt()
   @Min(0)
   @Type(() => Number)
   actualQuantity: number;

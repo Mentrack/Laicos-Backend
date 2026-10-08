@@ -10,6 +10,7 @@ import {
   tryReserveProduce,
   type OrderLine,
 } from '../order/utils/reservation';
+import { isTransactionTimeout } from '../common/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutDto } from './dto';
 import { CART_ITEM_INCLUDE } from './formatters/cart.formatter';
@@ -38,7 +39,28 @@ const CHECKOUT_INCLUDE = {
 export class CheckoutService {
   constructor(private readonly database: PrismaService) {}
 
-  checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
+  async checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
+    try {
+      return await this.placeOrders(user, idempotencyKey, dto);
+    } catch (error) {
+      // Rolled back, so a retry with the same key is safe. A 409 rather than
+      // a 503: HttpExceptionFilter hides every 5xx behind a generic message,
+      // and the client needs this code to know it can retry.
+      if (isTransactionTimeout(error)) {
+        throw new ConflictException({
+          message: 'Checkout is busy; please try again',
+          code: 'CHECKOUT_BUSY',
+        });
+      }
+      throw error;
+    }
+  }
+
+  private placeOrders(
+    user: User,
+    idempotencyKey: string,
+    dto: CreateCheckoutDto,
+  ) {
     return this.database.$transaction(async (tx) => {
       await lockCart(tx, user.id);
       const replay = await tx.checkout.findUnique({
@@ -57,7 +79,10 @@ export class CheckoutService {
         orderBy: { produceId: 'asc' },
       });
       if (items.length === 0) {
-        throw new BadRequestException('Your cart is empty');
+        throw new BadRequestException({
+          message: 'Your cart is empty',
+          code: 'CART_EMPTY',
+        });
       }
       const problems = items.flatMap((item) => {
         const issue = cartItemIssue(item);
@@ -118,7 +143,10 @@ export class CheckoutService {
       include: CHECKOUT_INCLUDE,
     });
     if (!checkout) {
-      throw new NotFoundException('Checkout not found');
+      throw new NotFoundException({
+        message: 'Checkout not found',
+        code: 'CHECKOUT_NOT_FOUND',
+      });
     }
     return checkout;
   }

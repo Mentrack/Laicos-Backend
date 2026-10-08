@@ -19,3 +19,8 @@ export function isForeignKeyViolation(error: unknown): boolean {
 export function isRecordNotFound(error: unknown): boolean {
   return hasPrismaCode(error, 'P2025');
 }
+
+/** An interactive transaction that outran its timeout or never got started. */
+export function isTransactionTimeout(error: unknown): boolean {
+  return hasPrismaCode(error, 'P2028');
+}

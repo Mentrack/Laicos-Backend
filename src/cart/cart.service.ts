@@ -46,9 +46,10 @@ export class CartService {
         (await tx.cartItem.count({ where: { buyerId: user.id } })) >=
           MAX_CART_ITEMS
       ) {
-        throw new ConflictException(
-          `Your cart can hold at most ${MAX_CART_ITEMS} items`,
-        );
+        throw new ConflictException({
+          message: `Your cart can hold at most ${MAX_CART_ITEMS} items`,
+          code: 'CART_FULL',
+        });
       }
       const quantity = (existing?.quantity ?? 0) + dto.quantity;
       await assertOrderable(tx, dto.produceId, quantity);
@@ -98,7 +99,10 @@ async function findOwnItem(
     where: { id, buyerId: user.id },
   });
   if (!item) {
-    throw new NotFoundException('Cart item not found');
+    throw new NotFoundException({
+      message: 'Cart item not found',
+      code: 'CART_ITEM_NOT_FOUND',
+    });
   }
   return item;
 }

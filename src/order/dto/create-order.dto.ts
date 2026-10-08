@@ -1,13 +1,18 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsPositive, IsUUID } from 'class-validator';
+import { IsInt, IsPositive, IsUUID } from 'class-validator';
 
 export class CreateOrderDto {
   @ApiProperty({ format: 'uuid', description: 'A PUBLISHED produce' })
   @IsUUID()
   produceId: string;
 
-  @ApiProperty({ example: 50, description: "In the produce's `unit`" })
-  @IsNumber({ allowNaN: false, allowInfinity: false })
+  // Produce is sold in whole units: no one buys half a tuber.
+  @ApiProperty({
+    type: 'integer',
+    example: 50,
+    description: "Whole units of the produce's `unit`",
+  })
+  @IsInt()
   @IsPositive()
   quantity: number;
 }

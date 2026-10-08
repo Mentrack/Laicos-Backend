@@ -22,6 +22,8 @@ COPY . .
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 RUN pnpm db:generate
 RUN pnpm build
+# After `build`: nest's deleteOutDir would wipe dist/prisma/seed.js.
+RUN pnpm seed:build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
@@ -44,4 +46,7 @@ EXPOSE 8080
 # node_modules against the workspace on every exec, which fails here since
 # there's no pnpm installed in this stage and no writable store to reconcile.
 # migrate deploy takes its own advisory lock, so concurrent instance starts are safe.
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && node dist/src/main"]
+# The seed is opt-in per environment (SEED_ON_DEPLOY=true) and takes no lock, so
+# replicas starting together can race on it. A failed seed is logged, but the app
+# still starts: demo data shouldn't take the environment down.
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && { if [ \"$SEED_ON_DEPLOY\" = true ]; then node dist/prisma/seed.js || echo 'Seed failed; starting anyway' >&2; fi; } && node dist/src/main"]

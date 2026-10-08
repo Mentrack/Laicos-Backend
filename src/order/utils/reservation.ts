@@ -94,14 +94,21 @@ export function orderRefusal(produce: ReservableProduce | null) {
     produce.status === ProduceStatus.DRAFT ||
     produce.farm.verificationStatus !== FarmVerificationStatus.VERIFIED
   ) {
-    return new NotFoundException('Produce not found');
+    return new NotFoundException({
+      message: 'Produce not found',
+      code: 'PRODUCE_NOT_FOUND',
+    });
   }
   if (produce.status !== ProduceStatus.PUBLISHED) {
-    return new ConflictException('Produce is not available for ordering');
+    return new ConflictException({
+      message: 'Produce is not available for ordering',
+      code: 'PRODUCE_UNAVAILABLE',
+    });
   }
-  return new ConflictException(
-    `Only ${produce.floatingQuantity} ${produce.unit} available`,
-  );
+  return new ConflictException({
+    message: `Only ${produce.floatingQuantity} ${produce.unit} available`,
+    code: 'INSUFFICIENT_STOCK',
+  });
 }
 
 export function linePrice(

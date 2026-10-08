@@ -5,12 +5,14 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
+import { PaymentModule } from './payment/payment.module';
 import { requireConfig } from './common/config';
 import { FarmModule } from './farm/farm.module';
 import { HandoverModule } from './handover/handover.module';
 import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProduceModule } from './produce/produce.module';
+import { SourcingRequestModule } from './sourcing-request/sourcing-request.module';
 import { StorageModule } from './storage/storage.module';
 import { AgentModule } from './agent/agent.module';
 import { LocationModule } from './location/location.module';
@@ -50,6 +52,8 @@ import { VerificationModule } from './verification/verification.module';
     ProduceModule,
     OrderModule,
     CartModule,
+    PaymentModule,
+    SourcingRequestModule,
     StorageModule,
     AgentModule,
     LocationModule,

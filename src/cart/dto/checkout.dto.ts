@@ -20,6 +20,15 @@ export class CheckoutDto {
   @ApiProperty({ example: 'CHK-000123' })
   checkoutNumber: string;
 
+  @ApiProperty({ format: 'uuid', description: 'User.id of the buyer' })
+  buyerId: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    description: 'The Idempotency-Key this checkout was placed with',
+  })
+  idempotencyKey: string;
+
   // Prisma serialises Decimal as a string, which keeps money exact.
   @ApiProperty({ type: String, example: '45000.00' })
   totalPrice: string;

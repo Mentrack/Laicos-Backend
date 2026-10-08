@@ -90,4 +90,15 @@ describe('CreateProduceDto', () => {
       expect.arrayContaining(['description', 'specs']),
     );
   });
+
+  it('rejects fractional stock: produce is sold in whole units', async () => {
+    const dto = plainToInstance(CreateProduceDto, {
+      ...multipartBody,
+      actualQuantity: '2.5',
+    });
+
+    const errors = await validate(dto, pipeOptions);
+
+    expect(errors.map((error) => error.property)).toContain('actualQuantity');
+  });
 });

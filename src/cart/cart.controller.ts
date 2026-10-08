@@ -14,9 +14,9 @@ import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
+import { IdempotencyKey, idempotencyKeyPipe } from '../common/idempotency-key';
 import { CartService } from './cart.service';
 import { CheckoutService } from './checkout.service';
-import { IdempotencyKey } from './decorators/idempotency-key.decorator';
 import {
   AddCartItemDto,
   CartDto,
@@ -100,7 +100,7 @@ export class CartController {
   @ApiEnvelope(CheckoutDto, { status: HttpStatus.CREATED })
   async checkout(
     @CurrentUser() user: User,
-    @IdempotencyKey(new ParseUUIDPipe()) idempotencyKey: string,
+    @IdempotencyKey(idempotencyKeyPipe()) idempotencyKey: string,
     @Body() dto: CreateCheckoutDto,
   ) {
     const data = await this.checkouts.checkout(user, idempotencyKey, dto);

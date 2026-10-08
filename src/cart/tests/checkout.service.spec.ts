@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, HttpException } from '@nestjs/common';
 import {
   FarmVerificationStatus,
   Prisma,
@@ -47,6 +43,13 @@ function cartRow(produceId: string, quantity: number, overrides = {}) {
     quantity,
     produce: listing(produceId, overrides),
   };
+}
+
+// The body HttpExceptionFilter reads `message` and `code` from.
+async function errorBody(promise: Promise<unknown>) {
+  const error: unknown = await promise.catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(HttpException);
+  return (error as HttpException).getResponse();
 }
 
 describe('CheckoutService', () => {
@@ -113,8 +116,33 @@ describe('CheckoutService', () => {
   it('refuses an empty cart', async () => {
     tx.cartItem.findMany.mockResolvedValue([]);
     await expect(
-      service.checkout(buyer, key, { expectedTotal: 0 }),
-    ).rejects.toThrow(new BadRequestException('Your cart is empty'));
+      errorBody(service.checkout(buyer, key, { expectedTotal: 0 })),
+    ).resolves.toEqual({ message: 'Your cart is empty', code: 'CART_EMPTY' });
+  });
+
+  it('matches a whole-number expectedTotal against a 2-dp total', async () => {
+    reservable(
+      cartRow('a', 2, { pricePerUnit: new Prisma.Decimal('4500.00') }),
+    );
+    await expect(
+      service.checkout(buyer, key, { expectedTotal: 9000 }),
+    ).resolves.toBeDefined();
+  });
+
+  it('asks the buyer to retry when the checkout transaction times out', async () => {
+    tx.cartItem.findMany.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Transaction already closed', {
+        code: 'P2028',
+        clientVersion: 'test',
+      }),
+    );
+    const body = await errorBody(
+      service.checkout(buyer, key, { expectedTotal: 1 }),
+    );
+    expect(body).toEqual({
+      message: 'Checkout is busy; please try again',
+      code: 'CHECKOUT_BUSY',
+    });
   });
 
   it('lists every problem item at once and reserves nothing', async () => {
@@ -281,9 +309,12 @@ describe('CheckoutService', () => {
 
     it('404s on a checkout the caller cannot see', async () => {
       database.checkout.findFirst.mockResolvedValue(null);
-      await expect(service.findOne(buyer, checkoutId)).rejects.toThrow(
-        new NotFoundException('Checkout not found'),
-      );
+      await expect(
+        errorBody(service.findOne(buyer, checkoutId)),
+      ).resolves.toEqual({
+        message: 'Checkout not found',
+        code: 'CHECKOUT_NOT_FOUND',
+      });
     });
   });
 });
