@@ -7,9 +7,11 @@ import {
   IsString,
 } from 'class-validator';
 import { Role } from '../../../generated/client';
+import { NormalizedEmail } from '../../common/dto/normalized-email';
 
 export class RegisterDto {
   @ApiProperty({ example: 'ada@example.com' })
+  @NormalizedEmail()
   @IsEmail()
   @IsNotEmpty()
   email: string;

@@ -4,6 +4,7 @@ import { Prisma, Role } from '../../../generated/client';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../auth.service';
+import { EmailOtpService } from '../email-otp.service';
 import { FirebaseGoogleSignInDto } from '../dto';
 import { FirebaseService } from '../firebase/firebase.service';
 
@@ -37,6 +38,7 @@ describe('AuthService Google sign-in', () => {
     firebase as unknown as FirebaseService,
     {} as ConfigService,
     {} as MailService,
+    {} as EmailOtpService,
   );
 
   beforeEach(() => {
@@ -50,11 +52,12 @@ describe('AuthService Google sign-in', () => {
         ...google,
         isNewUser: false,
       });
-      user.findUnique.mockResolvedValue({ id: 'user-1' });
+      const buyer = { id: 'user-1', role: Role.BUYER, isVerified: true };
+      user.findUnique.mockResolvedValue(buyer);
 
       await expect(
         service.googleLogin({ idToken: 'google-token' }),
-      ).resolves.toEqual({ user: { id: 'user-1' }, ...tokens });
+      ).resolves.toEqual({ user: buyer, ...tokens });
       expect(firebase.signInWithGoogle).toHaveBeenCalledWith('google-token');
       expect(refreshToken.upsert).toHaveBeenCalledWith({
         where: { userId: 'user-1' },

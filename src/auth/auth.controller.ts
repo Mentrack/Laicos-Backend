@@ -7,7 +7,12 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiCreatedResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { User } from '../../generated/client';
 import { ApiEnvelope, MessageResponseDto } from '../common/dto/envelope';
 import { AuthService } from './auth.service';
@@ -24,8 +29,10 @@ import {
   LoginDto,
   RefreshTokenDto,
   RegisterDto,
+  ResendVerificationDto,
   TokenPairDto,
   UserDto,
+  VerifyEmailDto,
 } from './dto';
 
 @Controller('auth')
@@ -37,16 +44,49 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register with email and password',
     description:
-      'Creates the Firebase account and the local user, and signs them in. Buyers and riders only; farmers and agents have their own signup.',
+      'Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Buyers and riders only; farmers and agents have their own signup.',
   })
-  @ApiEnvelope(AuthSessionDto, { status: HttpStatus.CREATED })
+  @ApiCreatedResponse({ type: MessageResponseDto })
   async register(@Body() dto: RegisterDto) {
-    const data = await this.auth.register(dto);
-    return { data, message: 'User registered' };
+    await this.auth.register(dto);
+    return { data: null, message: 'Verification code sent' };
+  }
+
+  @Post('verify-email')
+  @ApiOperation({
+    summary: 'Verify the email with the emailed code and sign in',
+    description:
+      '400 INVALID_VERIFICATION_CODE for any failure: wrong, expired or used code, or unknown email. The 5th wrong guess also kills the code, so the user must request a new one.',
+  })
+  @HttpCode(HttpStatus.OK)
+  @ApiEnvelope(AuthSessionDto)
+  async verifyEmail(@Body() dto: VerifyEmailDto) {
+    const data = await this.auth.verifyEmail(dto);
+    return { data, message: 'Email verified' };
+  }
+
+  @Post('verify-email/resend')
+  @ApiOperation({
+    summary: 'Email a new verification code',
+    description:
+      'Always the same answer. Sends nothing within 60 seconds of the last code, past 10 codes a day, or when the email needs no verifying.',
+  })
+  @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ type: MessageResponseDto })
+  async resendVerification(@Body() dto: ResendVerificationDto) {
+    await this.auth.resendVerification(dto.email);
+    return {
+      data: null,
+      message: 'If that email needs verifying, a new code has been sent',
+    };
   }
 
   @Post('login')
-  @ApiOperation({ summary: 'Log in with email and password' })
+  @ApiOperation({
+    summary: 'Log in with email and password',
+    description:
+      '403 EMAIL_NOT_VERIFIED for a buyer or rider who has not verified: open the code screen and call POST /auth/verify-email/resend.',
+  })
   @HttpCode(HttpStatus.OK)
   @ApiEnvelope(AuthSessionDto)
   async login(@Body() dto: LoginDto) {

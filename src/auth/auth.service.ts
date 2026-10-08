@@ -17,13 +17,20 @@ import {
   GoogleRegisterDto,
   CreateLocalUserDto,
   FirebaseAuthTokensDto,
+  VerifyEmailDto,
 } from './dto';
+import { EmailOtpService } from './email-otp.service';
 import { firebaseErrorCode } from './firebase/firebase.errors';
 import { FirebaseService } from './firebase/firebase.service';
 import {
   isPendingActivation,
   verificationPendingError,
 } from './utils/pending-access';
+import {
+  emailNotVerifiedError,
+  invalidVerificationCodeError,
+  needsEmailVerification,
+} from './utils/email-verification';
 import { webappUrl } from '../common/config';
 import { MailService } from '../mail/mail.service';
 import { passwordResetEmail } from '../mail/templates';
@@ -44,19 +51,59 @@ export class AuthService {
     private readonly firebase: FirebaseService,
     private readonly config: ConfigService,
     private readonly mail: MailService,
+    private readonly otp: EmailOtpService,
   ) {}
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto): Promise<void> {
     const firebaseRecord = await this.createFirebaseUser(dto);
+    let user: UserModel;
     try {
-      return await this.completeRegistration(dto, firebaseRecord);
+      user = await this.createLocalUser({
+        firebaseUid: firebaseRecord.uid,
+        email: dto.email,
+        firstName: dto.firstName,
+        lastName: dto.lastName,
+        phoneNumber: dto.phoneNumber,
+        role: dto.role,
+        isVerified: false,
+      });
     } catch (error) {
-      await this.database.user
-        .deleteMany({ where: { firebaseUid: firebaseRecord.uid } })
-        .catch(() => undefined);
       await this.deleteFirebaseUser(firebaseRecord.uid);
       throw error;
     }
+    // The account stands without the email: rolling back would turn the
+    // user's retry into a 409. "Resend code" recovers.
+    await this.otp.issue(user).catch((error) => {
+      this.logger.error(`Verification code not sent to user ${user.id}`, error);
+    });
+  }
+
+  async verifyEmail(dto: VerifyEmailDto) {
+    const user = await this.database.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (!user) {
+      throw invalidVerificationCodeError();
+    }
+    // Only buyers and riders are ever issued a code, and only until verified.
+    await this.otp.verify(user.id, dto.code);
+    // Every step is idempotent and the code is discarded last, so a failure
+    // anywhere lets the user retry with the same code.
+    await this.firebase.auth.updateUser(user.firebaseUid, {
+      emailVerified: true,
+    });
+    const verified = await this.database.user.update({
+      where: { id: user.id },
+      data: { isVerified: true },
+    });
+    const tokens = await this.firebase.signInWithCustomToken(user.firebaseUid);
+    await this.saveRefreshToken(verified.id, tokens.refreshToken);
+    await this.otp.discard(user.id);
+    return { user: verified, ...toTokenPair(tokens) };
+  }
+
+  resendVerification(email: string): Promise<void> {
+    return this.otp.resend(email);
   }
 
   async login(dto: LoginDto) {
@@ -85,8 +132,12 @@ export class AuthService {
     if (isPendingActivation(user)) {
       throw verificationPendingError(user.role);
     }
-    await this.saveRefreshToken(user.id, google.refreshToken);
-    return { user, ...toTokenPair(google) };
+    const verified = await this.trustGoogleVerification(user, google);
+    if (needsEmailVerification(verified)) {
+      throw emailNotVerifiedError();
+    }
+    await this.saveRefreshToken(verified.id, google.refreshToken);
+    return { user: verified, ...toTokenPair(google) };
   }
 
   async googleRegister(dto: GoogleRegisterDto) {
@@ -233,33 +284,6 @@ export class AuthService {
   //   );
   // }
 
-  private async completeRegistration(
-    dto: RegisterDto,
-    firebaseRecord: UserRecord,
-  ) {
-    const user = await this.createLocalUser({
-      firebaseUid: firebaseRecord.uid,
-      email: dto.email,
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-      phoneNumber: dto.phoneNumber,
-      role: dto.role,
-      isVerified: firebaseRecord.emailVerified,
-    });
-    const tokens = await this.firebase.signInWithPassword(
-      dto.email,
-      dto.password,
-    );
-    await this.saveRefreshToken(user.id, tokens.refreshToken);
-
-    // await this.sendEmail(
-    //   dto.email,
-    //   this.emailTemplates.renderWelcome({ firstName: dto.firstName }),
-    // );
-
-    return { user, ...toTokenPair(tokens) };
-  }
-
   /** No `password` leaves an account nobody can sign in to: a new farmer. */
   async createFirebaseUser(
     dto: Pick<RegisterDto, 'email' | 'firstName' | 'lastName'> & {
@@ -312,7 +336,22 @@ export class AuthService {
     });
   }
 
-  /** The local user for a sign-in, refusing anyone awaiting verification. */
+  // Google proving the address counts as our code: a password buyer who never
+  // entered theirs is verified by signing in with Google.
+  private async trustGoogleVerification(
+    user: UserModel,
+    google: { emailVerified: boolean },
+  ): Promise<UserModel> {
+    if (user.isVerified || !google.emailVerified) {
+      return user;
+    }
+    return this.database.user.update({
+      where: { id: user.id },
+      data: { isVerified: true },
+    });
+  }
+
+  /** The local user for a sign-in, refusing anyone awaiting verification or an email check. */
   private async requireLocalUser(firebaseUid: string) {
     const user = await this.database.user.findUnique({
       where: { firebaseUid },
@@ -322,6 +361,9 @@ export class AuthService {
     }
     if (isPendingActivation(user)) {
       throw verificationPendingError(user.role);
+    }
+    if (needsEmailVerification(user)) {
+      throw emailNotVerifiedError();
     }
     return user;
   }

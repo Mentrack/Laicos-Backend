@@ -4,14 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  FarmVerificationStatus,
   OrderStatus,
   Prisma,
-  ProduceStatus,
   Role,
-  type Farm,
   type Order,
-  type Produce,
   type User,
 } from '../../generated/client';
 import { farmOwnedBy } from '../common/ownership';
@@ -19,6 +15,7 @@ import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
 import { PrismaService } from '../prisma/prisma.service';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
+import { orderLine, reserveProduce } from './utils/reservation';
 import {
   CancelOrderDto,
   CreateOrderDto,
@@ -70,40 +67,9 @@ export class OrderService {
 
   async create(user: User, dto: CreateOrderDto) {
     return this.database.$transaction(async (tx) => {
-      // One conditional UPDATE both checks and reserves the stock, so two
-      // buyers racing for the last units can't both succeed. It also holds
-      // the row lock for the rest of this transaction, so the status sync
-      // below needs no extra guard.
-      const reserved = await tx.produce.updateMany({
-        where: {
-          id: dto.produceId,
-          status: ProduceStatus.PUBLISHED,
-          floatingQuantity: { gte: dto.quantity },
-          farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
-        },
-        data: { floatingQuantity: { decrement: dto.quantity } },
-      });
-      const produce = await tx.produce.findUnique({
-        where: { id: dto.produceId },
-        include: { farm: { select: { verificationStatus: true } } },
-      });
-
-      if (reserved.count === 0 || !produce) {
-        throw orderRefusal(produce);
-      }
-
-      await syncProduceStatus(tx, produce);
-
+      const produce = await reserveProduce(tx, dto.produceId, dto.quantity);
       return tx.order.create({
-        data: {
-          produceId: produce.id,
-          farmId: produce.farmId,
-          buyerId: user.id,
-          quantity: dto.quantity,
-          produceName: produce.name,
-          type: produce.type,
-          totalPrice: produce.pricePerUnit.mul(dto.quantity).toDecimalPlaces(2),
-        },
+        data: { ...orderLine(produce, dto.quantity), buyerId: user.id },
       });
     });
   }
@@ -343,17 +309,6 @@ export class OrderService {
   }
 }
 
-// Sets Produce.status to match `produce`'s (already-updated) quantities, if
-// it needs to change. Safe without an extra guard: the caller's own write
-// just took this row's lock for the rest of the transaction.
-function syncProduceStatus(tx: Prisma.TransactionClient, produce: Produce) {
-  const status = deriveProduceStatus(produce.status, produce);
-  if (status === produce.status) {
-    return;
-  }
-  return tx.produce.update({ where: { id: produce.id }, data: { status } });
-}
-
 /** Gives back the stock `order` took in the status it was in when read. */
 async function releaseStock(tx: Prisma.TransactionClient, order: Order) {
   const produce = await tx.produce.findUniqueOrThrow({
@@ -379,26 +334,6 @@ async function releaseStock(tx: Prisma.TransactionClient, order: Order) {
 }
 
 // Runs after a failed reservation to say why it failed.
-function orderRefusal(
-  produce: (Produce & { farm: Pick<Farm, 'verificationStatus'> }) | null,
-) {
-  // Drafts and unverified farms' listings are hidden, so ordering one reads
-  // as not found.
-  if (
-    !produce ||
-    produce.status === ProduceStatus.DRAFT ||
-    produce.farm.verificationStatus !== FarmVerificationStatus.VERIFIED
-  ) {
-    return new NotFoundException('Produce not found');
-  }
-  if (produce.status !== ProduceStatus.PUBLISHED) {
-    return new ConflictException('Produce is not available for ordering');
-  }
-  return new ConflictException(
-    `Only ${produce.floatingQuantity} ${produce.unit} available`,
-  );
-}
-
 function isSeller(user: User) {
   return user.role === Role.FARMER || user.role === Role.ADMIN;
 }

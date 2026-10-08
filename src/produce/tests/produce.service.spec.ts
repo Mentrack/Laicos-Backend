@@ -1,7 +1,12 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   FarmVerificationStatus,
   Prisma,
+  ProduceCategory,
   ProduceStatus,
   ProduceType,
   Role,
@@ -10,9 +15,11 @@ import {
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import { ProduceSort } from '../dto';
 import { ProduceService } from '../produce.service';
 
 const user = { id: 'user-1', role: Role.FARMER } as User;
+const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
 const farmId = '6f1c1c3e-2b8e-4a55-9d0e-3b6b1f0c9a11';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const ownedByUser = { owner: { userId: user.id } };
@@ -25,6 +32,19 @@ const visible = {
     },
     { farm: ownedByUser },
   ],
+};
+// Buyers get the farm's code and region, never its street address.
+const listingInclude = {
+  farm: {
+    select: {
+      id: true,
+      farmCode: true,
+      verificationStatus: true,
+      country: true,
+      state: { select: { id: true, name: true } },
+      lga: { select: { id: true, stateId: true, name: true } },
+    },
+  },
 };
 
 // The leading bytes of a PNG, which IMAGE_SIGNATURES matches on.
@@ -46,7 +66,7 @@ describe('ProduceService', () => {
   const farm = { findFirst: jest.fn() };
   const produce = {
     create: jest.fn(),
-    findMany: jest.fn(),
+    findMany: jest.fn<Promise<unknown[]>, [Prisma.ProduceFindManyArgs]>(),
     count: jest.fn(),
     findFirst: jest.fn(),
     update: jest.fn(),
@@ -141,24 +161,98 @@ describe('ProduceService', () => {
     });
   });
 
-  it('filters by status and type and hides other farmers’ drafts', async () => {
-    produce.findMany.mockResolvedValue([]);
-    produce.count.mockResolvedValue(3);
-    const result = await service.findAll(user, {
-      status: ProduceStatus.PUBLISHED,
-      type: ProduceType.EXPORT,
+  describe('findAll', () => {
+    beforeEach(() => {
+      produce.findMany.mockResolvedValue([]);
+      produce.count.mockResolvedValue(3);
     });
-    const where = {
-      ...visible,
-      status: ProduceStatus.PUBLISHED,
-      type: ProduceType.EXPORT,
-      farmId: undefined,
-    };
-    expect(produce.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where, skip: 0, take: 20 }),
-    );
-    expect(produce.count).toHaveBeenCalledWith({ where });
-    expect(result.metaData.total).toBe(3);
+
+    function findManyArgs() {
+      return produce.findMany.mock.calls[0][0];
+    }
+
+    it('filters by status and type and hides other farmers’ drafts', async () => {
+      const result = await service.findAll(user, {
+        status: ProduceStatus.PUBLISHED,
+        type: ProduceType.EXPORT,
+      });
+      const { where, skip, take } = findManyArgs();
+      expect(where).toMatchObject({
+        ...visible,
+        status: ProduceStatus.PUBLISHED,
+        type: ProduceType.EXPORT,
+      });
+      expect({ skip, take }).toEqual({ skip: 0, take: 20 });
+      expect(produce.count).toHaveBeenCalledWith({ where });
+      expect(result.metaData.total).toBe(3);
+    });
+
+    it('shows buyers only orderable listings by default', async () => {
+      await service.findAll(buyer, {});
+      expect(findManyArgs().where?.status).toBe(ProduceStatus.PUBLISHED);
+    });
+
+    it('lets buyers ask for sold-out listings', async () => {
+      await service.findAll(buyer, { status: ProduceStatus.SOLD_OUT });
+      expect(findManyArgs().where?.status).toBe(ProduceStatus.SOLD_OUT);
+    });
+
+    it('leaves a farmer’s list unfiltered by status by default', async () => {
+      await service.findAll(user, {});
+      expect(findManyArgs().where?.status).toBeUndefined();
+    });
+
+    it('searches the name case-insensitively', async () => {
+      await service.findAll(buyer, { search: 'cassava' });
+      expect(findManyArgs().where?.name).toEqual({
+        contains: 'cassava',
+        mode: 'insensitive',
+      });
+    });
+
+    it('filters by category', async () => {
+      await service.findAll(buyer, { category: ProduceCategory.TUBERS });
+      expect(findManyArgs().where?.category).toBe(ProduceCategory.TUBERS);
+    });
+
+    it('filters by the farm’s state and LGA', async () => {
+      await service.findAll(buyer, { stateId: 'state-1', lgaId: 'lga-1' });
+      expect(findManyArgs().where?.farm).toEqual({
+        stateId: 'state-1',
+        lgaId: 'lga-1',
+      });
+    });
+
+    it('filters by a price range', async () => {
+      await service.findAll(buyer, { minPrice: 100, maxPrice: 500 });
+      expect(findManyArgs().where?.pricePerUnit).toEqual({
+        gte: 100,
+        lte: 500,
+      });
+    });
+
+    it('rejects a price range whose minimum exceeds its maximum', async () => {
+      await expect(
+        service.findAll(buyer, { minPrice: 500, maxPrice: 100 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(produce.findMany).not.toHaveBeenCalled();
+    });
+
+    it('includes the farm’s code and region', async () => {
+      await service.findAll(buyer, {});
+      expect(findManyArgs().include).toEqual(listingInclude);
+    });
+
+    it.each([
+      [undefined, { createdAt: 'desc' }],
+      [ProduceSort.NEWEST, { createdAt: 'desc' }],
+      [ProduceSort.PRICE_ASC, { pricePerUnit: 'asc' }],
+      [ProduceSort.PRICE_DESC, { pricePerUnit: 'desc' }],
+      [ProduceSort.STOCK_DESC, { floatingQuantity: 'desc' }],
+    ])('sorts %s by %o, then id for stable paging', async (sort, primary) => {
+      await service.findAll(buyer, { sort });
+      expect(findManyArgs().orderBy).toEqual([primary, { id: 'desc' }]);
+    });
   });
 
   it('404s on produce the user cannot see', async () => {
@@ -168,6 +262,7 @@ describe('ProduceService', () => {
     );
     expect(produce.findFirst).toHaveBeenCalledWith({
       where: { id: produceId, ...visible },
+      include: listingInclude,
     });
   });
 

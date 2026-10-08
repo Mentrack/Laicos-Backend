@@ -175,3 +175,35 @@ export function passwordResetEmail(input: {
     ].join('\n'),
   };
 }
+
+export function emailVerificationCodeEmail(input: {
+  firstName: string;
+  code: string;
+  expiresInMinutes: number;
+}): RenderedEmail {
+  const title = 'Verify your email';
+  const lifetime = `It expires in ${input.expiresInMinutes} minutes.`;
+  const ignore =
+    'If you didn’t create a LAICOS account, you can ignore this email.';
+  return {
+    subject: `${input.code} is your LAICOS verification code`,
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(`Enter this code to verify your email. ${lifetime}`),
+        `<p style="margin:24px 0;font-size:32px;font-weight:700;letter-spacing:8px;color:${BRAND}">${escapeHtml(input.code)}</p>`,
+        paragraph(ignore),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `Enter this code to verify your email. ${lifetime}`,
+      '',
+      input.code,
+      '',
+      ignore,
+    ].join('\n'),
+  };
+}

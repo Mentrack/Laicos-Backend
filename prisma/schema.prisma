@@ -9,29 +9,32 @@ datasource db {
 }
 
 model User {
-  id                 String        @id @default(uuid())
-  firebaseUid        String        @unique
-  firstName          String
-  lastName           String
-  email              String        @unique
-  phoneNumber        String?
-  role               Role
-  agreedToTerms      Boolean       @default(false)
+  id                    String                 @id @default(uuid())
+  firebaseUid           String                 @unique
+  firstName             String
+  lastName              String
+  email                 String                 @unique
+  phoneNumber           String?
+  role                  Role
+  agreedToTerms         Boolean                @default(false)
   // Mirrors Firebase's emailVerified;
-  isVerified         Boolean       @default(false)
+  isVerified            Boolean                @default(false)
   // Farmers and agents only: set when a farmer's first farm is verified, or
   // (once the admin flow exists) when an admin verifies an agent. Until then
   // ActivationGuard locks them out. Other roles leave it null.
-  activatedAt        DateTime?
+  activatedAt           DateTime?
   // Set with the temporary password sent in a farmer's invite;
   // PasswordChangeGuard blocks most routes until changePassword clears it.
-  mustChangePassword Boolean       @default(false)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
-  farmer             Farmer?
-  agent              Agent?
-  orders             Order[]
-  refreshToken       RefreshToken?
+  mustChangePassword    Boolean                @default(false)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  farmer                Farmer?
+  agent                 Agent?
+  orders                Order[]
+  cartItems             CartItem[]
+  checkouts             Checkout[]
+  refreshToken          RefreshToken?
+  emailVerificationCode EmailVerificationCode?
 }
 
 model RefreshToken {
@@ -41,6 +44,22 @@ model RefreshToken {
   token     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// One live code per user; issuing a new one overwrites it.
+model EmailVerificationCode {
+  userId              String   @id
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // HMAC-SHA256 keyed by OTP_SECRET: a bare hash of 4 digits is reversible.
+  codeHash            String
+  expiresAt           DateTime
+  attempts            Int      @default(0)
+  lastSentAt          DateTime
+  // Codes sent since sendWindowStartedAt; caps resends at a few a day.
+  sendCount           Int      @default(0)
+  sendWindowStartedAt DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model Farmer {
@@ -246,9 +265,9 @@ model AssignmentDecline {
 }
 
 model Produce {
-  id               String        @id @default(uuid())
+  id               String           @id @default(uuid())
   farmId           String
-  farm             Farm          @relation(fields: [farmId], references: [id], onDelete: Cascade)
+  farm             Farm             @relation(fields: [farmId], references: [id], onDelete: Cascade)
   name             String
   // Original stock listed at creation. Immutable: actual/floating move as
   // orders come in, but this stays the record of what was first listed.
@@ -261,13 +280,19 @@ model Produce {
   floatingQuantity Float
   // Unit the quantities and pricePerUnit are expressed in, e.g. "kg" or "crate".
   unit             String
-  pricePerUnit     Decimal       @db.Decimal(12, 2)
+  pricePerUnit     Decimal          @db.Decimal(12, 2)
   imageUrl         String?
-  status           ProduceStatus @default(DRAFT)
-  type             ProduceType   @default(LOCAL)
+  status           ProduceStatus    @default(DRAFT)
+  type             ProduceType      @default(LOCAL)
+  // Optional so listings created before categories existed stay valid.
+  category         ProduceCategory?
+  description      String?
+  // Short free text shown as "Specs", e.g. "Grade A — Fresh Harvest".
+  specs            String?
+  cartItems        CartItem[]
   orders           Order[]
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
   // Target of Order's composite FK, so an order's farm always matches its produce's farm.
   @@unique([id, farmId])
@@ -295,6 +320,9 @@ model Order {
   // Snapshot of the produce's type at order time, so lists can tag and filter
   // local vs export orders without joining Produce.
   type               ProduceType
+  // Null for Buy Now orders (POST /orders) and those placed before checkout.
+  checkoutId         String?
+  checkout           Checkout?       @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
   // Required whenever status is CANCELLED.
   cancellationReason String?
   // Created when the farmer starts preparing; READY needs every item ticked.
@@ -307,6 +335,7 @@ model Order {
   @@index([farmId])
   @@index([produceId])
   @@index([buyerId])
+  @@index([checkoutId])
 }
 
 model OrderChecklist {
@@ -342,6 +371,39 @@ model OrderHandover {
   updatedAt        DateTime       @updatedAt
 
   @@index([agentId, status])
+}
+
+// A buyer's cart is just their items: nothing is stored about the cart itself.
+// Prices are never stored here; lines always use the listing's current price.
+model CartItem {
+  id        String   @id @default(uuid())
+  buyerId   String
+  buyer     User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  produceId String
+  produce   Produce  @relation(fields: [produceId], references: [id], onDelete: Cascade)
+  quantity  Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([buyerId, produceId])
+}
+
+// One cart checkout: the orders it placed and what they cost together.
+// Paystack will attach its payment here.
+model Checkout {
+  id             String   @id @default(uuid())
+  // Public code (CHK-000123), backed by a hand-made sequence like Order.orderNumber.
+  checkoutNumber String   @unique @default(dbgenerated("('CHK-'::text || lpad((nextval('\"Checkout_checkoutNumber_seq\"'::regclass))::text, 6, '0'::text))"))
+  buyerId        String
+  // Checkouts are history, like orders.
+  buyer          User     @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  // Client-generated per attempt (Idempotency-Key); a retry replays the original.
+  idempotencyKey String
+  totalPrice     Decimal  @db.Decimal(12, 2)
+  orders         Order[]
+  createdAt      DateTime @default(now())
+
+  @@unique([buyerId, idempotencyKey])
 }
 
 enum HandoverStatus {
@@ -415,6 +477,18 @@ enum ProduceStatus {
   DRAFT
   PUBLISHED
   SOLD_OUT
+}
+
+enum ProduceCategory {
+  GRAINS
+  TUBERS
+  LEGUMES
+  OILSEEDS
+  VEGETABLES
+  FRUITS
+  NUTS
+  SPICES
+  OTHER
 }
 
 enum ProduceType {
