@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
+import { PaymentModule } from './payment/payment.module';
 import { requireConfig } from './common/config';
 import { FarmModule } from './farm/farm.module';
 import { HandoverModule } from './handover/handover.module';
@@ -51,6 +52,7 @@ import { VerificationModule } from './verification/verification.module';
     ProduceModule,
     OrderModule,
     CartModule,
+    PaymentModule,
     SourcingRequestModule,
     StorageModule,
     AgentModule,

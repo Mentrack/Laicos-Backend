@@ -1,5 +1,5 @@
 import type { HttpException } from '@nestjs/common';
-import { idempotencyKeyPipe } from '../decorators/idempotency-key.decorator';
+import { idempotencyKeyPipe } from '../idempotency-key';
 
 const meta = { type: 'custom' as const };
 

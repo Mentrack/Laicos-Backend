@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { User } from '../../generated/client';
+import { lagosToday, toDateColumn } from '../common/dates';
 import {
   PaginationQueryDto,
   paginationMeta,
@@ -13,23 +14,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateSourcingRequestDto } from './dto';
 import { formatSourcingRequest } from './formatters/sourcing-request.formatter';
 
-// en-CA formats as YYYY-MM-DD, so dates compare as plain strings.
-const lagosDate = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Africa/Lagos',
-});
-
 @Injectable()
 export class SourcingRequestService {
   constructor(private readonly database: PrismaService) {}
 
   async create(user: User, dto: CreateSourcingRequestDto) {
-    if (dto.requiredDate < lagosDate.format(new Date())) {
+    if (dto.requiredDate < lagosToday()) {
       throw new BadRequestException('Required date cannot be in the past');
     }
     const request = await this.database.sourcingRequest.create({
       data: {
         ...dto,
-        requiredDate: new Date(`${dto.requiredDate}T00:00:00.000Z`),
+        requiredDate: toDateColumn(dto.requiredDate),
         buyerId: user.id,
       },
     });

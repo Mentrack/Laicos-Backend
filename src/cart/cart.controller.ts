@@ -14,12 +14,9 @@ import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
+import { IdempotencyKey, idempotencyKeyPipe } from '../common/idempotency-key';
 import { CartService } from './cart.service';
 import { CheckoutService } from './checkout.service';
-import {
-  IdempotencyKey,
-  idempotencyKeyPipe,
-} from './decorators/idempotency-key.decorator';
 import {
   AddCartItemDto,
   CartDto,

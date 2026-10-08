@@ -1,13 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEnum,
-  IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
-  Matches,
   MaxLength,
 } from 'class-validator';
 import {
@@ -17,6 +15,7 @@ import {
   SourcingTimeline,
   SourcingUnit,
 } from '../../../generated/client';
+import { IsDateOnly } from '../../common/dto/date-only';
 import { Trimmed } from '../../common/dto/trimmed';
 
 export class CreateSourcingRequestDto {
@@ -70,11 +69,7 @@ export class CreateSourcingRequestDto {
     example: '2026-11-15',
     description: 'Today or later (Africa/Lagos)',
   })
-  // Matches pins the date-only shape; strict ISO 8601 rejects 2026-02-30.
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'requiredDate must be YYYY-MM-DD',
-  })
-  @IsISO8601({ strict: true })
+  @IsDateOnly()
   requiredDate: string;
 
   @ApiProperty({ enum: SourcingTimeline, enumName: 'SourcingTimeline' })
