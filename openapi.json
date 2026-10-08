@@ -1997,9 +1997,19 @@
     },
     "/orders": {
       "post": {
-        "description": "Buyers only. Reserves the quantity from the listing. 404 for listings the buyer cannot see, including those on unverified farms.",
+        "description": "Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.",
         "operationId": "OrderController_create",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A UUID the client generates once per attempt",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2016,7 +2026,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrderResponseDto"
+                  "$ref": "#/components/schemas/CheckoutResponseDto"
                 }
               }
             }
@@ -2027,7 +2037,7 @@
             "bearer": []
           }
         ],
-        "summary": "Place an order",
+        "summary": "Buy Now",
         "tags": [
           "Orders"
         ]
@@ -2497,6 +2507,99 @@
         ]
       }
     },
+    "/checkouts/{id}/payments": {
+      "post": {
+        "description": "Starts a payment attempt for the checkout total, abandoning any earlier one. BANK_TRANSFER returns the escrow account and the reference to quote, and extends the hold to BANK_TRANSFER_HOLD_HOURS. Nothing is charged yet: an admin confirms payments. 409 CHECKOUT_NOT_PAYABLE once paid, expired, cancelled or past expiresAt.",
+        "operationId": "PaymentController_initiate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A UUID the client generates once per payment attempt",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiatePaymentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Pay my checkout",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/admin/payments/{reference}/confirm": {
+      "post": {
+        "description": "For bank transfers seen in the escrow account (and, until a card provider is integrated, card payments). Marks the checkout PAID and releases its orders to the farmers. Repeating it returns the payment. 409 CHECKOUT_EXPIRED if the checkout expired first: refund the buyer.",
+        "operationId": "AdminPaymentController_confirm",
+        "parameters": [
+          {
+            "name": "reference",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm a payment by hand",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
     "/cart": {
       "get": {
         "description": "Not paginated: capped at 50 items and checked out whole. Lines use current prices; items that can no longer be ordered stay, flagged by `issue`.",
@@ -2645,7 +2748,7 @@
     },
     "/cart/checkout": {
       "post": {
-        "description": "All or nothing: places one PENDING order per item under one checkout and empties the cart. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when current prices no longer total expectedTotal. Retrying with the same Idempotency-Key returns the original checkout.",
+        "description": "All or nothing: reserves stock for every item, places the orders AWAITING_PAYMENT under one checkout and empties the cart. Pay with POST /checkouts/{id}/payments before expiresAt or the stock is released. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when items plus delivery no longer total expectedTotal. 404 ADDRESS_NOT_FOUND, 400 INVALID_DELIVERY_DATE. Retrying with the same Idempotency-Key returns the original checkout.",
         "operationId": "CartController_checkout",
         "parameters": [
           {
@@ -2723,6 +2826,43 @@
           }
         ],
         "summary": "Get a checkout and its orders",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/checkouts/{id}/cancel": {
+      "post": {
+        "description": "Releases its stock at once and cancels its orders. 409 CHECKOUT_NOT_CANCELLABLE once paid, expired or cancelled; a paid order is cancelled per order instead.",
+        "operationId": "CheckoutController_cancel",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Cancel my unpaid checkout",
         "tags": [
           "Cart"
         ]
@@ -3250,6 +3390,152 @@
         "summary": "List my open tasks",
         "tags": [
           "Agents"
+        ]
+      }
+    },
+    "/addresses": {
+      "get": {
+        "description": "Default first, then newest. At most 20.",
+        "operationId": "AddressController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressArrayResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my delivery addresses",
+        "tags": [
+          "Addresses"
+        ]
+      },
+      "post": {
+        "description": "The first one becomes the default. 409 ADDRESS_LIMIT past 20.",
+        "operationId": "AddressController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAddressDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save a delivery address",
+        "tags": [
+          "Addresses"
+        ]
+      }
+    },
+    "/addresses/{id}": {
+      "patch": {
+        "description": "isDefault: true makes it the default. Placed checkouts keep the address they were placed with.",
+        "operationId": "AddressController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAddressDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Edit a delivery address",
+        "tags": [
+          "Addresses"
+        ]
+      },
+      "delete": {
+        "description": "Deleting the default promotes the newest remaining one.",
+        "operationId": "AddressController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddressResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete a delivery address",
+        "tags": [
+          "Addresses"
         ]
       }
     },
@@ -5845,16 +6131,83 @@
             "minimum": 1,
             "example": 50,
             "description": "Whole units of the produce's `unit`"
+          },
+          "expectedTotal": {
+            "type": "number",
+            "minimum": 0,
+            "example": 57500,
+            "description": "The grand total the buyer saw: items plus the delivery fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
+          },
+          "addressId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "One of the buyer’s addresses"
+          },
+          "deliveryDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-10",
+            "description": "Between DELIVERY_MIN_DAYS and DELIVERY_MAX_DAYS from today (Africa/Lagos)"
           }
         },
         "required": [
           "produceId",
-          "quantity"
+          "quantity",
+          "expectedTotal",
+          "addressId",
+          "deliveryDate"
+        ]
+      },
+      "CheckoutStatus": {
+        "type": "string",
+        "enum": [
+          "AWAITING_PAYMENT",
+          "PAID",
+          "EXPIRED",
+          "CANCELLED"
+        ]
+      },
+      "ShippingToDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "example": "Warehouse A"
+          },
+          "street": {
+            "type": "string",
+            "example": "12, Bompai Industrial Area"
+          },
+          "state": {
+            "type": "string",
+            "example": "Kano"
+          },
+          "lga": {
+            "type": "string",
+            "example": "Nassarawa"
+          },
+          "contactName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "label",
+          "street",
+          "state",
+          "lga",
+          "contactName",
+          "contactPhone"
         ]
       },
       "OrderStatus": {
         "type": "string",
         "enum": [
+          "AWAITING_PAYMENT",
           "PENDING",
           "CONFIRMED",
           "PREPARING",
@@ -5927,7 +6280,7 @@
             "type": "string",
             "nullable": true,
             "format": "uuid",
-            "description": "The cart checkout that placed this order; null for Buy Now orders"
+            "description": "The checkout that placed this order; null only for orders placed before checkouts existed"
           },
           "createdAt": {
             "format": "date-time",
@@ -5955,7 +6308,212 @@
           "updatedAt"
         ]
       },
-      "OrderResponseDto": {
+      "PaymentMethod": {
+        "type": "string",
+        "enum": [
+          "CARD",
+          "BANK_TRANSFER"
+        ]
+      },
+      "PaymentStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "SUCCEEDED",
+          "FAILED",
+          "ABANDONED"
+        ]
+      },
+      "BankTransferInstructionsDto": {
+        "type": "object",
+        "properties": {
+          "bankName": {
+            "type": "string",
+            "example": "Test Bank"
+          },
+          "accountName": {
+            "type": "string",
+            "example": "LAICOS Escrow"
+          },
+          "accountNumber": {
+            "type": "string",
+            "example": "0123456789"
+          },
+          "amount": {
+            "type": "string",
+            "example": "57500.00"
+          },
+          "narration": {
+            "type": "string",
+            "example": "PAY-000123",
+            "description": "The transfer description the buyer must use"
+          }
+        },
+        "required": [
+          "bankName",
+          "accountName",
+          "accountNumber",
+          "amount",
+          "narration"
+        ]
+      },
+      "PaymentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reference": {
+            "type": "string",
+            "example": "PAY-000123"
+          },
+          "method": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentStatus"
+              }
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "example": "57500.00"
+          },
+          "authorizationUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "The provider's hosted payment page; null until a card provider is integrated"
+          },
+          "bankTransfer": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BankTransferInstructionsDto"
+              }
+            ]
+          },
+          "paidAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "method",
+          "status",
+          "amount",
+          "authorizationUrl",
+          "bankTransfer",
+          "paidAt",
+          "createdAt"
+        ]
+      },
+      "CheckoutDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkoutNumber": {
+            "type": "string",
+            "example": "CHK-000123"
+          },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User.id of the buyer"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CheckoutStatus"
+              }
+            ]
+          },
+          "subtotal": {
+            "type": "string",
+            "example": "54000.00",
+            "description": "Items"
+          },
+          "deliveryFee": {
+            "type": "string",
+            "example": "3500.00"
+          },
+          "totalPrice": {
+            "type": "string",
+            "example": "57500.00",
+            "description": "subtotal + deliveryFee: the amount to pay"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "An AWAITING_PAYMENT checkout expires at this time, releasing its stock"
+          },
+          "paidAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "deliveryDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-10-10"
+          },
+          "shippingTo": {
+            "$ref": "#/components/schemas/ShippingToDto"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "orders": {
+            "description": "One per line",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderDto"
+            }
+          },
+          "payments": {
+            "description": "Attempts, newest first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaymentDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "checkoutNumber",
+          "buyerId",
+          "status",
+          "subtotal",
+          "deliveryFee",
+          "totalPrice",
+          "expiresAt",
+          "paidAt",
+          "deliveryDate",
+          "shippingTo",
+          "createdAt",
+          "orders",
+          "payments"
+        ]
+      },
+      "CheckoutResponseDto": {
         "type": "object",
         "properties": {
           "message": {
@@ -5963,7 +6521,7 @@
             "example": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/OrderDto"
+            "$ref": "#/components/schemas/CheckoutDto"
           }
         },
         "required": [
@@ -5997,6 +6555,10 @@
       "OrderStatusCountsDto": {
         "type": "object",
         "properties": {
+          "AWAITING_PAYMENT": {
+            "type": "number",
+            "example": 0
+          },
           "PENDING": {
             "type": "number",
             "example": 3
@@ -6027,6 +6589,7 @@
           }
         },
         "required": [
+          "AWAITING_PAYMENT",
           "PENDING",
           "CONFIRMED",
           "PREPARING",
@@ -6096,6 +6659,22 @@
           },
           "data": {
             "$ref": "#/components/schemas/OrderSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "OrderResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/OrderDto"
           }
         },
         "required": [
@@ -6193,6 +6772,37 @@
         },
         "required": [
           "reason"
+        ]
+      },
+      "InitiatePaymentDto": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          }
+        },
+        "required": [
+          "method"
+        ]
+      },
+      "PaymentResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PaymentDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "CartItemIssue": {
@@ -6327,12 +6937,24 @@
             "type": "string",
             "example": "45000.00",
             "description": "Sum of lineTotal over items with no issue"
+          },
+          "deliveryFee": {
+            "type": "string",
+            "example": "3500.00",
+            "description": "Flat delivery fee; 0.00 when nothing can be ordered"
+          },
+          "grandTotal": {
+            "type": "string",
+            "example": "48500.00",
+            "description": "total + deliveryFee: what checkout will charge"
           }
         },
         "required": [
           "items",
           "itemCount",
-          "total"
+          "total",
+          "deliveryFee",
+          "grandTotal"
         ]
       },
       "CartResponseDto": {
@@ -6407,75 +7029,25 @@
           "expectedTotal": {
             "type": "number",
             "minimum": 0,
-            "example": 45000,
-            "description": "The cart total the buyer saw. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
-          }
-        },
-        "required": [
-          "expectedTotal"
-        ]
-      },
-      "CheckoutDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
+            "example": 57500,
+            "description": "The grand total the buyer saw: items plus the delivery fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
           },
-          "checkoutNumber": {
-            "type": "string",
-            "example": "CHK-000123"
-          },
-          "buyerId": {
+          "addressId": {
             "type": "string",
             "format": "uuid",
-            "description": "User.id of the buyer"
+            "description": "One of the buyer’s addresses"
           },
-          "idempotencyKey": {
+          "deliveryDate": {
             "type": "string",
-            "format": "uuid",
-            "description": "The Idempotency-Key this checkout was placed with"
-          },
-          "totalPrice": {
-            "type": "string",
-            "example": "45000.00"
-          },
-          "createdAt": {
-            "format": "date-time",
-            "type": "string"
-          },
-          "orders": {
-            "description": "One per cart item",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OrderDto"
-            }
+            "format": "date",
+            "example": "2026-10-10",
+            "description": "Between DELIVERY_MIN_DAYS and DELIVERY_MAX_DAYS from today (Africa/Lagos)"
           }
         },
         "required": [
-          "id",
-          "checkoutNumber",
-          "buyerId",
-          "idempotencyKey",
-          "totalPrice",
-          "createdAt",
-          "orders"
-        ]
-      },
-      "CheckoutResponseDto": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "example": "OK"
-          },
-          "data": {
-            "$ref": "#/components/schemas/CheckoutDto"
-          }
-        },
-        "required": [
-          "message",
-          "data"
+          "expectedTotal",
+          "addressId",
+          "deliveryDate"
         ]
       },
       "SourcingUnit": {
@@ -6582,7 +7154,6 @@
           },
           "requiredDate": {
             "type": "string",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "format": "date",
             "example": "2026-11-15",
             "description": "Today or later (Africa/Lagos)"
@@ -6667,7 +7238,6 @@
           },
           "requiredDate": {
             "type": "string",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "format": "date",
             "example": "2026-11-15",
             "description": "Today or later (Africa/Lagos)"
@@ -7384,6 +7954,188 @@
           "data",
           "metaData"
         ]
+      },
+      "AddressPlaceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Kano"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "AddressDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "label": {
+            "type": "string",
+            "example": "Warehouse A"
+          },
+          "street": {
+            "type": "string",
+            "example": "12, Bompai Industrial Area"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AddressPlaceDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/AddressPlaceDto"
+          },
+          "contactName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "street",
+          "state",
+          "lga",
+          "contactName",
+          "contactPhone",
+          "isDefault",
+          "createdAt"
+        ]
+      },
+      "AddressArrayResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddressDto"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "CreateAddressDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 60,
+            "example": "Warehouse A"
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "12, Bompai Industrial Area"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Must lie in stateId"
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Musa Ibrahim"
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "+2348012345678"
+          }
+        },
+        "required": [
+          "label",
+          "street",
+          "stateId",
+          "lgaId"
+        ]
+      },
+      "AddressResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AddressDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "UpdateAddressDto": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 60,
+            "example": "Warehouse A"
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "12, Bompai Industrial Area"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Must lie in stateId"
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Musa Ibrahim"
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "+2348012345678"
+          },
+          "isDefault": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": "Make this the default address"
+          }
+        }
       },
       "HandoverListResponseDto": {
         "type": "object",
