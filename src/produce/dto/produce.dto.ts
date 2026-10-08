@@ -18,18 +18,21 @@ export class ProduceDto {
   name: string;
 
   @ApiProperty({
+    type: 'integer',
     example: 500,
     description: 'Original stock listed, in `unit`. Immutable after creation.',
   })
   quantity: number;
 
   @ApiProperty({
+    type: 'integer',
     example: 500,
     description: 'Stock not yet committed to a CONFIRMED order, in `unit`',
   })
   actualQuantity: number;
 
   @ApiProperty({
+    type: 'integer',
     example: 450,
     description: 'Stock still orderable: actual minus PENDING orders',
   })

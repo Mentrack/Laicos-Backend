@@ -11,6 +11,7 @@ import { HandoverModule } from './handover/handover.module';
 import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProduceModule } from './produce/produce.module';
+import { SourcingRequestModule } from './sourcing-request/sourcing-request.module';
 import { StorageModule } from './storage/storage.module';
 import { AgentModule } from './agent/agent.module';
 import { LocationModule } from './location/location.module';
@@ -50,6 +51,7 @@ import { VerificationModule } from './verification/verification.module';
     ProduceModule,
     OrderModule,
     CartModule,
+    SourcingRequestModule,
     StorageModule,
     AgentModule,
     LocationModule,

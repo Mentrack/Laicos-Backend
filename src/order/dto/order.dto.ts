@@ -23,7 +23,11 @@ export class OrderDto {
   @ApiProperty({ format: 'uuid', description: 'User.id of the buyer' })
   buyerId: string;
 
-  @ApiProperty({ example: 50, description: "In the produce's `unit`" })
+  @ApiProperty({
+    type: 'integer',
+    example: 50,
+    description: "Whole units of the produce's `unit`",
+  })
   quantity: number;
 
   // Prisma serialises Decimal as a string, which keeps money exact.

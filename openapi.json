@@ -2728,6 +2728,127 @@
         ]
       }
     },
+    "/sourcing-requests": {
+      "post": {
+        "description": "Starts UNDER_REVIEW while LAICOS matches it with providers.",
+        "operationId": "SourcingRequestController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSourcingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Request produce that is not listed",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      },
+      "get": {
+        "operationId": "SourcingRequestController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingRequestListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my sourcing requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/sourcing-requests/{id}": {
+      "get": {
+        "operationId": "SourcingRequestController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get one of my sourcing requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
     "/agents/signup": {
       "post": {
         "description": "Public, multipart: my details, state and LGA, and idDocument (my ID; PDF or image, 10 MB). No password: I get access once an admin verifies me. Until then sign-in answers 403 VERIFICATION_PENDING. 409 when the email is registered.",
@@ -5285,10 +5406,10 @@
             "example": "Yellow maize"
           },
           "actualQuantity": {
-            "type": "number",
+            "type": "integer",
             "minimum": 0,
             "example": 500,
-            "description": "Stock on hand, in `unit`. floatingQuantity starts equal to it and is managed by orders."
+            "description": "Whole units of stock on hand, in `unit`. floatingQuantity starts equal to it and is managed by orders."
           },
           "unit": {
             "type": "string",
@@ -5359,17 +5480,17 @@
             "example": "Yellow maize"
           },
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "example": 500,
             "description": "Original stock listed, in `unit`. Immutable after creation."
           },
           "actualQuantity": {
-            "type": "number",
+            "type": "integer",
             "example": 500,
             "description": "Stock not yet committed to a CONFIRMED order, in `unit`"
           },
           "floatingQuantity": {
-            "type": "number",
+            "type": "integer",
             "example": 450,
             "description": "Stock still orderable: actual minus PENDING orders"
           },
@@ -5523,17 +5644,17 @@
             "example": "Yellow maize"
           },
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "example": 500,
             "description": "Original stock listed, in `unit`. Immutable after creation."
           },
           "actualQuantity": {
-            "type": "number",
+            "type": "integer",
             "example": 500,
             "description": "Stock not yet committed to a CONFIRMED order, in `unit`"
           },
           "floatingQuantity": {
-            "type": "number",
+            "type": "integer",
             "example": 450,
             "description": "Stock still orderable: actual minus PENDING orders"
           },
@@ -5660,10 +5781,10 @@
             "example": "Yellow maize"
           },
           "actualQuantity": {
-            "type": "number",
+            "type": "integer",
             "minimum": 0,
             "example": 500,
-            "description": "Stock on hand, in `unit`. floatingQuantity starts equal to it and is managed by orders."
+            "description": "Whole units of stock on hand, in `unit`. floatingQuantity starts equal to it and is managed by orders."
           },
           "unit": {
             "type": "string",
@@ -5720,10 +5841,10 @@
             "description": "A PUBLISHED produce"
           },
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "minimum": 1,
             "example": 50,
-            "description": "In the produce's `unit`"
+            "description": "Whole units of the produce's `unit`"
           }
         },
         "required": [
@@ -5774,9 +5895,9 @@
             "description": "User.id of the buyer"
           },
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "example": 50,
-            "description": "In the produce's `unit`"
+            "description": "Whole units of the produce's `unit`"
           },
           "totalPrice": {
             "type": "string",
@@ -6124,7 +6245,7 @@
             "description": "Current price"
           },
           "floatingQuantity": {
-            "type": "number",
+            "type": "integer",
             "example": 500,
             "description": "Stock still orderable"
           },
@@ -6158,9 +6279,9 @@
             "format": "uuid"
           },
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "example": 10,
-            "description": "In the produce's `unit`"
+            "description": "Whole units of the produce's `unit`"
           },
           "lineTotal": {
             "type": "string",
@@ -6239,10 +6360,10 @@
             "description": "A PUBLISHED produce"
           },
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "minimum": 1,
             "example": 50,
-            "description": "In the produce's `unit`"
+            "description": "Whole units of the produce's `unit`"
           }
         },
         "required": [
@@ -6270,10 +6391,10 @@
         "type": "object",
         "properties": {
           "quantity": {
-            "type": "number",
+            "type": "integer",
             "minimum": 1,
             "example": 50,
-            "description": "In the produce's `unit`"
+            "description": "Whole units of the produce's `unit`"
           }
         },
         "required": [
@@ -6305,6 +6426,16 @@
             "type": "string",
             "example": "CHK-000123"
           },
+          "buyerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "User.id of the buyer"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Idempotency-Key this checkout was placed with"
+          },
           "totalPrice": {
             "type": "string",
             "example": "45000.00"
@@ -6324,6 +6455,8 @@
         "required": [
           "id",
           "checkoutNumber",
+          "buyerId",
+          "idempotencyKey",
           "totalPrice",
           "createdAt",
           "orders"
@@ -6343,6 +6476,297 @@
         "required": [
           "message",
           "data"
+        ]
+      },
+      "SourcingUnit": {
+        "type": "string",
+        "enum": [
+          "KG",
+          "TONNES",
+          "BAGS",
+          "CRATES",
+          "BASKETS",
+          "LITRES",
+          "PIECES"
+        ]
+      },
+      "QualityGrade": {
+        "type": "string",
+        "enum": [
+          "GRADE_A",
+          "GRADE_B",
+          "GRADE_C",
+          "MIXED"
+        ]
+      },
+      "PackagingType": {
+        "type": "string",
+        "enum": [
+          "BAGS",
+          "SACKS",
+          "CRATES",
+          "CARTONS",
+          "BULK",
+          "OTHER"
+        ]
+      },
+      "ProduceCondition": {
+        "type": "string",
+        "enum": [
+          "FRESH",
+          "DRIED",
+          "PROCESSED",
+          "FROZEN"
+        ]
+      },
+      "SourcingTimeline": {
+        "type": "string",
+        "enum": [
+          "WITHIN_1_WEEK",
+          "WITHIN_2_WEEKS",
+          "WITHIN_1_MONTH",
+          "FLEXIBLE"
+        ]
+      },
+      "CreateSourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "produceName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Sesame Seeds (Bulk)"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 1,
+            "example": 20,
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "quality": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QualityGrade"
+              }
+            ]
+          },
+          "packaging": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PackagingType"
+              }
+            ]
+          },
+          "condition": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCondition"
+              }
+            ]
+          },
+          "additionalSpecs": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Moisture content below 8%, purity minimum 99%"
+          },
+          "deliveryDestination": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Warehouse A, Ibadan, Oyo State"
+          },
+          "requiredDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "format": "date",
+            "example": "2026-11-15",
+            "description": "Today or later (Africa/Lagos)"
+          },
+          "timeline": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingTimeline"
+              }
+            ]
+          },
+          "logisticsNotes": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Heavy truck offloading at dock 3"
+          }
+        },
+        "required": [
+          "produceName",
+          "quantity",
+          "unit",
+          "quality",
+          "packaging",
+          "condition",
+          "deliveryDestination",
+          "requiredDate",
+          "timeline"
+        ]
+      },
+      "SourcingRequestStatus": {
+        "type": "string",
+        "enum": [
+          "UNDER_REVIEW"
+        ]
+      },
+      "SourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "produceName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Sesame Seeds (Bulk)"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 1,
+            "example": 20,
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "quality": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QualityGrade"
+              }
+            ]
+          },
+          "packaging": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PackagingType"
+              }
+            ]
+          },
+          "condition": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCondition"
+              }
+            ]
+          },
+          "deliveryDestination": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Warehouse A, Ibadan, Oyo State"
+          },
+          "requiredDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "format": "date",
+            "example": "2026-11-15",
+            "description": "Today or later (Africa/Lagos)"
+          },
+          "timeline": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingTimeline"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000015"
+          },
+          "additionalSpecs": {
+            "type": "string",
+            "nullable": true
+          },
+          "logisticsNotes": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingRequestStatus"
+              }
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "produceName",
+          "quantity",
+          "unit",
+          "quality",
+          "packaging",
+          "condition",
+          "deliveryDestination",
+          "requiredDate",
+          "timeline",
+          "id",
+          "requestNumber",
+          "additionalSpecs",
+          "logisticsNotes",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "SourcingRequestResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SourcingRequestDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "SourcingRequestListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourcingRequestDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
         ]
       },
       "AgentSignupDto": {
@@ -6821,8 +7245,8 @@
             "example": "Maize"
           },
           "quantity": {
-            "type": "number",
-            "example": 12.5,
+            "type": "integer",
+            "example": 12,
             "description": "In `unit`"
           },
           "unit": {

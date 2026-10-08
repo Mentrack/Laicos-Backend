@@ -1,6 +1,8 @@
 /**
- * Dev seed: 5 farmers (one farm each), 5 extension agents, 2 buyers and an
+ * Dev seed: 9 farmers (one farm each), 5 extension agents, 2 buyers and an
  * admin, plus the verification rounds, produce and orders between them.
+ * farmer-6..9 are verified with only in-stock, published listings across the
+ * categories, so buyers always have a marketplace to browse and order from.
  *
  * Farmers and agents follow the password-less signup flows. A farmer is
  * active (can sign in with the seed password) once a round of their farm was
@@ -16,6 +18,9 @@
  * them resolve but 404.
  *
  *   pnpm seed   (needs DATABASE_URL and the FIREBASE_* admin vars in .env)
+ *
+ * The container runs it on start when SEED_ON_DEPLOY=true. Each run puts the
+ * seed rows back as written here, so only set it where that is wanted.
  */
 import 'dotenv/config';
 import { createHash } from 'node:crypto';
@@ -31,6 +36,7 @@ import {
   PhotoSlot,
   Prisma,
   PrismaClient,
+  ProduceCategory,
   ProduceStatus,
   ProduceType,
   Role,
@@ -130,6 +136,9 @@ interface SeedProduce {
   // DRAFT or PUBLISHED; SOLD_OUT is derived from the orders.
   status: ProduceStatus;
   type: ProduceType;
+  category: ProduceCategory;
+  description: string;
+  specs: string;
   orders: SeedOrder[];
 }
 
@@ -249,6 +258,28 @@ const REQUIRED_PHOTO_EVIDENCE: SeedEvidence[] = REQUIRED_PHOTOS.map(
   (photoSlot) => ({ kind: EvidenceKind.PHOTO, photoSlot }),
 );
 
+/** A round approved with nothing to flag. */
+function cleanApproval(
+  round: Pick<SeedRound, 'key' | 'agent' | 'daysAgo' | 'measuredSize'> & {
+    identityNote: string;
+    generalNote: string;
+    estimatedYield: { value: number; unit: string };
+  },
+): SeedRound {
+  return {
+    ...round,
+    status: VerificationTaskStatus.APPROVED,
+    locationMatches: true,
+    checks: cleanChecks(),
+    evidence: REQUIRED_PHOTO_EVIDENCE,
+  };
+}
+
+/** A published listing nobody has ordered yet: all of its stock is buyable. */
+function inStock(produce: Omit<SeedProduce, 'status' | 'orders'>): SeedProduce {
+  return { ...produce, status: ProduceStatus.PUBLISHED, orders: [] };
+}
+
 const FARMERS: SeedFarmer[] = [
   {
     key: 'farmer-1',
@@ -296,6 +327,10 @@ const FARMERS: SeedFarmer[] = [
           pricePerUnit: '450.00',
           status: ProduceStatus.PUBLISHED,
           type: ProduceType.LOCAL,
+          category: ProduceCategory.GRAINS,
+          description:
+            'Sun-dried white maize, shelled and bagged in 50 kg sacks.',
+          specs: 'Grade A — Moisture below 13%',
           orders: [
             {
               key: 'order-1',
@@ -341,6 +376,9 @@ const FARMERS: SeedFarmer[] = [
           pricePerUnit: '250.00',
           status: ProduceStatus.PUBLISHED,
           type: ProduceType.LOCAL,
+          category: ProduceCategory.TUBERS,
+          description: 'Freshly harvested premium cassava tubers.',
+          specs: 'Grade A — Fresh Harvest',
           // Takes all the stock, so it derives to SOLD_OUT.
           orders: [
             {
@@ -419,6 +457,9 @@ const FARMERS: SeedFarmer[] = [
           pricePerUnit: '1200.00',
           status: ProduceStatus.PUBLISHED,
           type: ProduceType.EXPORT,
+          category: ProduceCategory.OILSEEDS,
+          description: 'Hulled white sesame, machine-cleaned for export.',
+          specs: '99% purity — FFA below 2%',
           orders: [
             {
               key: 'order-6',
@@ -444,6 +485,9 @@ const FARMERS: SeedFarmer[] = [
           pricePerUnit: '600.00',
           status: ProduceStatus.DRAFT,
           type: ProduceType.LOCAL,
+          category: ProduceCategory.LEGUMES,
+          description: 'Dry soybeans from the last harvest, not yet graded.',
+          specs: 'Ungraded',
           orders: [],
         },
       ],
@@ -581,6 +625,271 @@ const FARMERS: SeedFarmer[] = [
         },
       ],
       produce: [],
+    },
+  },
+  // farmer-6..9: verified farms whose listings are all in stock, for buyers.
+  {
+    key: 'farmer-6',
+    email: 'farmer6@laicos.test',
+    firstName: 'Bolanle',
+    lastName: 'Adebayo',
+    phoneNumber: '+2348030000006',
+    idType: IdType.NIN,
+    idNumber: '20000000006',
+    farm: {
+      key: 'farm-6',
+      name: 'Adebayo Vegetable Gardens',
+      state: 'Oyo',
+      lga: 'Ibadan North',
+      location: '22 Sango Road, Ibadan',
+      size: 2.5,
+      mainProduce: 'Tomato',
+      isExporting: false,
+      hasChiefConfirmation: true,
+      rounds: [
+        cleanApproval({
+          key: 'farm-6-round-1',
+          agent: 'agent-1',
+          daysAgo: 18,
+          identityNote: 'NIN slip and survey plan match the farmer.',
+          measuredSize: 2.4,
+          estimatedYield: { value: 12, unit: 't' },
+          generalNote: 'Drip-irrigated beds, tomatoes and peppers fruiting.',
+        }),
+      ],
+      produce: [
+        inStock({
+          key: 'produce-5',
+          name: 'Roma Tomatoes',
+          quantity: 800,
+          unit: 'kg',
+          pricePerUnit: '700.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.VEGETABLES,
+          description: 'Firm, ripe Roma tomatoes packed in ventilated crates.',
+          specs: 'Grade A — Fresh Harvest',
+        }),
+        inStock({
+          key: 'produce-6',
+          name: 'Scotch Bonnet Peppers',
+          quantity: 200,
+          unit: 'kg',
+          pricePerUnit: '1500.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.VEGETABLES,
+          description: 'Hot red and yellow ata rodo, picked to order.',
+          specs: 'Grade A — Mixed colours',
+        }),
+        inStock({
+          key: 'produce-7',
+          name: 'Plantain',
+          quantity: 150,
+          unit: 'bunch',
+          pricePerUnit: '3500.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.FRUITS,
+          description: 'Mature green plantain bunches, 30–40 fingers each.',
+          specs: 'Grade A — Unripe',
+        }),
+      ],
+    },
+  },
+  {
+    key: 'farmer-7',
+    email: 'farmer7@laicos.test',
+    firstName: 'Musa',
+    lastName: 'Danjuma',
+    phoneNumber: '+2348030000007',
+    idType: IdType.VOTERS_CARD,
+    idNumber: '90B7C8D9E0F1A2B3C4',
+    farm: {
+      key: 'farm-7',
+      name: 'Danjuma Grain Farm',
+      state: 'Kaduna',
+      lga: 'Zaria',
+      location: 'Dogarawa Village, Zaria',
+      size: 15,
+      mainProduce: 'Sorghum',
+      isExporting: false,
+      hasChiefConfirmation: true,
+      rounds: [
+        cleanApproval({
+          key: 'farm-7-round-1',
+          agent: 'agent-3',
+          daysAgo: 22,
+          identityNote: 'Voter card and chief letter match the farmer.',
+          measuredSize: 14.6,
+          estimatedYield: { value: 30, unit: 't' },
+          generalNote: 'Large rain-fed holding with a lockable store on site.',
+        }),
+      ],
+      produce: [
+        inStock({
+          key: 'produce-8',
+          name: 'Red Sorghum',
+          quantity: 5000,
+          unit: 'kg',
+          pricePerUnit: '380.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.GRAINS,
+          description: 'Threshed and winnowed red sorghum in 100 kg bags.',
+          specs: 'Grade A — Moisture below 12%',
+        }),
+        inStock({
+          key: 'produce-9',
+          name: 'Pearl Millet',
+          quantity: 2000,
+          unit: 'kg',
+          pricePerUnit: '420.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.GRAINS,
+          description: 'Clean grey pearl millet, stone-free.',
+          specs: 'Grade B — Machine cleaned',
+        }),
+        inStock({
+          key: 'produce-10',
+          name: 'Brown Cowpea',
+          quantity: 1500,
+          unit: 'kg',
+          pricePerUnit: '950.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.LEGUMES,
+          description: 'Sweet brown beans, weevil-free and hand-sorted.',
+          specs: 'Grade A — Hand sorted',
+        }),
+      ],
+    },
+  },
+  {
+    key: 'farmer-8',
+    email: 'farmer8@laicos.test',
+    firstName: 'Zainab',
+    lastName: 'Abdullahi',
+    phoneNumber: '+2348030000008',
+    idType: IdType.NIN,
+    idNumber: '20000000008',
+    farm: {
+      key: 'farm-8',
+      name: 'Abdullahi Spice Farm',
+      state: 'Kaduna',
+      lga: 'Zaria',
+      location: 'Shika Road, Zaria',
+      size: 9,
+      mainProduce: 'Ginger',
+      isExporting: true,
+      hasChiefConfirmation: true,
+      rounds: [
+        cleanApproval({
+          key: 'farm-8-round-1',
+          agent: 'agent-2',
+          daysAgo: 10,
+          identityNote: 'NIN slip, C of O and chief letter all match.',
+          measuredSize: 9.2,
+          estimatedYield: { value: 15, unit: 't' },
+          generalNote: 'Export-ready drying yard and a sorting shed.',
+        }),
+      ],
+      produce: [
+        inStock({
+          key: 'produce-11',
+          name: 'Dried Split Ginger',
+          quantity: 3000,
+          unit: 'kg',
+          pricePerUnit: '1800.00',
+          type: ProduceType.EXPORT,
+          category: ProduceCategory.SPICES,
+          description: 'Sun-dried split ginger, sorted and bagged for export.',
+          specs: 'Grade A — Moisture below 10%',
+        }),
+        inStock({
+          key: 'produce-12',
+          name: 'Raw Cashew Nuts',
+          quantity: 2500,
+          unit: 'kg',
+          pricePerUnit: '1100.00',
+          type: ProduceType.EXPORT,
+          category: ProduceCategory.NUTS,
+          description: 'In-shell raw cashew nuts from this season.',
+          specs: 'KOR 47 lbs — Nut count 190/kg',
+        }),
+        inStock({
+          key: 'produce-13',
+          name: 'Dried Hibiscus Flowers',
+          quantity: 1200,
+          unit: 'kg',
+          pricePerUnit: '1400.00',
+          type: ProduceType.EXPORT,
+          category: ProduceCategory.OTHER,
+          description: 'Deep-red zobo calyces, shade-dried and cleaned.',
+          specs: 'Grade A — Whole calyces',
+        }),
+      ],
+    },
+  },
+  {
+    key: 'farmer-9',
+    email: 'farmer9@laicos.test',
+    firstName: 'Yetunde',
+    lastName: 'Ogunleye',
+    phoneNumber: '+2348030000009',
+    idType: IdType.VOTERS_CARD,
+    idNumber: '90D4E5F6A7B8C9D0E1',
+    farm: {
+      key: 'farm-9',
+      name: 'Ogunleye Tuber Farm',
+      state: 'Oyo',
+      lga: 'Ibadan North',
+      location: '7 Ojoo Road, Ibadan',
+      size: 4,
+      mainProduce: 'Yam',
+      isExporting: false,
+      hasChiefConfirmation: false,
+      rounds: [
+        cleanApproval({
+          key: 'farm-9-round-1',
+          agent: 'agent-1',
+          daysAgo: 8,
+          identityNote: 'Voter card and ownership deed match the farmer.',
+          measuredSize: 4.1,
+          estimatedYield: { value: 20, unit: 't' },
+          generalNote: 'Yam barn well ventilated; pineapples intercropped.',
+        }),
+      ],
+      produce: [
+        inStock({
+          key: 'produce-14',
+          name: 'Puna Yam',
+          quantity: 400,
+          unit: 'tuber',
+          pricePerUnit: '2500.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.TUBERS,
+          description: 'Large white puna yam tubers, 3–5 kg each.',
+          specs: 'Grade A — Barn stored',
+        }),
+        inStock({
+          key: 'produce-15',
+          name: 'Sweet Potatoes',
+          quantity: 600,
+          unit: 'kg',
+          pricePerUnit: '550.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.TUBERS,
+          description: 'Orange-fleshed sweet potatoes, freshly lifted.',
+          specs: 'Grade B — Mixed sizes',
+        }),
+        inStock({
+          key: 'produce-16',
+          name: 'Smooth Cayenne Pineapples',
+          quantity: 300,
+          unit: 'piece',
+          pricePerUnit: '800.00',
+          type: ProduceType.LOCAL,
+          category: ProduceCategory.FRUITS,
+          description: 'Sweet, half-coloured pineapples, 1.5–2 kg each.',
+          specs: 'Grade A — Fresh Harvest',
+        }),
+      ],
     },
   },
 ];
@@ -950,6 +1259,9 @@ async function seedProduce(
       floatingQuantity,
     }),
     type: produce.type,
+    category: produce.category,
+    description: produce.description,
+    specs: produce.specs,
   };
   await prisma.produce.upsert({
     where: { id },
@@ -1095,8 +1407,15 @@ async function seedFarmer(
 // ---------------------------------------------------------------------------
 
 async function main() {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Refusing to seed with NODE_ENV=production');
+  // The deployed image always runs with NODE_ENV=production, so a deployed
+  // environment opts in explicitly instead.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.SEED_ON_DEPLOY !== 'true'
+  ) {
+    throw new Error(
+      'Refusing to seed with NODE_ENV=production unless SEED_ON_DEPLOY=true',
+    );
   }
   const password = process.env.SEED_USER_PASSWORD?.trim() || 'Laicos@2026';
 

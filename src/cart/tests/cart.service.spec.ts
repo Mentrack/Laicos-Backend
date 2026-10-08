@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { HttpException, NotFoundException } from '@nestjs/common';
 import {
   FarmVerificationStatus,
   Prisma,
@@ -41,6 +41,13 @@ function cartRow(quantity: number, overrides: Partial<typeof produce> = {}) {
     updatedAt: new Date('2026-10-08'),
     produce: { ...produce, ...overrides },
   };
+}
+
+// The body HttpExceptionFilter reads `message` and `code` from.
+async function errorBody(promise: Promise<unknown>) {
+  const error: unknown = await promise.catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(HttpException);
+  return (error as HttpException).getResponse();
 }
 
 describe('CartService', () => {
@@ -173,10 +180,11 @@ describe('CartService', () => {
       cartItem.findUnique.mockResolvedValue(null);
       cartItem.count.mockResolvedValue(50);
       await expect(
-        service.addItem(buyer, { produceId, quantity: 1 }),
-      ).rejects.toThrow(
-        new ConflictException('Your cart can hold at most 50 items'),
-      );
+        errorBody(service.addItem(buyer, { produceId, quantity: 1 })),
+      ).resolves.toEqual({
+        message: 'Your cart can hold at most 50 items',
+        code: 'CART_FULL',
+      });
     });
 
     it('lets an item already in a full cart grow', async () => {
@@ -208,8 +216,11 @@ describe('CartService', () => {
     it('404s on another buyer’s item', async () => {
       cartItem.findFirst.mockResolvedValue(null);
       await expect(
-        service.updateItem(buyer, itemId, { quantity: 3 }),
-      ).rejects.toThrow(new NotFoundException('Cart item not found'));
+        errorBody(service.updateItem(buyer, itemId, { quantity: 3 })),
+      ).resolves.toEqual({
+        message: 'Cart item not found',
+        code: 'CART_ITEM_NOT_FOUND',
+      });
       expect(cartItem.update).not.toHaveBeenCalled();
     });
   });

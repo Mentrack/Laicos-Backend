@@ -15,7 +15,7 @@ export class HandoverDto {
   @ApiProperty({ example: 'Maize' })
   produceName: string;
 
-  @ApiProperty({ example: 12.5, description: 'In `unit`' })
+  @ApiProperty({ type: 'integer', example: 12, description: 'In `unit`' })
   quantity: number;
 
   @ApiProperty({ example: 'tons' })

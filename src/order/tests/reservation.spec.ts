@@ -28,7 +28,7 @@ const produce = {
 describe('reservation', () => {
   it('allows a quantity equal to the floating stock', () => {
     expect(isOrderable(produce, 500)).toBe(true);
-    expect(isOrderable(produce, 500.5)).toBe(false);
+    expect(isOrderable(produce, 501)).toBe(false);
   });
 
   it('refuses drafts and unverified farms as not found', () => {
@@ -36,6 +36,10 @@ describe('reservation', () => {
       false,
     );
     expect(orderRefusal(null)).toBeInstanceOf(NotFoundException);
+    expect(orderRefusal(null).getResponse()).toEqual({
+      message: 'Produce not found',
+      code: 'PRODUCE_NOT_FOUND',
+    });
     expect(
       orderRefusal({
         ...produce,
@@ -50,13 +54,19 @@ describe('reservation', () => {
       status: ProduceStatus.SOLD_OUT,
     });
     expect(refusal).toBeInstanceOf(ConflictException);
-    expect(refusal.message).toBe('Produce is not available for ordering');
+    expect(refusal.getResponse()).toEqual({
+      message: 'Produce is not available for ordering',
+      code: 'PRODUCE_UNAVAILABLE',
+    });
   });
 
   it('names the floating stock when there is not enough', () => {
-    expect(orderRefusal({ ...produce, floatingQuantity: 8 }).message).toBe(
-      'Only 8 Tuber available',
-    );
+    expect(
+      orderRefusal({ ...produce, floatingQuantity: 8 }).getResponse(),
+    ).toEqual({
+      message: 'Only 8 Tuber available',
+      code: 'INSUFFICIENT_STOCK',
+    });
   });
 
   it('prices a line to 2 dp', () => {
