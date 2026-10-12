@@ -16,6 +16,15 @@ export function webappOrigins(config: ConfigService): string[] {
     .filter(Boolean);
 }
 
+/** This API's public origin. BASE_URL is optional, and blank means local dev. */
+export function apiBaseUrl(config: ConfigService): string {
+  const baseUrl = config.get<string>('BASE_URL')?.trim();
+  if (baseUrl) {
+    return baseUrl.replace(/\/$/, '');
+  }
+  return `http://localhost:${config.get<string>('PORT') ?? 8080}`;
+}
+
 /** A webapp link for emails; the first allowed origin is the live webapp. */
 export function webappUrl(config: ConfigService, path: string): string {
   return `${webappOrigins(config)[0].replace(/\/$/, '')}${path}`;

@@ -6,10 +6,14 @@ import { ErrorResponseDto } from './common/dto/error-response.dto';
  * The single OpenAPI definition. Shared by main.ts (served) and
  * scripts/generate-openapi.ts (committed openapi.json) so the two can't drift.
  */
-export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
+export function buildOpenApiDocument(
+  app: INestApplication,
+  baseUrl: string,
+): OpenAPIObject {
   const config = new DocumentBuilder()
     .setTitle('laicos API')
     .setVersion('1.0')
+    .setExternalDoc('Swagger UI', `${baseUrl}/v1/docs`)
     // Firebase ID token; `@Auth()` marks each protected route with this scheme.
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
     // Tag descriptions head each group in Swagger UI, in this order.
