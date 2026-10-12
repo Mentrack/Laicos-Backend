@@ -8254,5 +8254,9 @@
         ]
       }
     }
+  },
+  "externalDocs": {
+    "description": "Swagger UI",
+    "url": "http://localhost:8080/v1/docs"
   }
 }

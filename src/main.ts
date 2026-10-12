@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
-import { webappOrigins } from './common/config';
+import { apiBaseUrl, webappOrigins } from './common/config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { buildOpenApiDocument } from './openapi';
 
@@ -26,7 +26,8 @@ async function bootstrap() {
   );
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  const document = buildOpenApiDocument(app);
+  const baseUrl = apiBaseUrl(app.get(ConfigService));
+  const document = buildOpenApiDocument(app, baseUrl);
   SwaggerModule.setup('v1/docs', app, document, {
     jsonDocumentUrl: 'v1/docs.json',
     yamlDocumentUrl: 'v1/docs.yaml',
@@ -37,7 +38,6 @@ async function bootstrap() {
   const port = process.env.PORT ?? 8080;
   await app.listen(port);
   if (['development', 'staging'].includes(process.env.NODE_ENV ?? '')) {
-    const baseUrl = process.env.BASE_URL ?? `http://localhost:${port}`;
     const logger = new Logger('Bootstrap');
     logger.log(`laicos server is running on: ${baseUrl}`);
     logger.log(`API documentation: ${baseUrl}/v1/docs`);
