@@ -38,7 +38,10 @@ export class SourcingRequestController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'List my sourcing requests' })
+  @ApiOperation({
+    summary: 'List my sourcing requests',
+    description: "Only the caller's own, newest first.",
+  })
   @ApiEnvelope(SourcingRequestDto, { paginated: true })
   async findAll(@CurrentUser() user: User, @Query() query: PaginationQueryDto) {
     const { data, metaData } = await this.sourcingRequests.findAll(user, query);
@@ -46,7 +49,10 @@ export class SourcingRequestController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get one of my sourcing requests' })
+  @ApiOperation({
+    summary: 'Get one of my sourcing requests',
+    description: "Another buyer's request is 404, the same as a missing one.",
+  })
   @ApiEnvelope(SourcingRequestDto)
   async findOne(
     @CurrentUser() user: User,

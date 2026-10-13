@@ -27,7 +27,11 @@ export class BankAccountController {
   constructor(private readonly accounts: BankAccountService) {}
 
   @Get('banks')
-  @ApiOperation({ summary: 'List Nigerian banks for payouts' })
+  @ApiOperation({
+    summary: 'List Nigerian banks for payouts',
+    description:
+      "Farmers and agents, for the payout account form. From Paystack, cached for a day; not paginated. 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack can't be reached.",
+  })
   @Auth(Role.FARMER, Role.EXTENSION_AGENT)
   @ApiEnvelope(BankDto, { list: true })
   async banks() {

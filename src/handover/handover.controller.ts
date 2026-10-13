@@ -47,7 +47,11 @@ export class HandoverController {
   }
 
   @Get(':orderId')
-  @ApiOperation({ summary: 'Get an order handover' })
+  @ApiOperation({
+    summary: 'Get an order handover',
+    description:
+      "Keyed by order id. Another agent's handover is 404, the same as a missing one.",
+  })
   @ApiEnvelope(HandoverDto)
   async findOne(
     @CurrentAgent() agent: Agent,

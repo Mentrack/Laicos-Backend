@@ -38,8 +38,28 @@ export function buildOpenApiDocument(
       'Produce listings. Farmers manage their own; everyone else sees published listings on verified farms.',
     )
     .addTag(
+      'Cart',
+      "A buyer's cart and checkout. Adding to the cart reserves nothing; checkout reserves the stock and places unpaid orders under one checkout. A guest keeps the cart on the device, prices it with POST /cart/quote and merges it after sign-in with POST /cart/items/bulk.",
+    )
+    .addTag(
+      'Addresses',
+      "A buyer's saved delivery addresses, up to 20. The first becomes the default; a placed checkout keeps the address it was placed with.",
+    )
+    .addTag(
+      'Payments',
+      'Paying for a checkout through Paystack, in naira or dollars. The checkout becomes PAID when Paystack confirms the charge. Admins can re-check a payment and issue refunds.',
+    )
+    .addTag(
+      'FX',
+      'The naira-per-dollar rate, with the margin already applied, for showing and charging prices in USD. Public; no token needed.',
+    )
+    .addTag(
       'Orders',
       'Buyers place orders; farmers confirm, prepare (with a checklist) and mark them ready. Either side can cancel within its limits.',
+    )
+    .addTag(
+      'Sourcing Requests',
+      'A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts UNDER_REVIEW.',
     )
     .addTag(
       'Agents',
@@ -48,6 +68,18 @@ export function buildOpenApiDocument(
     .addTag(
       'Verifications',
       'Farm verification tasks assigned to the calling agent: the on-site checklist, evidence photos, and the approve / reject / decline decision. Verified agents only.',
+    )
+    .addTag(
+      'Handovers',
+      'The step between a farmer marking an order READY and logistics collecting it. The agent whose cluster holds the farm checks the goods (verify), then records who took them (complete), which ships the order. Verified agents only.',
+    )
+    .addTag(
+      'Bank accounts',
+      "Where a farmer's payouts go. A farmer sets their own; an agent can set one for a farmer in their cluster. The account is checked with Paystack, and any change holds the farmer's payouts for 24 hours.",
+    )
+    .addTag(
+      'Payouts',
+      'Paying farmers for fulfilled, paid orders once the hold period has passed. Farmers see their own payouts; admins see who is due and send them as one Paystack bulk transfer.',
     )
     .build();
   return SwaggerModule.createDocument(app, config, {

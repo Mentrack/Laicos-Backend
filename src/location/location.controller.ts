@@ -12,7 +12,10 @@ export class LocationController {
   constructor(private readonly locations: LocationService) {}
 
   @Get('states')
-  @ApiOperation({ summary: 'List all states' })
+  @ApiOperation({
+    summary: 'List all states',
+    description: 'Public. Sorted by name; not paginated.',
+  })
   @ApiEnvelope(StateDto, { list: true })
   async findStates() {
     const data = await this.locations.findStates();
@@ -20,7 +23,11 @@ export class LocationController {
   }
 
   @Get('states/:stateId/lgas')
-  @ApiOperation({ summary: 'List the LGAs in a state' })
+  @ApiOperation({
+    summary: 'List the LGAs in a state',
+    description:
+      'Public. Sorted by name; not paginated. 404 when the state does not exist.',
+  })
   @ApiEnvelope(LgaDto, { list: true })
   async findLgas(@Param('stateId', ParseUUIDPipe) stateId: string) {
     const data = await this.locations.findLgas(stateId);

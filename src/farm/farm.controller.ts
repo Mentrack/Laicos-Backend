@@ -123,7 +123,11 @@ export class FarmController {
   }
 
   @Get('farms')
-  @ApiOperation({ summary: 'List my farms' })
+  @ApiOperation({
+    summary: 'List my farms',
+    description:
+      'Farmers only. Every farm the caller owns, whatever its verification status, newest first.',
+  })
   @Auth(Role.FARMER)
   @ApiTags('Farms')
   @ApiEnvelope(FarmDto, { paginated: true })
@@ -136,7 +140,11 @@ export class FarmController {
   }
 
   @Get('farms/:id')
-  @ApiOperation({ summary: 'Get one of my farms' })
+  @ApiOperation({
+    summary: 'Get one of my farms',
+    description:
+      "Farmers only. Another farmer's farm is 404, the same as a missing one.",
+  })
   @Auth(Role.FARMER)
   @ApiTags('Farms')
   @ApiEnvelope(FarmDto)
@@ -277,7 +285,10 @@ export class FarmController {
   }
 
   @Get('farmers')
-  @ApiOperation({ summary: 'List farmers' })
+  @ApiOperation({
+    summary: 'List farmers',
+    description: 'Newest first. Rows carry no ID number or ID document.',
+  })
   // @Auth(Role.ADMIN)
   @ApiTags('Farmers')
   @ApiEnvelope(FarmerDto, { paginated: true })
@@ -302,7 +313,11 @@ export class FarmController {
   }
 
   @Patch('farmers/me')
-  @ApiOperation({ summary: 'Set my ID type and number' })
+  @ApiOperation({
+    summary: 'Set my ID type and number',
+    description:
+      'Farmers only. Send either field or both; a field left out keeps its value. idDocumentUrl in the response is a presigned link valid for 15 minutes.',
+  })
   @Auth(Role.FARMER)
   @ApiTags('Farmers')
   @ApiEnvelope(FarmerProfileDto)
@@ -337,7 +352,11 @@ export class FarmController {
   }
 
   @Get('farmers/:id')
-  @ApiOperation({ summary: 'Get a farmer’s public profile' })
+  @ApiOperation({
+    summary: 'Get a farmer’s public profile',
+    description:
+      'Any signed-in user. {id} is the Farmer id, not the user id. Never includes the ID number or document.',
+  })
   @Auth()
   @ApiTags('Farmers')
   @ApiEnvelope(FarmerDto)

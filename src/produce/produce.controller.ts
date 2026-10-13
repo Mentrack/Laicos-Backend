@@ -64,7 +64,11 @@ export class ProduceController {
   }
 
   @Post(':id/image')
-  @ApiOperation({ summary: 'Replace a listing’s image' })
+  @ApiOperation({
+    summary: 'Replace a listing’s image',
+    description:
+      'Multipart: the new image in `file` (JPEG, PNG or WebP, checked by content, 5 MB). Farmers only, on their own listings.',
+  })
   @HttpCode(HttpStatus.OK)
   @Auth(Role.FARMER)
   @UseInterceptors(
@@ -113,7 +117,11 @@ export class ProduceController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update one of my listings' })
+  @ApiOperation({
+    summary: 'Update one of my listings',
+    description:
+      'Farmers only; a listing cannot move to another farm. Changing actualQuantity moves floatingQuantity by the same amount, and status follows stock between PUBLISHED and SOLD_OUT (DRAFT stays DRAFT). 409 when the new quantity is below what orders have reserved, or when stock changed meanwhile (retry).',
+  })
   @Auth(Role.FARMER)
   @ApiEnvelope(ProduceDto)
   async update(

@@ -122,7 +122,11 @@ export class AuthController {
   }
 
   @Post('refresh-token')
-  @ApiOperation({ summary: 'Exchange a refresh token for a new token pair' })
+  @ApiOperation({
+    summary: 'Exchange a refresh token for a new token pair',
+    description:
+      'Public. Store the returned refreshToken: it replaces the one sent. 401 when the refresh token is invalid or expired, or no account exists for it; 403 EMAIL_NOT_VERIFIED or VERIFICATION_PENDING as on login.',
+  })
   @HttpCode(HttpStatus.OK)
   @ApiEnvelope(TokenPairDto)
   async refreshToken(@Body() dto: RefreshTokenDto) {
@@ -150,7 +154,11 @@ export class AuthController {
   }
 
   @Post('forgot-password/confirm')
-  @ApiOperation({ summary: 'Set a new password from a reset link code' })
+  @ApiOperation({
+    summary: 'Set a new password from a reset link code',
+    description:
+      'Public. oobCode is the code in the link POST /auth/forgot-password emails. 400 when the code is invalid or expired, or the password is shorter than 6 characters. Other signed-in devices stay signed in.',
+  })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: MessageResponseDto })
   async confirmForgotPassword(@Body() dto: ConfirmForgotPasswordDto) {
@@ -176,7 +184,11 @@ export class AuthController {
   }
 
   @Post('logout')
-  @ApiOperation({ summary: 'Log out of every session' })
+  @ApiOperation({
+    summary: 'Log out of every session',
+    description:
+      'Revokes every refresh token for the user: all devices are signed out and ID tokens already issued stop working at once. Allowed while a password change is pending.',
+  })
   @HttpCode(HttpStatus.OK)
   @Auth()
   @AllowPendingPasswordChange()
@@ -187,7 +199,11 @@ export class AuthController {
   }
 
   @Get('me')
-  @ApiOperation({ summary: 'Get the signed-in user' })
+  @ApiOperation({
+    summary: 'Get the signed-in user',
+    description:
+      'Read fresh on every call. Allowed while a password change is pending, so the client can check mustChangePassword.',
+  })
   @Auth()
   @AllowPendingPasswordChange()
   @ApiEnvelope(UserDto)

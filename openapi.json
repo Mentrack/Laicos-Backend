@@ -244,6 +244,7 @@
     },
     "/auth/refresh-token": {
       "post": {
+        "description": "Public. Store the returned refreshToken: it replaces the one sent. 401 when the refresh token is invalid or expired, or no account exists for it; 403 EMAIL_NOT_VERIFIED or VERIFICATION_PENDING as on login.",
         "operationId": "AuthController_refreshToken",
         "parameters": [],
         "requestBody": {
@@ -309,6 +310,7 @@
     },
     "/auth/forgot-password/confirm": {
       "post": {
+        "description": "Public. oobCode is the code in the link POST /auth/forgot-password emails. 400 when the code is invalid or expired, or the password is shorter than 6 characters. Other signed-in devices stay signed in.",
         "operationId": "AuthController_confirmForgotPassword",
         "parameters": [],
         "requestBody": {
@@ -379,6 +381,7 @@
     },
     "/auth/logout": {
       "post": {
+        "description": "Revokes every refresh token for the user: all devices are signed out and ID tokens already issued stop working at once. Allowed while a password change is pending.",
         "operationId": "AuthController_logout",
         "parameters": [],
         "responses": {
@@ -406,6 +409,7 @@
     },
     "/auth/me": {
       "get": {
+        "description": "Read fresh on every call. Allowed while a password change is pending, so the client can check mustChangePassword.",
         "operationId": "AuthController_getCurrentUser",
         "parameters": [],
         "responses": {
@@ -487,6 +491,7 @@
         ]
       },
       "get": {
+        "description": "Farmers only. Every farm the caller owns, whatever its verification status, newest first.",
         "operationId": "FarmController_findFarms",
         "parameters": [
           {
@@ -536,6 +541,7 @@
     },
     "/farms/{id}": {
       "get": {
+        "description": "Farmers only. Another farmer's farm is 404, the same as a missing one.",
         "operationId": "FarmController_findFarm",
         "parameters": [
           {
@@ -857,6 +863,7 @@
     },
     "/farmers": {
       "get": {
+        "description": "Newest first. Rows carry no ID number or ID document.",
         "operationId": "FarmController_findFarmers",
         "parameters": [
           {
@@ -927,6 +934,7 @@
         ]
       },
       "patch": {
+        "description": "Farmers only. Send either field or both; a field left out keeps its value. idDocumentUrl in the response is a presigned link valid for 15 minutes.",
         "operationId": "FarmController_updateMyFarmer",
         "parameters": [],
         "requestBody": {
@@ -1011,6 +1019,7 @@
     },
     "/farmers/{id}": {
       "get": {
+        "description": "Any signed-in user. {id} is the Farmer id, not the user id. Never includes the ID number or document.",
         "operationId": "FarmController_findFarmer",
         "parameters": [
           {
@@ -1047,6 +1056,7 @@
     },
     "/locations/states": {
       "get": {
+        "description": "Public. Sorted by name; not paginated.",
         "operationId": "LocationController_findStates",
         "parameters": [],
         "responses": {
@@ -1069,6 +1079,7 @@
     },
     "/locations/states/{stateId}/lgas": {
       "get": {
+        "description": "Public. Sorted by name; not paginated. 404 when the state does not exist.",
         "operationId": "LocationController_findLgas",
         "parameters": [
           {
@@ -1478,6 +1489,7 @@
     },
     "/verifications/{id}/evidence/{evidenceId}": {
       "delete": {
+        "description": "Deletes the photo and its stored file and returns the round. Counts as a draft save, so an ASSIGNED round becomes IN_PROGRESS. 409 once the round is no longer open.",
         "operationId": "VerificationController_removeEvidence",
         "parameters": [
           {
@@ -1850,6 +1862,7 @@
     },
     "/produce/{id}/image": {
       "post": {
+        "description": "Multipart: the new image in `file` (JPEG, PNG or WebP, checked by content, 5 MB). Farmers only, on their own listings.",
         "operationId": "ProduceController_attachImage",
         "parameters": [
           {
@@ -1940,6 +1953,7 @@
         ]
       },
       "patch": {
+        "description": "Farmers only; a listing cannot move to another farm. Changing actualQuantity moves floatingQuantity by the same amount, and status follows stock between PUBLISHED and SOLD_OUT (DRAFT stays DRAFT). 409 when the new quantity is below what orders have reserved, or when stock changed meanwhile (retry).",
         "operationId": "ProduceController_update",
         "parameters": [
           {
@@ -2198,6 +2212,7 @@
     },
     "/orders/summary": {
       "get": {
+        "description": "Farmers only, across their farms; unpaid orders are left out. totalEarnings is the value of FULFILLED orders, not money paid out; activeOrders counts PENDING to SHIPPED.",
         "operationId": "OrderController_summary",
         "parameters": [],
         "responses": {
@@ -2225,6 +2240,7 @@
     },
     "/orders/{id}": {
       "get": {
+        "description": "Buyers see orders they placed, farmers paid orders on their farms, admins everything. 404 for anything else.",
         "operationId": "OrderController_findOne",
         "parameters": [
           {
@@ -2296,6 +2312,7 @@
     },
     "/orders/{id}/confirm": {
       "patch": {
+        "description": "Farmer (own farms) or admin. PENDING to CONFIRMED only: commits the stock, which can mark the listing SOLD_OUT. 409 for any other status, or when the order changed meanwhile (retry).",
         "operationId": "OrderController_confirm",
         "parameters": [
           {
@@ -2369,6 +2386,7 @@
     },
     "/orders/{id}/checklist": {
       "get": {
+        "description": "Farmer (own farms) or admin. 404 until PATCH /orders/{id}/prepare has started preparing the order.",
         "operationId": "OrderController_findChecklist",
         "parameters": [
           {
@@ -2403,6 +2421,7 @@
         ]
       },
       "patch": {
+        "description": "Farmer (own farms) or admin, only while the order is PREPARING (409 otherwise). Send just the items to change; false unticks one. PATCH /orders/{id}/ready needs all four ticked.",
         "operationId": "OrderController_updateChecklist",
         "parameters": [
           {
@@ -2673,6 +2692,7 @@
     },
     "/banks": {
       "get": {
+        "description": "Farmers and agents, for the payout account form. From Paystack, cached for a day; not paginated. 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack can't be reached.",
         "operationId": "BankAccountController_banks",
         "parameters": [],
         "responses": {
@@ -3157,6 +3177,7 @@
     },
     "/cart/items/{id}": {
       "patch": {
+        "description": "Sets the quantity rather than adding to it, and reserves nothing. 404 CART_ITEM_NOT_FOUND or PRODUCE_NOT_FOUND; 409 PRODUCE_UNAVAILABLE or INSUFFICIENT_STOCK.",
         "operationId": "CartController_updateItem",
         "parameters": [
           {
@@ -3201,6 +3222,7 @@
         ]
       },
       "delete": {
+        "description": "Returns the removed item. 404 CART_ITEM_NOT_FOUND when it is not in the caller's cart.",
         "operationId": "CartController_removeItem",
         "parameters": [
           {
@@ -3395,6 +3417,7 @@
         ]
       },
       "get": {
+        "description": "Only the caller's own, newest first.",
         "operationId": "SourcingRequestController_findAll",
         "parameters": [
           {
@@ -3444,6 +3467,7 @@
     },
     "/sourcing-requests/{id}": {
       "get": {
+        "description": "Another buyer's request is 404, the same as a missing one.",
         "operationId": "SourcingRequestController_findOne",
         "parameters": [
           {
@@ -3689,6 +3713,7 @@
     },
     "/agents/me/cluster/farms": {
       "get": {
+        "description": "The farms the caller manages, newest first. A farm sent back for re-verification leaves the cluster.",
         "operationId": "AgentController_findClusterFarms",
         "parameters": [
           {
@@ -4088,6 +4113,7 @@
     },
     "/handovers/{orderId}": {
       "get": {
+        "description": "Keyed by order id. Another agent's handover is 404, the same as a missing one.",
         "operationId": "HandoverController_findOne",
         "parameters": [
           {
@@ -4245,8 +4271,28 @@
       "description": "Produce listings. Farmers manage their own; everyone else sees published listings on verified farms."
     },
     {
+      "name": "Cart",
+      "description": "A buyer's cart and checkout. Adding to the cart reserves nothing; checkout reserves the stock and places unpaid orders under one checkout. A guest keeps the cart on the device, prices it with POST /cart/quote and merges it after sign-in with POST /cart/items/bulk."
+    },
+    {
+      "name": "Addresses",
+      "description": "A buyer's saved delivery addresses, up to 20. The first becomes the default; a placed checkout keeps the address it was placed with."
+    },
+    {
+      "name": "Payments",
+      "description": "Paying for a checkout through Paystack, in naira or dollars. The checkout becomes PAID when Paystack confirms the charge. Admins can re-check a payment and issue refunds."
+    },
+    {
+      "name": "FX",
+      "description": "The naira-per-dollar rate, with the margin already applied, for showing and charging prices in USD. Public; no token needed."
+    },
+    {
       "name": "Orders",
       "description": "Buyers place orders; farmers confirm, prepare (with a checklist) and mark them ready. Either side can cancel within its limits."
+    },
+    {
+      "name": "Sourcing Requests",
+      "description": "A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts UNDER_REVIEW."
     },
     {
       "name": "Agents",
@@ -4255,6 +4301,18 @@
     {
       "name": "Verifications",
       "description": "Farm verification tasks assigned to the calling agent: the on-site checklist, evidence photos, and the approve / reject / decline decision. Verified agents only."
+    },
+    {
+      "name": "Handovers",
+      "description": "The step between a farmer marking an order READY and logistics collecting it. The agent whose cluster holds the farm checks the goods (verify), then records who took them (complete), which ships the order. Verified agents only."
+    },
+    {
+      "name": "Bank accounts",
+      "description": "Where a farmer's payouts go. A farmer sets their own; an agent can set one for a farmer in their cluster. The account is checked with Paystack, and any change holds the farmer's payouts for 24 hours."
+    },
+    {
+      "name": "Payouts",
+      "description": "Paying farmers for fulfilled, paid orders once the hold period has passed. Farmers see their own payouts; admins see who is due and send them as one Paystack bulk transfer."
     }
   ],
   "servers": [],
