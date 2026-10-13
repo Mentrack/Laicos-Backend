@@ -57,6 +57,7 @@ function checkoutRow(overrides: Record<string, unknown> = {}) {
     status: CheckoutStatus.AWAITING_PAYMENT,
     subtotal: new Prisma.Decimal('701.00'),
     deliveryFee: new Prisma.Decimal('3500.00'),
+    serviceFee: new Prisma.Decimal('0.00'),
     totalPrice: new Prisma.Decimal('4201.00'),
     expiresAt: new Date(),
     paidAt: null,

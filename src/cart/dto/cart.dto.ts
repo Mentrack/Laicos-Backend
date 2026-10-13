@@ -48,10 +48,7 @@ export class CartProduceDto {
   farm: CartProduceFarmDto;
 }
 
-export class CartItemDto {
-  @ApiProperty({ format: 'uuid' })
-  id: string;
-
+export class CartLineDto {
   @ApiProperty({
     type: 'integer',
     example: 10,
@@ -79,10 +76,12 @@ export class CartItemDto {
   produce: CartProduceDto;
 }
 
-export class CartDto {
-  @ApiProperty({ type: [CartItemDto], description: 'Newest first' })
-  items: CartItemDto[];
+export class CartItemDto extends CartLineDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+}
 
+export class CartTotalsDto {
   @ApiProperty({ example: 2 })
   itemCount: number;
 
@@ -102,8 +101,56 @@ export class CartDto {
 
   @ApiProperty({
     type: String,
+    example: '2250.00',
+    description: 'SERVICE_FEE_PERCENT of total',
+  })
+  serviceFee: string;
+
+  @ApiProperty({
+    type: String,
     example: '48500.00',
-    description: 'total + deliveryFee: what checkout will charge',
+    description: 'total + deliveryFee + serviceFee: what checkout will charge',
   })
   grandTotal: string;
+}
+
+export class CartDto extends CartTotalsDto {
+  @ApiProperty({ type: [CartItemDto], description: 'Newest first' })
+  items: CartItemDto[];
+}
+
+export class CartQuoteDto extends CartTotalsDto {
+  @ApiProperty({ type: [CartLineDto], description: 'In request order' })
+  items: CartLineDto[];
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description:
+      'Requested produce that is gone or not public; drop these from the device cart',
+  })
+  unavailableProduceIds: string[];
+}
+
+export class CartSkippedItemDto {
+  @ApiProperty({ format: 'uuid' })
+  produceId: string;
+
+  @ApiProperty({
+    example: 'INSUFFICIENT_STOCK',
+    description:
+      'CART_FULL, PRODUCE_NOT_FOUND, PRODUCE_UNAVAILABLE or INSUFFICIENT_STOCK',
+  })
+  code: string;
+
+  @ApiProperty({ example: 'Only 3 Bags available' })
+  message: string;
+}
+
+export class CartMergeDto extends CartDto {
+  @ApiProperty({
+    type: [CartSkippedItemDto],
+    description: 'Items not merged, and why; everything else was added',
+  })
+  skipped: CartSkippedItemDto[];
 }

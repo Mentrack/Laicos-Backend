@@ -12,6 +12,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import type { FarmerProfileDto } from '../dto';
 import { toFarmerDto } from '../formatters/farmer.formatter';
+import { requireFarmer } from '../utils/require-farmer';
 
 // Farmer rows are created with their FARMER user (AuthService.createLocalUser)
 // and deleted with it (onDelete: Cascade), so there is no create or delete here.
@@ -23,7 +24,7 @@ export class FarmerService {
   ) {}
 
   async findMine(user: User): Promise<FarmerProfileDto> {
-    const farmer = await this.requireFarmer(user);
+    const farmer = await requireFarmer(this.database, user);
     return {
       ...toFarmerDto(farmer),
       ...(await formatIdentity(this.storage, farmer)),
@@ -31,7 +32,7 @@ export class FarmerService {
   }
 
   async updateMine(user: User, dto: UpdateIdentityDto) {
-    const farmer = await this.requireFarmer(user);
+    const farmer = await requireFarmer(this.database, user);
     await this.database.farmer.update({
       where: { id: farmer.id },
       data: { idType: dto.idType, idNumber: dto.idNumber },
@@ -40,7 +41,7 @@ export class FarmerService {
   }
 
   async uploadIdDocument(user: User, file: StorageUploadFile) {
-    const farmer = await this.requireFarmer(user);
+    const farmer = await requireFarmer(this.database, user);
     await replaceIdDocument(
       this.storage,
       `farmers/${farmer.id}/id`,
@@ -79,15 +80,5 @@ export class FarmerService {
       data: farmers.map(toFarmerDto),
       metaData: paginationMeta(page, perPage, total),
     };
-  }
-
-  private async requireFarmer(user: User) {
-    const farmer = await this.database.farmer.findUnique({
-      where: { userId: user.id },
-    });
-    if (!farmer) {
-      throw new NotFoundException('Farmer profile not found');
-    }
-    return farmer;
   }
 }

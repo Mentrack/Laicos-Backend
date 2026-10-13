@@ -24,7 +24,7 @@ export class PaymentController {
   @ApiOperation({
     summary: 'Pay my checkout',
     description:
-      'Starts a payment attempt for the checkout total, abandoning any earlier one. BANK_TRANSFER returns the escrow account and the reference to quote, and extends the hold to BANK_TRANSFER_HOLD_HOURS. Nothing is charged yet: an admin confirms payments. 409 CHECKOUT_NOT_PAYABLE once paid, expired, cancelled or past expiresAt.',
+      'Starts a Paystack payment for the checkout total in NGN or USD, abandoning any earlier attempt. Redirect the buyer to authorizationUrl (or open Paystack inline with accessCode). The checkout becomes PAID when Paystack confirms the charge. 409 CHECKOUT_NOT_PAYABLE once paid, expired, cancelled or past expiresAt; 409 FX_RATE_STALE for USD without a recent rate; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down (retry with a new Idempotency-Key).',
   })
   @ApiHeader({
     name: 'Idempotency-Key',

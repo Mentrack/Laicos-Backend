@@ -5,13 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import {
-  FarmVerificationStatus,
-  Prisma,
-  ProduceStatus,
-  Role,
-  type User,
-} from '../../generated/client';
+import { Prisma, ProduceStatus, Role, type User } from '../../generated/client';
 import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import {
@@ -29,6 +23,7 @@ import {
   UpdateProduceDto,
 } from './dto';
 import { deriveProduceStatus } from './utils/produce-status';
+import { visibleTo } from './utils/produce-visibility';
 
 /** Writes are scoped to the owning farmer; reads hide other farmers' drafts. */
 @Injectable()
@@ -96,7 +91,7 @@ export class ProduceService {
     }
   }
 
-  async findAll(user: User, query: ProduceQueryDto) {
+  async findAll(user: User | null, query: ProduceQueryDto) {
     const { minPrice, maxPrice } = query;
     if (
       minPrice !== undefined &&
@@ -132,7 +127,7 @@ export class ProduceService {
     return { data, metaData: paginationMeta(page, perPage, total) };
   }
 
-  async findOne(user: User, id: string) {
+  async findOne(user: User | null, id: string) {
     const produce = await this.database.produce.findFirst({
       where: { id, ...visibleTo(user) },
       include: LISTING_INCLUDE,
@@ -230,22 +225,8 @@ const SORT_ORDER: Record<ProduceSort, Prisma.ProduceOrderByWithRelationInput> =
 
 // Farmers manage their own listings, sold out or not; everyone else shops,
 // so they only see what can still be ordered unless they ask otherwise.
-function defaultStatusFor(user: User): ProduceStatus | undefined {
-  return user.role === Role.FARMER ? undefined : ProduceStatus.PUBLISHED;
-}
-
-// A farmer sees all their own produce. Everyone else sees only listings
-// that are out of draft on a farm an agent has verified.
-function visibleTo(user: User): Prisma.ProduceWhereInput {
-  return {
-    OR: [
-      {
-        status: { not: ProduceStatus.DRAFT },
-        farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
-      },
-      { farm: farmOwnedBy(user) },
-    ],
-  };
+function defaultStatusFor(user: User | null): ProduceStatus | undefined {
+  return user?.role === Role.FARMER ? undefined : ProduceStatus.PUBLISHED;
 }
 
 function mapProduceWriteError(error: unknown): unknown {

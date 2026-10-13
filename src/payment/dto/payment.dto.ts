@@ -1,52 +1,68 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PaymentMethod, PaymentStatus } from '../../../generated/client';
-
-export class BankTransferInstructionsDto {
-  @ApiProperty({ example: 'Test Bank' })
-  bankName: string;
-
-  @ApiProperty({ example: 'LAICOS Escrow' })
-  accountName: string;
-
-  @ApiProperty({ example: '0123456789' })
-  accountNumber: string;
-
-  @ApiProperty({ type: String, example: '57500.00' })
-  amount: string;
-
-  @ApiProperty({
-    example: 'PAY-000123',
-    description: 'The transfer description the buyer must use',
-  })
-  narration: string;
-}
+import { Currency, PaymentStatus } from '../../../generated/client';
 
 export class PaymentDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty({ example: 'PAY-000123' })
+  @ApiProperty({
+    example: 'PAY-000123',
+    description: 'Also the Paystack transaction reference',
+  })
   reference: string;
-
-  @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
-  method: PaymentMethod;
 
   @ApiProperty({ enum: PaymentStatus, enumName: 'PaymentStatus' })
   status: PaymentStatus;
 
-  @ApiProperty({ type: String, example: '57500.00' })
+  @ApiProperty({ enum: Currency, enumName: 'Currency' })
+  currency: Currency;
+
+  @ApiProperty({
+    type: String,
+    example: '57500.00',
+    description: 'The checkout total in NGN',
+  })
   amount: string;
 
   @ApiProperty({
     type: String,
+    example: '37.58',
+    description: 'What the buyer is charged, in currency',
+  })
+  chargedAmount: string;
+
+  @ApiProperty({
+    type: String,
     nullable: true,
-    description:
-      "The provider's hosted payment page; null until a card provider is integrated",
+    example: '1530.123456',
+    description: 'NGN per USD used for a USD payment; null for NGN',
+  })
+  fxRate: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: 'card',
+    description: 'How the buyer paid, once Paystack reports it',
+  })
+  channel: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: "Paystack's hosted payment page: redirect the buyer here",
   })
   authorizationUrl: string | null;
 
-  @ApiProperty({ type: BankTransferInstructionsDto, nullable: true })
-  bankTransfer: BankTransferInstructionsDto | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: "For Paystack's inline popup instead of the redirect",
+  })
+  accessCode: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  failureReason: string | null;
 
   @ApiProperty({ type: Date, nullable: true })
   paidAt: Date | null;

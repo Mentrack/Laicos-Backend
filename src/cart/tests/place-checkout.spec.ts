@@ -160,6 +160,7 @@ describe('createCheckout', () => {
     });
     expect((data.subtotal as Prisma.Decimal).toFixed(2)).toBe('54000.00');
     expect((data.deliveryFee as Prisma.Decimal).toFixed(2)).toBe('3500.00');
+    expect((data.serviceFee as Prisma.Decimal).toFixed(2)).toBe('0.00');
     expect((data.totalPrice as Prisma.Decimal).toFixed(2)).toBe('57500.00');
     expect(data.orders.create).toEqual([
       expect.objectContaining({
@@ -173,6 +174,26 @@ describe('createCheckout', () => {
         status: OrderStatus.AWAITING_PAYMENT,
       }),
     ]);
+  });
+
+  it('adds a service fee on the subtotal to the total', async () => {
+    await createCheckout(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        buyerId: 'buyer-1',
+        idempotencyKey: key,
+        lines: [line('a', '45000.00'), line('b', '9000.00')],
+        delivery,
+        expectedTotal: 60200,
+      },
+      testCheckoutConfig({ SERVICE_FEE_PERCENT: '5' }),
+      now,
+    );
+    const [{ data }] = tx.checkout.create.mock.calls[0] as [
+      { data: Record<string, unknown> },
+    ];
+    expect((data.serviceFee as Prisma.Decimal).toFixed(2)).toBe('2700.00');
+    expect((data.totalPrice as Prisma.Decimal).toFixed(2)).toBe('60200.00');
   });
 
   it('refuses when the buyer saw a total without the fee', async () => {

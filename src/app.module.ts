@@ -7,8 +7,11 @@ import { AddressModule } from './address/address.module';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { PaymentModule } from './payment/payment.module';
+import { PayoutModule } from './payout/payout.module';
+import { PaystackModule } from './paystack/paystack.module';
 import { requireConfig } from './common/config';
 import { FarmModule } from './farm/farm.module';
+import { FxModule } from './fx/fx.module';
 import { HandoverModule } from './handover/handover.module';
 import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -47,6 +50,8 @@ import { VerificationModule } from './verification/verification.module';
       },
     }),
     PrismaModule,
+    PaystackModule,
+    FxModule,
     MailModule,
     AuthModule,
     FarmModule,
@@ -54,6 +59,7 @@ import { VerificationModule } from './verification/verification.module';
     OrderModule,
     CartModule,
     PaymentModule,
+    PayoutModule,
     SourcingRequestModule,
     StorageModule,
     AgentModule,

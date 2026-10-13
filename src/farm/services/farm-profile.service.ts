@@ -12,13 +12,13 @@ import {
 export class FarmProfileService {
   constructor(private readonly database: PrismaService) {}
 
-  async findOne(user: User, id: string) {
+  async findOne(user: User | null, id: string) {
     const farm = await this.database.farm.findFirst({
       where: {
         id,
         OR: [
           { verificationStatus: FarmVerificationStatus.VERIFIED },
-          farmOwnedBy(user),
+          ...(user ? [farmOwnedBy(user)] : []),
         ],
       },
       select: FARM_PROFILE_SELECT,

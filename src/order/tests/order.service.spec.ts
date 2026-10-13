@@ -118,6 +118,7 @@ describe('OrderService', () => {
       status: 'AWAITING_PAYMENT',
       subtotal: new Prisma.Decimal('0'),
       deliveryFee: new Prisma.Decimal('3500'),
+      serviceFee: new Prisma.Decimal('0'),
       totalPrice: new Prisma.Decimal('3500'),
       expiresAt: new Date(),
       paidAt: null,

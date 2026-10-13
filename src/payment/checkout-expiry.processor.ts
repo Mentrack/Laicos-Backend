@@ -9,7 +9,7 @@ const SWEEP_EVERY_MS = 60 * 1000;
 
 /**
  * A sweep rather than one delayed job per checkout: it survives lost jobs
- * and transfer-hold extensions without rescheduling anything.
+ * without rescheduling anything.
  */
 @Processor(CHECKOUT_EXPIRY_QUEUE)
 export class CheckoutExpiryProcessor extends WorkerHost {

@@ -1,29 +1,39 @@
 import { Prisma } from '../../../generated/client';
+import { percentOf } from '../../common/money';
 import { linePrice } from '../../order/utils/reservation';
-import type { CartDto, CartItemDto } from '../dto';
+import type { CheckoutConfig } from '../../payment/checkout-config';
+import type {
+  CartDto,
+  CartItemDto,
+  CartLineDto,
+  CartQuoteDto,
+  CartTotalsDto,
+} from '../dto';
 import { cartItemIssue } from '../utils/cart-issue';
 
-export const CART_ITEM_INCLUDE = {
-  produce: {
-    include: {
-      farm: {
-        select: { id: true, farmCode: true, verificationStatus: true },
-      },
-    },
+export const CART_PRODUCE_INCLUDE = {
+  farm: {
+    select: { id: true, farmCode: true, verificationStatus: true },
   },
+} satisfies Prisma.ProduceInclude;
+
+export const CART_ITEM_INCLUDE = {
+  produce: { include: CART_PRODUCE_INCLUDE },
 } satisfies Prisma.CartItemInclude;
 
 export type CartItemRow = Prisma.CartItemGetPayload<{
   include: typeof CART_ITEM_INCLUDE;
 }>;
 
-export function formatCartItem(item: CartItemRow): CartItemDto {
-  const { produce } = item;
+/** A cart row or a device-cart line: all pricing and issues need. */
+export type CartLineRow = Pick<CartItemRow, 'quantity' | 'produce'>;
+
+export function formatCartLine(line: CartLineRow): CartLineDto {
+  const { produce } = line;
   return {
-    id: item.id,
-    quantity: item.quantity,
-    lineTotal: linePrice(produce.pricePerUnit, item.quantity).toFixed(2),
-    issue: cartItemIssue(item),
+    quantity: line.quantity,
+    lineTotal: linePrice(produce.pricePerUnit, line.quantity).toFixed(2),
+    issue: cartItemIssue(line),
     produce: {
       id: produce.id,
       name: produce.name,
@@ -37,21 +47,43 @@ export function formatCartItem(item: CartItemRow): CartItemDto {
   };
 }
 
-export function formatCart(
-  items: CartItemRow[],
-  deliveryFee: Prisma.Decimal,
-): CartDto {
-  const orderable = items.filter((item) => cartItemIssue(item) === null);
-  const total = orderable.reduce(
-    (sum, item) => sum.add(linePrice(item.produce.pricePerUnit, item.quantity)),
-    new Prisma.Decimal(0),
-  );
-  const fee = orderable.length > 0 ? deliveryFee : new Prisma.Decimal(0);
+export function formatCartItem(item: CartItemRow): CartItemDto {
+  return { id: item.id, ...formatCartLine(item) };
+}
+
+type CartFees = Pick<CheckoutConfig, 'deliveryFee' | 'serviceFeePercent'>;
+
+export function formatCart(items: CartItemRow[], fees: CartFees): CartDto {
   return {
     items: items.map(formatCartItem),
-    itemCount: items.length,
+    ...cartTotals(items, fees),
+  };
+}
+
+export function formatCartQuote(
+  lines: CartLineRow[],
+  fees: CartFees,
+): Omit<CartQuoteDto, 'unavailableProduceIds'> {
+  return {
+    items: lines.map(formatCartLine),
+    ...cartTotals(lines, fees),
+  };
+}
+
+function cartTotals(lines: CartLineRow[], fees: CartFees): CartTotalsDto {
+  const orderable = lines.filter((line) => cartItemIssue(line) === null);
+  const total = orderable.reduce(
+    (sum, line) => sum.add(linePrice(line.produce.pricePerUnit, line.quantity)),
+    new Prisma.Decimal(0),
+  );
+  const deliveryFee =
+    orderable.length > 0 ? fees.deliveryFee : new Prisma.Decimal(0);
+  const serviceFee = percentOf(total, fees.serviceFeePercent);
+  return {
+    itemCount: lines.length,
     total: total.toFixed(2),
-    deliveryFee: fee.toFixed(2),
-    grandTotal: total.add(fee).toFixed(2),
+    deliveryFee: deliveryFee.toFixed(2),
+    serviceFee: serviceFee.toFixed(2),
+    grandTotal: total.add(deliveryFee).add(serviceFee).toFixed(2),
   };
 }

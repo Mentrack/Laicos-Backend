@@ -45,8 +45,8 @@ export class CheckoutExpiryService {
   private expire(id: string, now: Date) {
     return this.database.$transaction(async (tx) => {
       await lockCheckout(tx, id);
-      // Re-read under the lock: it may have been paid, cancelled or given a
-      // transfer hold since the scan.
+      // Re-read under the lock: it may have been paid or cancelled since the
+      // scan.
       const checkout = await tx.checkout.findUnique({ where: { id } });
       if (
         !checkout ||
