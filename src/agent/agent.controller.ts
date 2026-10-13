@@ -93,7 +93,11 @@ export class AgentController {
   }
 
   @Get('cluster/farms')
-  @ApiOperation({ summary: 'List the farms in my cluster' })
+  @ApiOperation({
+    summary: 'List the farms in my cluster',
+    description:
+      'The farms the caller manages, newest first. A farm sent back for re-verification leaves the cluster.',
+  })
   @ApiEnvelope(FarmDto, { paginated: true })
   async findClusterFarms(
     @CurrentUser() user: User,

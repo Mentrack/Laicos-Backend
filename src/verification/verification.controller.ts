@@ -201,7 +201,11 @@ export class VerificationController {
   }
 
   @Delete(':id/evidence/:evidenceId')
-  @ApiOperation({ summary: 'Remove an evidence photo' })
+  @ApiOperation({
+    summary: 'Remove an evidence photo',
+    description:
+      'Deletes the photo and its stored file and returns the round. Counts as a draft save, so an ASSIGNED round becomes IN_PROGRESS. 409 once the round is no longer open.',
+  })
   @ApiEnvelope(VerificationDto)
   async removeEvidence(
     @CurrentAgent() agent: Agent,

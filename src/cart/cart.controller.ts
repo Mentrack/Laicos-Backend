@@ -103,7 +103,11 @@ export class CartController {
   }
 
   @Patch('items/:id')
-  @ApiOperation({ summary: 'Change a cart item’s quantity' })
+  @ApiOperation({
+    summary: 'Change a cart item’s quantity',
+    description:
+      'Sets the quantity rather than adding to it, and reserves nothing. 404 CART_ITEM_NOT_FOUND or PRODUCE_NOT_FOUND; 409 PRODUCE_UNAVAILABLE or INSUFFICIENT_STOCK.',
+  })
   @Auth(Role.BUYER)
   @ApiEnvelope(CartItemDto)
   async updateItem(
@@ -116,7 +120,11 @@ export class CartController {
   }
 
   @Delete('items/:id')
-  @ApiOperation({ summary: 'Remove a cart item' })
+  @ApiOperation({
+    summary: 'Remove a cart item',
+    description:
+      "Returns the removed item. 404 CART_ITEM_NOT_FOUND when it is not in the caller's cart.",
+  })
   @Auth(Role.BUYER)
   @ApiEnvelope(CartItemDto)
   async removeItem(

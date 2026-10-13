@@ -86,7 +86,11 @@ export class OrderController {
 
   // Dashboard cards. Declared before `:id` for the same reason as count.
   @Get('summary')
-  @ApiOperation({ summary: 'Get my order dashboard figures' })
+  @ApiOperation({
+    summary: 'Get my order dashboard figures',
+    description:
+      'Farmers only, across their farms; unpaid orders are left out. totalEarnings is the value of FULFILLED orders, not money paid out; activeOrders counts PENDING to SHIPPED.',
+  })
   @Auth(Role.FARMER)
   @ApiEnvelope(OrderSummaryDto)
   async summary(@CurrentUser() user: User) {
@@ -95,7 +99,11 @@ export class OrderController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get an order' })
+  @ApiOperation({
+    summary: 'Get an order',
+    description:
+      'Buyers see orders they placed, farmers paid orders on their farms, admins everything. 404 for anything else.',
+  })
   @Auth()
   @ApiEnvelope(OrderDto)
   async findOne(
@@ -109,7 +117,11 @@ export class OrderController {
   // A farmer's moves are confirm -> prepare -> ready (or cancel), so each is
   // its own route rather than a free-form status PATCH.
   @Patch(':id/confirm')
-  @ApiOperation({ summary: 'Confirm a pending order' })
+  @ApiOperation({
+    summary: 'Confirm a pending order',
+    description:
+      'Farmer (own farms) or admin. PENDING to CONFIRMED only: commits the stock, which can mark the listing SOLD_OUT. 409 for any other status, or when the order changed meanwhile (retry).',
+  })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderDto)
   async confirm(
@@ -136,7 +148,11 @@ export class OrderController {
   }
 
   @Get(':id/checklist')
-  @ApiOperation({ summary: 'Get an order’s preparation checklist' })
+  @ApiOperation({
+    summary: 'Get an order’s preparation checklist',
+    description:
+      'Farmer (own farms) or admin. 404 until PATCH /orders/{id}/prepare has started preparing the order.',
+  })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderChecklistDto)
   async findChecklist(
@@ -148,7 +164,11 @@ export class OrderController {
   }
 
   @Patch(':id/checklist')
-  @ApiOperation({ summary: 'Tick items on an order’s preparation checklist' })
+  @ApiOperation({
+    summary: 'Tick items on an order’s preparation checklist',
+    description:
+      'Farmer (own farms) or admin, only while the order is PREPARING (409 otherwise). Send just the items to change; false unticks one. PATCH /orders/{id}/ready needs all four ticked.',
+  })
   @Auth(Role.FARMER, Role.ADMIN)
   @ApiEnvelope(OrderChecklistDto)
   async updateChecklist(
