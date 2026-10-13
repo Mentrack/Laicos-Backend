@@ -1,9 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum } from 'class-validator';
-import { PaymentMethod } from '../../../generated/client';
+import { Currency } from '../../../generated/client';
 
 export class InitiatePaymentDto {
-  @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
-  @IsEnum(PaymentMethod)
-  method: PaymentMethod;
+  @ApiProperty({
+    enum: Currency,
+    enumName: 'Currency',
+    description: 'USD is charged by card only, at the rate from GET /fx/rate',
+  })
+  @IsEnum(Currency)
+  currency: Currency;
 }

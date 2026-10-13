@@ -7,7 +7,7 @@ export class CreateCheckoutDto {
   @ApiProperty({
     example: 57500,
     description:
-      'The grand total the buyer saw: items plus the delivery fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED.',
+      'The grand total the buyer saw: items plus the delivery fee plus the service fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED.',
   })
   @IsNumber({ allowNaN: false, allowInfinity: false, maxDecimalPlaces: 2 })
   @Min(0)

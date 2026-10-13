@@ -21,6 +21,29 @@
         "summary": "Liveness check"
       }
     },
+    "/fx/rate": {
+      "get": {
+        "description": "Public, so prices can be shown in USD. The margin is already applied. 409 FX_RATE_STALE when no recent rate is available.",
+        "operationId": "FxController_rate",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get the NGN per USD rate for dollar payments",
+        "tags": [
+          "FX"
+        ]
+      }
+    },
     "/auth/register": {
       "post": {
         "description": "Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Buyers and riders only; farmers and agents have their own signup.",
@@ -629,7 +652,7 @@
     },
     "/farms/{id}/profile": {
       "get": {
-        "description": "Any signed-in user. Verified farms only, except to their owner; never includes the address.",
+        "description": "No token needed. Verified farms only, except to their owner; never includes the address.",
         "operationId": "FarmController_findFarmProfile",
         "parameters": [
           {
@@ -1682,7 +1705,7 @@
         ]
       },
       "get": {
-        "description": "Farmers also see their own drafts and listings on unverified farms; everyone else sees only published listings on verified farms.",
+        "description": "No token needed. Farmers also see their own drafts and listings on unverified farms; everyone else, guests included, sees only published listings on verified farms.",
         "operationId": "ProduceController_findAll",
         "parameters": [
           {
@@ -1882,6 +1905,7 @@
     },
     "/produce/{id}": {
       "get": {
+        "description": "No token needed.",
         "operationId": "ProduceController_findOne",
         "parameters": [
           {
@@ -1997,7 +2021,7 @@
     },
     "/orders": {
       "post": {
-        "description": "Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.",
+        "description": "Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee plus the service fee no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.",
         "operationId": "OrderController_create",
         "parameters": [
           {
@@ -2509,7 +2533,7 @@
     },
     "/checkouts/{id}/payments": {
       "post": {
-        "description": "Starts a payment attempt for the checkout total, abandoning any earlier one. BANK_TRANSFER returns the escrow account and the reference to quote, and extends the hold to BANK_TRANSFER_HOLD_HOURS. Nothing is charged yet: an admin confirms payments. 409 CHECKOUT_NOT_PAYABLE once paid, expired, cancelled or past expiresAt.",
+        "description": "Starts a Paystack payment for the checkout total in NGN or USD, abandoning any earlier attempt. Redirect the buyer to authorizationUrl (or open Paystack inline with accessCode). The checkout becomes PAID when Paystack confirms the charge. 409 CHECKOUT_NOT_PAYABLE once paid, expired, cancelled or past expiresAt; 409 FX_RATE_STALE for USD without a recent rate; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down (retry with a new Idempotency-Key).",
         "operationId": "PaymentController_initiate",
         "parameters": [
           {
@@ -2563,10 +2587,10 @@
         ]
       }
     },
-    "/admin/payments/{reference}/confirm": {
+    "/admin/payments/{reference}/verify": {
       "post": {
-        "description": "For bank transfers seen in the escrow account (and, until a card provider is integrated, card payments). Marks the checkout PAID and releases its orders to the farmers. Repeating it returns the payment. 409 CHECKOUT_EXPIRED if the checkout expired or was cancelled first: refund the buyer. An attempt is abandoned when the buyer starts another, and only the checkout’s current PENDING attempt can be confirmed (409 PAYMENT_NOT_PENDING otherwise): for a transfer made against an abandoned attempt, confirm the current one if the amount is the same, or refund.",
-        "operationId": "AdminPaymentController_confirm",
+        "description": "For a missed webhook (or local dev without one). Applies Paystack's answer exactly as the webhook would: a successful charge pays the checkout; money that can no longer be applied (checkout expired, cancelled or already paid, or the amount differs) becomes ORPHANED and is refunded automatically. Repeating it returns the payment. 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
+        "operationId": "AdminPaymentController_verify",
         "parameters": [
           {
             "name": "reference",
@@ -2594,9 +2618,388 @@
             "bearer": []
           }
         ],
-        "summary": "Confirm a payment by hand",
+        "summary": "Re-check a payment with Paystack",
         "tags": [
           "Payments"
+        ]
+      }
+    },
+    "/admin/payments/{reference}/refunds": {
+      "post": {
+        "description": "The payment must be SUCCEEDED; an ORPHANED payment can only have its balance refunded (to retry a failed automatic refund). With orderId: a CANCELLED order on this payment, refunded its price plus its share of the service fee (delivery is not refunded). Without: the payment's remaining balance, refused while any order on the checkout has a pending or paid payout. Paid back in the payment's currency through Paystack; status becomes PROCESSED when Paystack confirms, or FAILED if Paystack refuses (ask again to retry). An unknown outcome stays PENDING until Paystack reports it. 409 PAYMENT_NOT_REFUNDABLE, ORDER_NOT_REFUNDABLE, ORDER_ALREADY_REFUNDED, NOTHING_TO_REFUND, REFUND_EXCEEDS_BALANCE, ORDERS_PAID_OUT.",
+        "operationId": "AdminPaymentController_refund",
+        "parameters": [
+          {
+            "name": "reference",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRefundDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Refund a payment",
+        "tags": [
+          "Payments"
+        ]
+      }
+    },
+    "/banks": {
+      "get": {
+        "operationId": "BankAccountController_banks",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankArrayResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List Nigerian banks for payouts",
+        "tags": [
+          "Bank accounts"
+        ]
+      }
+    },
+    "/farmers/me/bank-account": {
+      "get": {
+        "description": "404 BANK_ACCOUNT_NOT_FOUND until one is set.",
+        "operationId": "BankAccountController_findMine",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankAccountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my payout bank account",
+        "tags": [
+          "Bank accounts"
+        ]
+      },
+      "put": {
+        "description": "Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the farmer. Any change holds the farmer's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
+        "operationId": "BankAccountController_setMine",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBankAccountDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankAccountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set my payout bank account",
+        "tags": [
+          "Bank accounts"
+        ]
+      }
+    },
+    "/agents/me/farmers/{farmerId}/bank-account": {
+      "put": {
+        "description": "Verified agents only, for farmers with a farm in my cluster (404 FARMER_NOT_FOUND otherwise). Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the farmer. Any change holds the farmer's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
+        "operationId": "BankAccountController_setForFarmer",
+        "parameters": [
+          {
+            "name": "farmerId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBankAccountDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankAccountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set a cluster farmer's payout bank account",
+        "tags": [
+          "Bank accounts"
+        ]
+      }
+    },
+    "/admin/payouts/eligible": {
+      "get": {
+        "description": "One row per farmer whose FULFILLED, paid orders are past PAYOUT_HOLD_HOURS and not yet paid out, and whose bank account has been unchanged for 24h. Check accountName against the farmer before approving.",
+        "operationId": "AdminPayoutController_findEligible",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EligiblePayoutListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List farmers due a payout",
+        "tags": [
+          "Payouts"
+        ]
+      }
+    },
+    "/admin/payouts": {
+      "post": {
+        "description": "One NGN transfer per farmer for all their eligible orders, sent in one Paystack bulk transfer from the balance. Payouts start PENDING and settle by webhook (SUCCEEDED, FAILED or REVERSED; the last two free the orders to be paid again). Farmers with nothing eligible are returned in skippedFarmerIds.",
+        "operationId": "AdminPayoutController_approve",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePayoutsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutBatchResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Pay farmers",
+        "tags": [
+          "Payouts"
+        ]
+      },
+      "get": {
+        "description": "Newest first.",
+        "operationId": "AdminPayoutController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/PayoutStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List payouts",
+        "tags": [
+          "Payouts"
+        ]
+      }
+    },
+    "/payouts": {
+      "get": {
+        "description": "Newest first.",
+        "operationId": "PayoutController_findMine",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my payouts",
+        "tags": [
+          "Payouts"
         ]
       }
     },
@@ -2623,6 +3026,44 @@
           }
         ],
         "summary": "Get my cart",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/cart/quote": {
+      "post": {
+        "description": "No token needed: for a guest cart kept on the device. Same pricing and issue rules as GET /cart. Produce that is gone or not public comes back in unavailableProduceIds rather than as a line.",
+        "operationId": "CartController_quote",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartLinesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartQuoteResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Price a device cart",
         "tags": [
           "Cart"
         ]
@@ -2661,6 +3102,54 @@
           }
         ],
         "summary": "Add to my cart",
+        "tags": [
+          "Cart"
+        ]
+      }
+    },
+    "/cart/items/bulk": {
+      "post": {
+        "description": "Call once after sign-in with the guest cart. Quantities add to lines already in the cart, as POST /cart/items does. Items that cannot be added (unavailable, over stock, or past the 50-item cap) are skipped and listed in `skipped`; the rest are merged. Returns the whole cart. Retrying with the same Idempotency-Key adds nothing and returns the current cart with the original `skipped`. 409 CART_BUSY when the cart is locked too long (nothing was merged; retry with the same key).",
+        "operationId": "CartController_mergeItems",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A UUID the client generates once per merge and reuses on retry",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartLinesDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartMergeResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Merge a device cart into my cart",
         "tags": [
           "Cart"
         ]
@@ -2748,7 +3237,7 @@
     },
     "/cart/checkout": {
       "post": {
-        "description": "All or nothing: reserves stock for every item, places the orders AWAITING_PAYMENT under one checkout and empties the cart. Pay with POST /checkouts/{id}/payments before expiresAt or the stock is released. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when items plus delivery no longer total expectedTotal. 404 ADDRESS_NOT_FOUND, 400 INVALID_DELIVERY_DATE. Retrying with the same Idempotency-Key returns the original checkout.",
+        "description": "All or nothing: reserves stock for every item, places the orders AWAITING_PAYMENT under one checkout and empties the cart. Pay with POST /checkouts/{id}/payments before expiresAt or the stock is released. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when items plus delivery and the service fee no longer total expectedTotal. 404 ADDRESS_NOT_FOUND, 400 INVALID_DELIVERY_DATE. Retrying with the same Idempotency-Key returns the original checkout.",
         "operationId": "CartController_checkout",
         "parameters": [
           {
@@ -3778,6 +4267,40 @@
       }
     },
     "schemas": {
+      "FxRateDto": {
+        "type": "object",
+        "properties": {
+          "rate": {
+            "type": "string",
+            "example": "1530.123456",
+            "description": "NGN per USD for dollar payments, margin applied"
+          },
+          "fetchedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rate",
+          "fetchedAt"
+        ]
+      },
+      "FxRateResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/FxRateDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "RegisterDto": {
         "type": "object",
         "properties": {
@@ -6136,7 +6659,7 @@
             "type": "number",
             "minimum": 0,
             "example": 57500,
-            "description": "The grand total the buyer saw: items plus the delivery fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
+            "description": "The grand total the buyer saw: items plus the delivery fee plus the service fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
           },
           "addressId": {
             "type": "string",
@@ -6308,53 +6831,21 @@
           "updatedAt"
         ]
       },
-      "PaymentMethod": {
-        "type": "string",
-        "enum": [
-          "CARD",
-          "BANK_TRANSFER"
-        ]
-      },
       "PaymentStatus": {
         "type": "string",
         "enum": [
           "PENDING",
           "SUCCEEDED",
           "FAILED",
-          "ABANDONED"
+          "ABANDONED",
+          "ORPHANED"
         ]
       },
-      "BankTransferInstructionsDto": {
-        "type": "object",
-        "properties": {
-          "bankName": {
-            "type": "string",
-            "example": "Test Bank"
-          },
-          "accountName": {
-            "type": "string",
-            "example": "LAICOS Escrow"
-          },
-          "accountNumber": {
-            "type": "string",
-            "example": "0123456789"
-          },
-          "amount": {
-            "type": "string",
-            "example": "57500.00"
-          },
-          "narration": {
-            "type": "string",
-            "example": "PAY-000123",
-            "description": "The transfer description the buyer must use"
-          }
-        },
-        "required": [
-          "bankName",
-          "accountName",
-          "accountNumber",
-          "amount",
-          "narration"
+      "Currency": {
+        "type": "string",
+        "enum": [
+          "NGN",
+          "USD"
         ]
       },
       "PaymentDto": {
@@ -6366,14 +6857,8 @@
           },
           "reference": {
             "type": "string",
-            "example": "PAY-000123"
-          },
-          "method": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PaymentMethod"
-              }
-            ]
+            "example": "PAY-000123",
+            "description": "Also the Paystack transaction reference"
           },
           "status": {
             "allOf": [
@@ -6382,23 +6867,48 @@
               }
             ]
           },
+          "currency": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              }
+            ]
+          },
           "amount": {
             "type": "string",
-            "example": "57500.00"
+            "example": "57500.00",
+            "description": "The checkout total in NGN"
+          },
+          "chargedAmount": {
+            "type": "string",
+            "example": "37.58",
+            "description": "What the buyer is charged, in currency"
+          },
+          "fxRate": {
+            "type": "string",
+            "nullable": true,
+            "example": "1530.123456",
+            "description": "NGN per USD used for a USD payment; null for NGN"
+          },
+          "channel": {
+            "type": "string",
+            "nullable": true,
+            "example": "card",
+            "description": "How the buyer paid, once Paystack reports it"
           },
           "authorizationUrl": {
             "type": "string",
             "nullable": true,
-            "description": "The provider's hosted payment page; null until a card provider is integrated"
+            "description": "Paystack's hosted payment page: redirect the buyer here"
           },
-          "bankTransfer": {
+          "accessCode": {
+            "type": "string",
             "nullable": true,
-            "type": "object",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/BankTransferInstructionsDto"
-              }
-            ]
+            "description": "For Paystack's inline popup instead of the redirect"
+          },
+          "failureReason": {
+            "type": "string",
+            "nullable": true
           },
           "paidAt": {
             "format": "date-time",
@@ -6413,11 +6923,15 @@
         "required": [
           "id",
           "reference",
-          "method",
           "status",
+          "currency",
           "amount",
+          "chargedAmount",
+          "fxRate",
+          "channel",
           "authorizationUrl",
-          "bankTransfer",
+          "accessCode",
+          "failureReason",
           "paidAt",
           "createdAt"
         ]
@@ -6454,10 +6968,15 @@
             "type": "string",
             "example": "3500.00"
           },
+          "serviceFee": {
+            "type": "string",
+            "example": "2700.00",
+            "description": "SERVICE_FEE_PERCENT of subtotal"
+          },
           "totalPrice": {
             "type": "string",
             "example": "57500.00",
-            "description": "subtotal + deliveryFee: the amount to pay"
+            "description": "subtotal + deliveryFee + serviceFee: the amount to pay"
           },
           "expiresAt": {
             "format": "date-time",
@@ -6503,6 +7022,7 @@
           "status",
           "subtotal",
           "deliveryFee",
+          "serviceFee",
           "totalPrice",
           "expiresAt",
           "paidAt",
@@ -6777,16 +7297,17 @@
       "InitiatePaymentDto": {
         "type": "object",
         "properties": {
-          "method": {
+          "currency": {
+            "description": "USD is charged by card only, at the rate from GET /fx/rate",
             "allOf": [
               {
-                "$ref": "#/components/schemas/PaymentMethod"
+                "$ref": "#/components/schemas/Currency"
               }
             ]
           }
         },
         "required": [
-          "method"
+          "currency"
         ]
       },
       "PaymentResponseDto": {
@@ -6803,6 +7324,495 @@
         "required": [
           "message",
           "data"
+        ]
+      },
+      "CreateRefundDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A CANCELLED order on this payment: refunds its price plus its share of the service fee. Omit to refund the payment's remaining balance."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "example": "Farmer could not fulfil the order"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "RefundStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "PROCESSED",
+          "FAILED"
+        ]
+      },
+      "RefundDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "string",
+            "example": "9450.00",
+            "description": "In the payment's currency"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RefundStatus"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "failureReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "amount",
+          "status",
+          "reason",
+          "failureReason",
+          "createdAt"
+        ]
+      },
+      "RefundResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RefundDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "BankDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Guaranty Trust Bank"
+          },
+          "code": {
+            "type": "string",
+            "example": "058"
+          }
+        },
+        "required": [
+          "name",
+          "code"
+        ]
+      },
+      "BankArrayResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BankDto"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "BankAccountDto": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "example": "058"
+          },
+          "bankName": {
+            "type": "string",
+            "example": "Guaranty Trust Bank"
+          },
+          "accountNumber": {
+            "type": "string",
+            "example": "******6789"
+          },
+          "accountName": {
+            "type": "string",
+            "example": "ADA OKAFOR",
+            "description": "As the bank holds it; confirm it is the farmer"
+          },
+          "payoutsHeldUntil": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Payouts wait until this time after any change (24h)"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bankCode",
+          "bankName",
+          "accountNumber",
+          "accountName",
+          "payoutsHeldUntil",
+          "updatedAt"
+        ]
+      },
+      "BankAccountResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BankAccountDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "SetBankAccountDto": {
+        "type": "object",
+        "properties": {
+          "bankCode": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "058",
+            "description": "A code from GET /banks"
+          },
+          "accountNumber": {
+            "type": "string",
+            "pattern": "^\\d{10}$",
+            "example": "0123456789",
+            "description": "10-digit NUBAN"
+          }
+        },
+        "required": [
+          "bankCode",
+          "accountNumber"
+        ]
+      },
+      "EligibleOrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "amount": {
+            "type": "string",
+            "example": "4000.00"
+          },
+          "fulfilledAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orderNumber",
+          "amount",
+          "fulfilledAt"
+        ]
+      },
+      "EligiblePayoutDto": {
+        "type": "object",
+        "properties": {
+          "farmerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id; send to POST /admin/payouts"
+          },
+          "farmerCode": {
+            "type": "string",
+            "example": "FRM-000123"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor"
+          },
+          "bankName": {
+            "type": "string",
+            "example": "Guaranty Trust Bank"
+          },
+          "accountNumber": {
+            "type": "string",
+            "example": "******6789"
+          },
+          "accountName": {
+            "type": "string",
+            "example": "ADA OKAFOR",
+            "description": "As the bank holds it; check it matches the farmer"
+          },
+          "total": {
+            "type": "string",
+            "example": "9000.00",
+            "description": "NGN"
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EligibleOrderDto"
+            }
+          }
+        },
+        "required": [
+          "farmerId",
+          "farmerCode",
+          "firstName",
+          "lastName",
+          "bankName",
+          "accountNumber",
+          "accountName",
+          "total",
+          "orders"
+        ]
+      },
+      "EligiblePayoutListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EligiblePayoutDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "ApprovePayoutsDto": {
+        "type": "object",
+        "properties": {
+          "farmerIds": {
+            "uniqueItems": true,
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Farmer.id values from GET /admin/payouts/eligible (1-100)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "farmerIds"
+        ]
+      },
+      "PayoutStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "SUCCEEDED",
+          "FAILED",
+          "REVERSED"
+        ]
+      },
+      "PayoutItemDto": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "string",
+            "example": "4000.00"
+          }
+        },
+        "required": [
+          "orderId",
+          "amount"
+        ]
+      },
+      "PayoutDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reference": {
+            "type": "string",
+            "example": "PO-000123"
+          },
+          "farmerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id"
+          },
+          "amount": {
+            "type": "string",
+            "example": "9000.00",
+            "description": "NGN"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PayoutStatus"
+              }
+            ]
+          },
+          "bankName": {
+            "type": "string",
+            "example": "Guaranty Trust Bank"
+          },
+          "accountNumber": {
+            "type": "string",
+            "example": "******6789"
+          },
+          "accountName": {
+            "type": "string",
+            "example": "ADA OKAFOR"
+          },
+          "failureReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "paidAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutItemDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "farmerId",
+          "amount",
+          "status",
+          "bankName",
+          "accountNumber",
+          "accountName",
+          "failureReason",
+          "paidAt",
+          "createdAt",
+          "items"
+        ]
+      },
+      "PayoutBatchDto": {
+        "type": "object",
+        "properties": {
+          "payouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutDto"
+            }
+          },
+          "skippedFarmerIds": {
+            "description": "Farmers with nothing eligible (or no bank account) right now",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "payouts",
+          "skippedFarmerIds"
+        ]
+      },
+      "PayoutBatchResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PayoutBatchDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "PayoutListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PayoutDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
         ]
       },
       "CartItemIssue": {
@@ -6884,10 +7894,6 @@
       "CartItemDto": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
           "quantity": {
             "type": "integer",
             "example": 10,
@@ -6909,26 +7915,23 @@
           },
           "produce": {
             "$ref": "#/components/schemas/CartProduceDto"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
-          "id",
           "quantity",
           "lineTotal",
           "issue",
-          "produce"
+          "produce",
+          "id"
         ]
       },
       "CartDto": {
         "type": "object",
         "properties": {
-          "items": {
-            "description": "Newest first",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CartItemDto"
-            }
-          },
           "itemCount": {
             "type": "number",
             "example": 2
@@ -6943,18 +7946,31 @@
             "example": "3500.00",
             "description": "Flat delivery fee; 0.00 when nothing can be ordered"
           },
+          "serviceFee": {
+            "type": "string",
+            "example": "2250.00",
+            "description": "SERVICE_FEE_PERCENT of total"
+          },
           "grandTotal": {
             "type": "string",
             "example": "48500.00",
-            "description": "total + deliveryFee: what checkout will charge"
+            "description": "total + deliveryFee + serviceFee: what checkout will charge"
+          },
+          "items": {
+            "description": "Newest first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItemDto"
+            }
           }
         },
         "required": [
-          "items",
           "itemCount",
           "total",
           "deliveryFee",
-          "grandTotal"
+          "serviceFee",
+          "grandTotal",
+          "items"
         ]
       },
       "CartResponseDto": {
@@ -6993,6 +8009,125 @@
           "quantity"
         ]
       },
+      "CartLinesDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "uniqueItems": true,
+            "minItems": 1,
+            "description": "1 to 50 lines, each produceId once",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AddCartItemDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CartLineDto": {
+        "type": "object",
+        "properties": {
+          "quantity": {
+            "type": "integer",
+            "example": 10,
+            "description": "Whole units of the produce's `unit`"
+          },
+          "lineTotal": {
+            "type": "string",
+            "example": "45000.00",
+            "description": "Current price × quantity"
+          },
+          "issue": {
+            "nullable": true,
+            "description": "Why checkout would refuse this item; null when it can be ordered",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CartItemIssue"
+              }
+            ]
+          },
+          "produce": {
+            "$ref": "#/components/schemas/CartProduceDto"
+          }
+        },
+        "required": [
+          "quantity",
+          "lineTotal",
+          "issue",
+          "produce"
+        ]
+      },
+      "CartQuoteDto": {
+        "type": "object",
+        "properties": {
+          "itemCount": {
+            "type": "number",
+            "example": 2
+          },
+          "total": {
+            "type": "string",
+            "example": "45000.00",
+            "description": "Sum of lineTotal over items with no issue"
+          },
+          "deliveryFee": {
+            "type": "string",
+            "example": "3500.00",
+            "description": "Flat delivery fee; 0.00 when nothing can be ordered"
+          },
+          "serviceFee": {
+            "type": "string",
+            "example": "2250.00",
+            "description": "SERVICE_FEE_PERCENT of total"
+          },
+          "grandTotal": {
+            "type": "string",
+            "example": "48500.00",
+            "description": "total + deliveryFee + serviceFee: what checkout will charge"
+          },
+          "items": {
+            "description": "In request order",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartLineDto"
+            }
+          },
+          "unavailableProduceIds": {
+            "description": "Requested produce that is gone or not public; drop these from the device cart",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        "required": [
+          "itemCount",
+          "total",
+          "deliveryFee",
+          "serviceFee",
+          "grandTotal",
+          "items",
+          "unavailableProduceIds"
+        ]
+      },
+      "CartQuoteResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CartQuoteDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "CartItemResponseDto": {
         "type": "object",
         "properties": {
@@ -7002,6 +8137,97 @@
           },
           "data": {
             "$ref": "#/components/schemas/CartItemDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "CartSkippedItemDto": {
+        "type": "object",
+        "properties": {
+          "produceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "code": {
+            "type": "string",
+            "example": "INSUFFICIENT_STOCK",
+            "description": "CART_FULL, PRODUCE_NOT_FOUND, PRODUCE_UNAVAILABLE or INSUFFICIENT_STOCK"
+          },
+          "message": {
+            "type": "string",
+            "example": "Only 3 Bags available"
+          }
+        },
+        "required": [
+          "produceId",
+          "code",
+          "message"
+        ]
+      },
+      "CartMergeDto": {
+        "type": "object",
+        "properties": {
+          "itemCount": {
+            "type": "number",
+            "example": 2
+          },
+          "total": {
+            "type": "string",
+            "example": "45000.00",
+            "description": "Sum of lineTotal over items with no issue"
+          },
+          "deliveryFee": {
+            "type": "string",
+            "example": "3500.00",
+            "description": "Flat delivery fee; 0.00 when nothing can be ordered"
+          },
+          "serviceFee": {
+            "type": "string",
+            "example": "2250.00",
+            "description": "SERVICE_FEE_PERCENT of total"
+          },
+          "grandTotal": {
+            "type": "string",
+            "example": "48500.00",
+            "description": "total + deliveryFee + serviceFee: what checkout will charge"
+          },
+          "items": {
+            "description": "Newest first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartItemDto"
+            }
+          },
+          "skipped": {
+            "description": "Items not merged, and why; everything else was added",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CartSkippedItemDto"
+            }
+          }
+        },
+        "required": [
+          "itemCount",
+          "total",
+          "deliveryFee",
+          "serviceFee",
+          "grandTotal",
+          "items",
+          "skipped"
+        ]
+      },
+      "CartMergeResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CartMergeDto"
           }
         },
         "required": [
@@ -7030,7 +8256,7 @@
             "type": "number",
             "minimum": 0,
             "example": 57500,
-            "description": "The grand total the buyer saw: items plus the delivery fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
+            "description": "The grand total the buyer saw: items plus the delivery fee plus the service fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
           },
           "addressId": {
             "type": "string",
@@ -8257,6 +9483,6 @@
   },
   "externalDocs": {
     "description": "Swagger UI",
-    "url": "http://localhost:8080/v1/docs.json"
+    "url": "http://localhost:8080/v1/docs"
   }
 }

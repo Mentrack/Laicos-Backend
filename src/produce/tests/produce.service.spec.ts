@@ -253,6 +253,36 @@ describe('ProduceService', () => {
       await service.findAll(buyer, { sort });
       expect(findManyArgs().orderBy).toEqual([primary, { id: 'desc' }]);
     });
+
+    it('shows a guest only published listings on verified farms', async () => {
+      await service.findAll(null, {});
+      expect(findManyArgs().where).toMatchObject({
+        OR: [
+          {
+            status: { not: ProduceStatus.DRAFT },
+            farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
+          },
+        ],
+        status: ProduceStatus.PUBLISHED,
+      });
+    });
+  });
+
+  it('looks a guest up only among listings anyone can see', async () => {
+    produce.findFirst.mockResolvedValue({ id: produceId });
+    await service.findOne(null, produceId);
+    expect(produce.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: produceId,
+        OR: [
+          {
+            status: { not: ProduceStatus.DRAFT },
+            farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
+          },
+        ],
+      },
+      include: listingInclude,
+    });
   });
 
   it('404s on produce the user cannot see', async () => {

@@ -8,14 +8,21 @@ import {
   type User,
 } from '../../../generated/client';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
+import { CHECKOUT_TRANSACTION } from '../../payment/utils/checkout-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CartService } from '../cart.service';
 import { CartItemIssue } from '../dto';
-import type { CartItemRow } from '../formatters/cart.formatter';
+import {
+  formatCartItem,
+  formatCartLine,
+  type CartItemRow,
+} from '../formatters/cart.formatter';
 
 const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const itemId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
+const otherId = '1c3d5e7f-2a4b-4c6d-8e0f-1a2b3c4d5e6f';
+const mergeKey = '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d';
 // Typed from the row, not inferred, so overrides can set any status.
 type ProduceFixture = Pick<
   CartItemRow['produce'],
@@ -80,9 +87,11 @@ describe('CartService', () => {
     $executeRaw: jest.fn(),
     cartItem,
     produce: { findUnique: jest.fn() },
+    cartMerge: { findUnique: jest.fn(), create: jest.fn() },
   };
   const database = {
     cartItem,
+    produce: { findMany: jest.fn() },
     // A plain function, not jest.fn, so resetAllMocks keeps it.
     $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
       callback(tx),
@@ -118,6 +127,20 @@ describe('CartService', () => {
         total: '9000.00',
         deliveryFee: '3500.00',
         grandTotal: '12500.00',
+      });
+    });
+
+    it('adds a service fee on the item total to the grand total', async () => {
+      const charging = new CartService(
+        database as unknown as PrismaService,
+        testCheckoutConfig({ SERVICE_FEE_PERCENT: '5' }),
+      );
+      cartItem.findMany.mockResolvedValue([cartRow(2)]);
+      await expect(charging.find(buyer)).resolves.toMatchObject({
+        total: '9000.00',
+        deliveryFee: '3500.00',
+        serviceFee: '450.00',
+        grandTotal: '12950.00',
       });
     });
 
@@ -161,6 +184,93 @@ describe('CartService', () => {
       ]);
       const cart = await service.find(buyer);
       expect(cart.items[0].issue).toBe(CartItemIssue.INSUFFICIENT_STOCK);
+    });
+
+    it('formats a quote line exactly like a cart item, minus its id', () => {
+      const row = cartRow(10);
+      const { id, ...line } = formatCartItem(row);
+      expect(id).toBe(itemId);
+      expect(formatCartLine({ quantity: 10, produce: row.produce })).toEqual(
+        line,
+      );
+    });
+  });
+
+  describe('quote', () => {
+    it('prices device lines in request order with the delivery fee', async () => {
+      database.produce.findMany.mockResolvedValue([
+        { ...produce, id: otherId, name: 'Yam' },
+        produce,
+      ]);
+      const quote = await service.quote({
+        items: [
+          { produceId, quantity: 10 },
+          { produceId: otherId, quantity: 2 },
+        ],
+      });
+      expect(quote.items.map((line) => line.produce.id)).toEqual([
+        produceId,
+        otherId,
+      ]);
+      expect(quote).toMatchObject({
+        itemCount: 2,
+        total: '54000.00',
+        deliveryFee: '3500.00',
+        grandTotal: '57500.00',
+        unavailableProduceIds: [],
+      });
+    });
+
+    it('looks up only listings a guest may see', async () => {
+      database.produce.findMany.mockResolvedValue([]);
+      await service.quote({ items: [{ produceId, quantity: 1 }] });
+      expect(database.produce.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: { in: [produceId] },
+            OR: [
+              {
+                status: { not: ProduceStatus.DRAFT },
+                farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
+              },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('lists gone or hidden produce instead of pricing it', async () => {
+      database.produce.findMany.mockResolvedValue([produce]);
+      const quote = await service.quote({
+        items: [
+          { produceId, quantity: 1 },
+          { produceId: otherId, quantity: 1 },
+        ],
+      });
+      expect(quote.items).toHaveLength(1);
+      expect(quote.unavailableProduceIds).toEqual([otherId]);
+    });
+
+    it('keeps a sold-out listing as a flagged line, not an unavailable id', async () => {
+      database.produce.findMany.mockResolvedValue([
+        { ...produce, status: ProduceStatus.SOLD_OUT },
+      ]);
+      const quote = await service.quote({
+        items: [{ produceId, quantity: 1 }],
+      });
+      expect(quote.items[0].issue).toBe(CartItemIssue.UNAVAILABLE);
+      expect(quote.unavailableProduceIds).toEqual([]);
+      expect(quote).toMatchObject({ deliveryFee: '0.00', grandTotal: '0.00' });
+    });
+
+    it('flags a line over the floating stock', async () => {
+      database.produce.findMany.mockResolvedValue([
+        { ...produce, floatingQuantity: 3 },
+      ]);
+      const quote = await service.quote({
+        items: [{ produceId, quantity: 5 }],
+      });
+      expect(quote.items[0].issue).toBe(CartItemIssue.INSUFFICIENT_STOCK);
     });
   });
 
@@ -240,6 +350,185 @@ describe('CartService', () => {
       cartItem.upsert.mockResolvedValue(cartRow(2));
       await service.addItem(buyer, { produceId, quantity: 1 });
       expect(cartItem.count).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('mergeItems', () => {
+    it('adds to existing lines under the lock and returns the whole cart', async () => {
+      cartItem.findUnique.mockResolvedValue(cartRow(10));
+      tx.produce.findUnique.mockResolvedValue(produce);
+      cartItem.upsert.mockResolvedValue(cartRow(15));
+      cartItem.findMany.mockResolvedValue([cartRow(15)]);
+      const cart = await service.mergeItems(buyer, mergeKey, {
+        items: [{ produceId, quantity: 5 }],
+      });
+      expect(tx.$executeRaw).toHaveBeenCalledWith(
+        expect.anything(),
+        `cart:${buyer.id}`,
+      );
+      expect(cartItem.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ update: { quantity: 15 } }),
+      );
+      expect(cartItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { buyerId: buyer.id } }),
+      );
+      expect(cart).toMatchObject({
+        itemCount: 1,
+        total: '67500.00',
+        skipped: [],
+      });
+    });
+
+    it('skips an item over stock at the combined quantity and merges the rest', async () => {
+      cartItem.findUnique
+        .mockResolvedValueOnce(cartRow(498))
+        .mockResolvedValueOnce(null);
+      cartItem.count.mockResolvedValue(1);
+      tx.produce.findUnique
+        .mockResolvedValueOnce(produce)
+        .mockResolvedValueOnce({ ...produce, id: otherId });
+      cartItem.upsert.mockResolvedValue(cartRow(1));
+      cartItem.findMany.mockResolvedValue([cartRow(498), cartRow(1)]);
+      const cart = await service.mergeItems(buyer, mergeKey, {
+        items: [
+          { produceId, quantity: 5 },
+          { produceId: otherId, quantity: 1 },
+        ],
+      });
+      expect(cartItem.upsert).toHaveBeenCalledTimes(1);
+      expect(cart.skipped).toEqual([
+        {
+          produceId,
+          code: 'INSUFFICIENT_STOCK',
+          message: 'Only 500 Tuber available',
+        },
+      ]);
+    });
+
+    it('reports a hidden or deleted produce as not found', async () => {
+      cartItem.findUnique.mockResolvedValue(null);
+      cartItem.count.mockResolvedValue(0);
+      tx.produce.findUnique.mockResolvedValue(null);
+      cartItem.findMany.mockResolvedValue([]);
+      const cart = await service.mergeItems(buyer, mergeKey, {
+        items: [{ produceId, quantity: 1 }],
+      });
+      expect(cart.skipped).toEqual([
+        { produceId, code: 'PRODUCE_NOT_FOUND', message: 'Produce not found' },
+      ]);
+    });
+
+    it('grows an existing line in a full cart but skips new ones', async () => {
+      cartItem.findUnique
+        .mockResolvedValueOnce(cartRow(1))
+        .mockResolvedValueOnce(null);
+      cartItem.count.mockResolvedValue(50);
+      tx.produce.findUnique.mockResolvedValue(produce);
+      cartItem.upsert.mockResolvedValue(cartRow(2));
+      cartItem.findMany.mockResolvedValue([cartRow(2)]);
+      const cart = await service.mergeItems(buyer, mergeKey, {
+        items: [
+          { produceId, quantity: 1 },
+          { produceId: otherId, quantity: 1 },
+        ],
+      });
+      expect(cartItem.upsert).toHaveBeenCalledTimes(1);
+      expect(cart.skipped).toEqual([
+        {
+          produceId: otherId,
+          code: 'CART_FULL',
+          message: 'Your cart can hold at most 50 items',
+        },
+      ]);
+    });
+
+    it('records the key with what it skipped, under the lock', async () => {
+      cartItem.findUnique.mockResolvedValue(null);
+      cartItem.count.mockResolvedValue(50);
+      cartItem.findMany.mockResolvedValue([]);
+      await service.mergeItems(buyer, mergeKey, {
+        items: [{ produceId, quantity: 1 }],
+      });
+      expect(tx.cartMerge.findUnique).toHaveBeenCalledWith({
+        where: {
+          buyerId_idempotencyKey: {
+            buyerId: buyer.id,
+            idempotencyKey: mergeKey,
+          },
+        },
+      });
+      expect(tx.cartMerge.create).toHaveBeenCalledWith({
+        data: {
+          buyerId: buyer.id,
+          idempotencyKey: mergeKey,
+          skipped: [
+            {
+              produceId,
+              code: 'CART_FULL',
+              message: 'Your cart can hold at most 50 items',
+            },
+          ],
+        },
+      });
+    });
+
+    it('turns a transaction timeout into a retryable 409', async () => {
+      const original = database.$transaction;
+      database.$transaction = () =>
+        Promise.reject(
+          new Prisma.PrismaClientKnownRequestError('timed out', {
+            code: 'P2028',
+            clientVersion: 'test',
+          }),
+        );
+      try {
+        await expect(
+          errorBody(
+            service.mergeItems(buyer, mergeKey, {
+              items: [{ produceId, quantity: 1 }],
+            }),
+          ),
+        ).resolves.toEqual({
+          message: 'Your cart is busy; please try again',
+          code: 'CART_BUSY',
+        });
+      } finally {
+        database.$transaction = original;
+      }
+    });
+
+    it('gives a 50-line merge the checkout transaction limits', async () => {
+      const original = database.$transaction;
+      const transaction = jest.fn(
+        (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+      );
+      database.$transaction = transaction;
+      cartItem.findMany.mockResolvedValue([]);
+      try {
+        await service.mergeItems(buyer, mergeKey, {
+          items: [{ produceId, quantity: 1 }],
+        });
+        expect(transaction).toHaveBeenCalledWith(
+          expect.any(Function),
+          CHECKOUT_TRANSACTION,
+        );
+      } finally {
+        database.$transaction = original;
+      }
+    });
+
+    it('adds nothing on a repeated key and replays the original skipped list', async () => {
+      const original = [
+        { produceId: otherId, code: 'INSUFFICIENT_STOCK', message: 'x' },
+      ];
+      tx.cartMerge.findUnique.mockResolvedValue({ skipped: original });
+      cartItem.findMany.mockResolvedValue([cartRow(15)]);
+      const cart = await service.mergeItems(buyer, mergeKey, {
+        items: [{ produceId, quantity: 5 }],
+      });
+      expect(cartItem.upsert).not.toHaveBeenCalled();
+      expect(tx.cartMerge.create).not.toHaveBeenCalled();
+      expect(cart).toMatchObject({ itemCount: 1, skipped: original });
     });
   });
 

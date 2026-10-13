@@ -1,5 +1,5 @@
 import {
-  PaymentMethod,
+  Currency,
   PaymentStatus,
   Prisma,
   type Payment,
@@ -9,45 +9,54 @@ import { formatPayment } from '../formatters/payment.formatter';
 const base = {
   id: 'pay-1',
   reference: 'PAY-000001',
-  method: PaymentMethod.BANK_TRANSFER,
   status: PaymentStatus.PENDING,
+  currency: Currency.USD,
   amount: new Prisma.Decimal('57500'),
+  chargedAmount: new Prisma.Decimal('37.58'),
+  fxRate: new Prisma.Decimal('1530.123456'),
+  channel: null,
+  failureReason: null,
+  providerData: null,
   paidAt: null,
-  createdAt: new Date('2026-10-08T00:00:00Z'),
+  createdAt: new Date('2026-10-12T00:00:00Z'),
 } as Payment;
 
-const transfer = {
-  bankName: 'Test Bank',
-  accountName: 'LAICOS Escrow',
-  accountNumber: '0123456789',
-  amount: '57500.00',
-  narration: 'PAY-000001',
-};
-
 describe('formatPayment', () => {
-  it('reads stored transfer instructions back', () => {
-    expect(
-      formatPayment({
-        ...base,
-        providerData: { authorizationUrl: null, bankTransfer: transfer },
-      }),
-    ).toMatchObject({
+  it('formats amounts and the rate as fixed strings', () => {
+    expect(formatPayment(base)).toMatchObject({
+      currency: Currency.USD,
       amount: '57500.00',
+      chargedAmount: '37.58',
+      fxRate: '1530.123456',
       authorizationUrl: null,
-      bankTransfer: transfer,
+      accessCode: null,
     });
   });
 
-  it.each([
-    null,
-    'junk',
-    [],
-    { bankTransfer: { bankName: 1 } },
-    { authorizationUrl: 5 },
-  ])('treats malformed provider data %p as absent', (providerData) => {
-    expect(formatPayment({ ...base, providerData })).toMatchObject({
-      authorizationUrl: null,
-      bankTransfer: null,
+  it('reads the stored Paystack checkout back', () => {
+    expect(
+      formatPayment({
+        ...base,
+        providerData: {
+          authorizationUrl: 'https://checkout.paystack.com/abc',
+          accessCode: 'abc',
+        },
+      }),
+    ).toMatchObject({
+      authorizationUrl: 'https://checkout.paystack.com/abc',
+      accessCode: 'abc',
     });
+  });
+
+  it('treats malformed provider data as absent', () => {
+    expect(
+      formatPayment({ ...base, providerData: { authorizationUrl: 42 } }),
+    ).toMatchObject({ authorizationUrl: null, accessCode: null });
+  });
+
+  it('has no rate for a naira payment', () => {
+    expect(
+      formatPayment({ ...base, currency: Currency.NGN, fxRate: null }).fxRate,
+    ).toBeNull();
   });
 });

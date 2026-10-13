@@ -6,3 +6,10 @@ export function checkoutNotFound() {
     code: 'CHECKOUT_NOT_FOUND',
   });
 }
+
+export function paymentNotFound() {
+  return new NotFoundException({
+    message: 'Payment not found',
+    code: 'PAYMENT_NOT_FOUND',
+  });
+}

@@ -8,7 +8,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { buildOpenApiDocument } from './openapi';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: Paystack signs the exact bytes it sent, so the webhook needs them.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Explicit allowlist, never a wildcard. Auth is a bearer header, not a
   // cookie, so credentials stay off.

@@ -20,8 +20,9 @@ import {
 } from '@nestjs/platform-express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth, OptionalAuth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { OptionalUser } from '../auth/decorators/optional-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
 import { UpdateIdentityDto } from '../common/dto/identity.dto';
 import { ApiFileUpload, ApiImageUpload } from '../common/dto/image-upload';
@@ -151,13 +152,13 @@ export class FarmController {
   @ApiOperation({
     summary: 'Get a farm’s public profile',
     description:
-      'Any signed-in user. Verified farms only, except to their owner; never includes the address.',
+      'No token needed. Verified farms only, except to their owner; never includes the address.',
   })
-  @Auth()
+  @OptionalAuth()
   @ApiTags('Farms')
   @ApiEnvelope(FarmProfileDto)
   async findFarmProfile(
-    @CurrentUser() user: User,
+    @OptionalUser() user: User | null,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     const data = await this.farmProfiles.findOne(user, id);

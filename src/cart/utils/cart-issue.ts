@@ -7,10 +7,10 @@ import {
   type ReservableProduce,
 } from '../../order/utils/reservation';
 import { CartItemIssue } from '../dto';
-import type { CartItemRow } from '../formatters/cart.formatter';
+import type { CartLineRow } from '../formatters/cart.formatter';
 
-/** Why checkout would refuse this item right now, or null if it wouldn't. */
-export function cartItemIssue(item: CartItemRow): CartItemIssue | null {
+/** Why checkout would refuse this line right now, or null if it wouldn't. */
+export function cartItemIssue(item: CartLineRow): CartItemIssue | null {
   const { produce } = item;
   if (
     produce.status !== ProduceStatus.PUBLISHED ||
@@ -24,7 +24,7 @@ export function cartItemIssue(item: CartItemRow): CartItemIssue | null {
   return null;
 }
 
-export function describeIssue(item: CartItemRow, issue: CartItemIssue): string {
+export function describeIssue(item: CartLineRow, issue: CartItemIssue): string {
   const { name, floatingQuantity, unit } = item.produce;
   return issue === CartItemIssue.UNAVAILABLE
     ? unavailable(name)

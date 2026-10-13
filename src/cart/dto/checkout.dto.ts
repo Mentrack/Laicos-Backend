@@ -44,8 +44,15 @@ export class CheckoutDto {
 
   @ApiProperty({
     type: String,
+    example: '2700.00',
+    description: 'SERVICE_FEE_PERCENT of subtotal',
+  })
+  serviceFee: string;
+
+  @ApiProperty({
+    type: String,
     example: '57500.00',
-    description: 'subtotal + deliveryFee: the amount to pay',
+    description: 'subtotal + deliveryFee + serviceFee: the amount to pay',
   })
   totalPrice: string;
 

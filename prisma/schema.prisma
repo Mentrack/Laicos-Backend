@@ -32,10 +32,14 @@ model User {
   agent                 Agent?
   orders                Order[]
   cartItems             CartItem[]
+  cartMerges            CartMerge[]
   checkouts             Checkout[]
   sourcingRequests      SourcingRequest[]
   addresses             Address[]
   confirmedPayments     Payment[]              @relation("PaymentConfirmedBy")
+  refundsInitiated      Refund[]               @relation("RefundInitiatedBy")
+  bankAccountsSet       FarmerBankAccount[]    @relation("BankAccountSetBy")
+  payoutsApproved       Payout[]               @relation("PayoutApprovedBy")
   refreshToken          RefreshToken?
   emailVerificationCode EmailVerificationCode?
 }
@@ -66,20 +70,22 @@ model EmailVerificationCode {
 }
 
 model Farmer {
-  id            String   @id @default(uuid())
+  id            String             @id @default(uuid())
   // Public, human-readable code (FRM-000123). The sequence is created by hand in
   // the migration; Prisma only knows the column default that reads it.
-  farmerId      String   @unique @default(dbgenerated("('FRM-'::text || lpad((nextval('\"Farmer_farmerId_seq\"'::regclass))::text, 6, '0'::text))"))
-  userId        String   @unique
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  farmerId      String             @unique @default(dbgenerated("('FRM-'::text || lpad((nextval('\"Farmer_farmerId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId        String             @unique
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   // Set at profile setup; the agent checks them during farm verification.
   idType        IdType?
   idNumber      String?
   // Private-bucket key.
   idDocumentKey String?
   farms         Farm[]
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  bankAccount   FarmerBankAccount?
+  payouts       Payout[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 }
 
 model Farm {
@@ -334,6 +340,10 @@ model Order {
   checklist          OrderChecklist?
   // Created when the order is marked READY; the agent takes it from there.
   handover           OrderHandover?
+  // Set by logistics (not built yet); starts the payout hold.
+  fulfilledAt        DateTime?
+  payoutItems        PayoutItem[]
+  refunds            Refund[]
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
@@ -393,6 +403,19 @@ model CartItem {
   @@unique([buyerId, produceId])
 }
 
+// One row per applied guest-cart merge: a retried POST /cart/items/bulk with
+// the same key replays `skipped` instead of adding the quantities again.
+model CartMerge {
+  id             String   @id @default(uuid())
+  buyerId        String
+  buyer          User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  idempotencyKey String
+  skipped        Json
+  createdAt      DateTime @default(now())
+
+  @@unique([buyerId, idempotencyKey])
+}
+
 // One placement (cart or Buy Now): its orders, delivery and payment.
 model Checkout {
   id                   String         @id @default(uuid())
@@ -403,13 +426,15 @@ model Checkout {
   buyer                User           @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   // Client-generated per attempt (Idempotency-Key); a retry replays the original.
   idempotencyKey       String
-  // subtotal + deliveryFee
+  // subtotal + deliveryFee + serviceFee
   totalPrice           Decimal        @db.Decimal(12, 2)
   orders               Order[]
   createdAt            DateTime       @default(now())
   status               CheckoutStatus
   subtotal             Decimal        @db.Decimal(12, 2)
   deliveryFee          Decimal        @db.Decimal(12, 2)
+  // SERVICE_FEE_PERCENT of subtotal, kept by Laicos; snapshotted like deliveryFee.
+  serviceFee           Decimal        @db.Decimal(12, 2)
   // Reserved stock is released once this passes unpaid (CheckoutExpiryService).
   expiresAt            DateTime
   paidAt               DateTime?
@@ -453,22 +478,30 @@ model Address {
 model Payment {
   id             String          @id @default(uuid())
   // Public code (PAY-000123), backed by a hand-made sequence like Checkout.checkoutNumber.
-  // Bank transfer buyers quote it as the narration.
+  // Also the Paystack transaction reference.
   reference      String          @unique @default(dbgenerated("('PAY-'::text || lpad((nextval('\"Payment_reference_seq\"'::regclass))::text, 6, '0'::text))"))
   checkoutId     String
   checkout       Checkout        @relation(fields: [checkoutId], references: [id], onDelete: Restrict)
   // Client-generated per attempt (Idempotency-Key); a retry replays the original.
   idempotencyKey String
-  method         PaymentMethod
   provider       PaymentProvider
   status         PaymentStatus   @default(PENDING)
+  // The checkout total in NGN.
   amount         Decimal         @db.Decimal(12, 2)
-  // What the provider returned on initiate (e.g. transfer instructions).
+  currency       Currency        @default(NGN)
+  // What the buyer is charged in `currency`; equals amount for NGN.
+  chargedAmount  Decimal         @db.Decimal(12, 2)
+  // Effective NGN per USD fixed at initiation; null for NGN.
+  fxRate         Decimal?        @db.Decimal(18, 6)
+  channel        String?
+  failureReason  String?
+  // What the provider returned on initiate (authorization URL and access code).
   providerData   Json?
-  // Set when an admin confirmed it by hand; null for provider confirmations.
+  // Set when an admin applied it (verify); null for webhook confirmations.
   confirmedById  String?
   confirmedBy    User?           @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
   paidAt         DateTime?
+  refunds        Refund[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -482,13 +515,15 @@ enum CheckoutStatus {
   CANCELLED
 }
 
-enum PaymentMethod {
-  CARD
-  BANK_TRANSFER
+enum Currency {
+  NGN
+  USD
 }
 
+// STUB stays for rows created before Paystack.
 enum PaymentProvider {
   STUB
+  PAYSTACK
 }
 
 enum PaymentStatus {
@@ -496,6 +531,117 @@ enum PaymentStatus {
   SUCCEEDED
   FAILED
   ABANDONED
+  // Money arrived but could not be applied (late, duplicate or mismatched);
+  // it is refunded automatically.
+  ORPHANED
+}
+
+model FxRate {
+  id        String   @id @default(uuid())
+  // Market NGN per 1 USD, before FX_MARGIN_PERCENT.
+  rate      Decimal  @db.Decimal(18, 6)
+  source    String
+  fetchedAt DateTime @default(now())
+
+  @@index([fetchedAt])
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+model Refund {
+  id               String       @id @default(uuid())
+  paymentId        String
+  payment          Payment      @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  // Null: a refund of the payment's remaining balance.
+  orderId          String?
+  order            Order?       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  // In the payment's currency.
+  amount           Decimal      @db.Decimal(12, 2)
+  status           RefundStatus @default(PENDING)
+  reason           String
+  // Null when automatic (an orphaned payment).
+  initiatedById    String?
+  initiatedBy      User?        @relation("RefundInitiatedBy", fields: [initiatedById], references: [id], onDelete: Restrict)
+  providerRefundId String?
+  failureReason    String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([paymentId])
+  @@index([providerRefundId])
+}
+
+model FarmerBankAccount {
+  id               String   @id @default(uuid())
+  farmerId         String   @unique
+  farmer           Farmer   @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  bankCode         String
+  bankName         String
+  accountNumber    String
+  // As Paystack resolved it; admins compare it with the farmer's name.
+  accountName      String
+  recipientCode    String
+  setById          String
+  setBy            User     @relation("BankAccountSetBy", fields: [setById], references: [id], onDelete: Restrict)
+  // now + 24h on every change, so a hijacked login can't quietly redirect money.
+  payoutsHeldUntil DateTime
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+enum PayoutStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REVERSED
+}
+
+model Payout {
+  id            String       @id @default(uuid())
+  // Public code (PO-000123), backed by a hand-made sequence like Payment.reference.
+  reference     String       @unique @default(dbgenerated("('PO-'::text || lpad((nextval('\"Payout_reference_seq\"'::regclass))::text, 6, '0'::text))"))
+  farmerId      String
+  farmer        Farmer       @relation(fields: [farmerId], references: [id], onDelete: Restrict)
+  // NGN.
+  amount        Decimal      @db.Decimal(12, 2)
+  // Snapshot of the account paid, so a later bank change never rewrites history.
+  bankName      String
+  accountNumber String
+  accountName   String
+  recipientCode String
+  status        PayoutStatus @default(PENDING)
+  transferCode  String?
+  failureReason String?
+  approvedById  String
+  approvedBy    User         @relation("PayoutApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+  paidAt        DateTime?
+  items         PayoutItem[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([farmerId, status])
+  @@index([status])
+}
+
+// An order is paid out at most once: the hand-written partial unique index
+// PayoutItem_orderId_active_key covers items whose status is PENDING or
+// SUCCEEDED. status mirrors Payout.status (always written in the same
+// transaction) because an index can't see another table.
+model PayoutItem {
+  id       String       @id @default(uuid())
+  payoutId String
+  payout   Payout       @relation(fields: [payoutId], references: [id], onDelete: Cascade)
+  orderId  String
+  order    Order        @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  amount   Decimal      @db.Decimal(12, 2)
+  status   PayoutStatus @default(PENDING)
+
+  @@index([orderId])
+  @@index([payoutId])
 }
 
 // A buyer's request for produce they couldn't find listed. Admin handling is

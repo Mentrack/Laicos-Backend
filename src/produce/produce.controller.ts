@@ -16,8 +16,9 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
-import { Auth } from '../auth/decorators/auth.decorator';
+import { Auth, OptionalAuth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { OptionalUser } from '../auth/decorators/optional-user.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
 import { ApiImageUpload } from '../common/dto/image-upload';
 import {
@@ -84,21 +85,27 @@ export class ProduceController {
   @ApiOperation({
     summary: 'List produce',
     description:
-      'Farmers also see their own drafts and listings on unverified farms; everyone else sees only published listings on verified farms.',
+      'No token needed. Farmers also see their own drafts and listings on unverified farms; everyone else, guests included, sees only published listings on verified farms.',
   })
-  @Auth()
+  @OptionalAuth()
   @ApiEnvelope(ProduceListingDto, { paginated: true })
-  async findAll(@CurrentUser() user: User, @Query() query: ProduceQueryDto) {
+  async findAll(
+    @OptionalUser() user: User | null,
+    @Query() query: ProduceQueryDto,
+  ) {
     const { data, metaData } = await this.produce.findAll(user, query);
     return { data, message: 'Produce retrieved', metaData };
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a produce listing' })
-  @Auth()
+  @ApiOperation({
+    summary: 'Get a produce listing',
+    description: 'No token needed.',
+  })
+  @OptionalAuth()
   @ApiEnvelope(ProduceListingDto)
   async findOne(
-    @CurrentUser() user: User,
+    @OptionalUser() user: User | null,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     const data = await this.produce.findOne(user, id);

@@ -39,7 +39,7 @@ export class OrderController {
   @ApiOperation({
     summary: 'Buy Now',
     description:
-      'Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.',
+      'Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee plus the service fee no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',

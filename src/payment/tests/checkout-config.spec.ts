@@ -5,14 +5,9 @@ describe('CheckoutConfig', () => {
     const config = testCheckoutConfig({ DELIVERY_FEE: '3500.50' });
     expect(config.deliveryFee.toFixed(2)).toBe('3500.50');
     expect(config.holdMinutes).toBe(30);
-    expect(config.bankTransferHoldHours).toBe(24);
     expect(config.deliveryMinDays).toBe(1);
     expect(config.deliveryMaxDays).toBe(30);
-    expect(config.escrow).toEqual({
-      bankName: 'Test Bank',
-      accountName: 'LAICOS Escrow',
-      accountNumber: '0123456789',
-    });
+    expect(config.serviceFeePercent.toFixed(2)).toBe('0.00');
   });
 
   it('allows a zero fee and same-day delivery', () => {
@@ -34,11 +29,21 @@ describe('CheckoutConfig', () => {
     ['DELIVERY_FEE', 'abc'],
     ['CHECKOUT_HOLD_MINUTES', '0'],
     ['CHECKOUT_HOLD_MINUTES', '1.5'],
-    ['BANK_TRANSFER_HOLD_HOURS', '0'],
+    ['SERVICE_FEE_PERCENT', '-1'],
+    ['SERVICE_FEE_PERCENT', '101'],
+    ['SERVICE_FEE_PERCENT', '2.555'],
     ['DELIVERY_MIN_DAYS', '-1'],
     ['DELIVERY_MAX_DAYS', '0'],
   ])('refuses %s=%p', (key, value) => {
     expect(() => testCheckoutConfig({ [key]: value })).toThrow(key);
+  });
+
+  it('reads a fractional service fee', () => {
+    expect(
+      testCheckoutConfig({
+        SERVICE_FEE_PERCENT: '2.5',
+      }).serviceFeePercent.toFixed(2),
+    ).toBe('2.50');
   });
 
   it('refuses a minimum after the maximum', () => {

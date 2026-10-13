@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { CheckoutStatus, OrderStatus, Prisma } from '../../../generated/client';
 import { addressNotFound } from '../../address/utils/address-not-found';
 import { addDays, lagosToday, toDateColumn } from '../../common/dates';
+import { percentOf } from '../../common/money';
 import type { OrderLine } from '../../order/utils/reservation';
 import type { CheckoutConfig } from '../../payment/checkout-config';
 import {
@@ -78,7 +79,7 @@ export async function resolveDelivery(
 }
 
 /**
- * Prices the reserved lines plus delivery and places them awaiting payment.
+ * Prices the reserved lines plus delivery and the service fee and places them awaiting payment.
  * The lines must come from rows the caller has just reserved (and so
  * locked), so a farmer's price edit can't slip in after the check.
  */
@@ -92,7 +93,8 @@ export async function createCheckout(
     (sum, line) => sum.add(line.totalPrice),
     new Prisma.Decimal(0),
   );
-  const totalPrice = subtotal.add(config.deliveryFee);
+  const serviceFee = percentOf(subtotal, config.serviceFeePercent);
+  const totalPrice = subtotal.add(config.deliveryFee).add(serviceFee);
   if (!totalPrice.equals(draft.expectedTotal)) {
     throw new ConflictException({
       message: 'Prices in your cart have changed',
@@ -106,6 +108,7 @@ export async function createCheckout(
       status: CheckoutStatus.AWAITING_PAYMENT,
       subtotal,
       deliveryFee: config.deliveryFee,
+      serviceFee,
       totalPrice,
       expiresAt: new Date(now.getTime() + config.holdMinutes * 60_000),
       ...draft.delivery,

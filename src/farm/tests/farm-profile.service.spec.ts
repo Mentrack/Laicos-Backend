@@ -98,4 +98,24 @@ describe('FarmProfileService', () => {
       NotFoundException,
     );
   });
+
+  it('shows a guest verified farms only', async () => {
+    farm.findFirst.mockResolvedValue(row);
+    await service.findOne(null, farmId);
+    expect(farm.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: farmId,
+          OR: [{ verificationStatus: FarmVerificationStatus.VERIFIED }],
+        },
+      }),
+    );
+  });
+
+  it('404s a guest asking for an unverified farm', async () => {
+    farm.findFirst.mockResolvedValue(null);
+    await expect(service.findOne(null, farmId)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
 });
