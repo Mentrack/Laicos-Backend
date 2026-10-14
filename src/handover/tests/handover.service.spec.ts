@@ -6,7 +6,9 @@ import {
   ProduceType,
   type Agent,
 } from '../../../generated/client';
+import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
 import { HandoverService } from '../handover.service';
 
 const agent = { id: 'agent-1', isVerified: true } as Agent;
@@ -30,6 +32,7 @@ function row(overrides: Record<string, unknown> = {}) {
     handedOverAt: null,
     createdAt: new Date('2026-09-01'),
     updatedAt: new Date('2026-09-01'),
+    proofs: [],
     order: {
       id: orderId,
       orderNumber: 'ORD-000001',
@@ -60,18 +63,38 @@ describe('HandoverService', () => {
     findFirst: jest.fn(),
     update: jest.fn(),
   };
+  const handoverProof = {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+    delete: jest.fn(),
+  };
   const order = { update: jest.fn() };
-  const tx = { orderHandover, order };
+  const tx = { orderHandover, order, handoverProof };
   const database = {
     ...tx,
     $transaction: (
       arg: Promise<unknown>[] | ((client: typeof tx) => Promise<unknown>),
     ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
   };
-  const service = new HandoverService(database as unknown as PrismaService);
+  const storage = {
+    uploadPrivateFile: jest.fn(),
+    deletePrivate: jest.fn(),
+    getPresignedUrl: jest.fn((key: string) =>
+      Promise.resolve(`https://signed/${key}`),
+    ),
+  };
+  const service = new HandoverService(
+    database as unknown as PrismaService,
+    storage as unknown as StorageService,
+  );
+  const image: StorageUploadFile = {
+    buffer: Buffer.from([0xff, 0xd8, 0xff, 0]),
+    mimetype: 'image/jpeg',
+    size: 4,
+  };
 
   beforeEach(() => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
     orderHandover.findFirst.mockResolvedValue(row());
     orderHandover.update.mockResolvedValue(row());
   });
@@ -190,6 +213,127 @@ describe('HandoverService', () => {
       await expect(
         service.complete(agent, orderId, dto),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('addProof', () => {
+    const proof = {
+      id: 'proof-1',
+      orderId,
+      storageKey: 'handovers/order/x.jpg',
+      createdAt: new Date('2026-09-01'),
+    };
+
+    beforeEach(() => {
+      storage.uploadPrivateFile.mockResolvedValue(proof.storageKey);
+      handoverProof.create.mockResolvedValue(proof);
+      orderHandover.findFirst.mockResolvedValue(
+        row({ proofs: [proof], status: HandoverStatus.PENDING }),
+      );
+    });
+
+    it('stores a photo on a pending handover and returns a signed URL', async () => {
+      const result = await service.addProof(agent, orderId, image);
+      expect(storage.uploadPrivateFile).toHaveBeenCalledWith(
+        `handovers/${orderId}`,
+        image,
+        expect.any(Array),
+      );
+      expect(handoverProof.create).toHaveBeenCalledWith({
+        data: { orderId, storageKey: proof.storageKey },
+      });
+      expect(result.proof).toEqual([
+        {
+          id: proof.id,
+          url: `https://signed/${proof.storageKey}`,
+          createdAt: proof.createdAt,
+        },
+      ]);
+    });
+
+    it('stores a photo after the goods are verified', async () => {
+      orderHandover.findFirst
+        .mockResolvedValueOnce(row({ status: HandoverStatus.VERIFIED }))
+        .mockResolvedValueOnce(
+          row({ proofs: [proof], status: HandoverStatus.VERIFIED }),
+        );
+      await expect(
+        service.addProof(agent, orderId, image),
+      ).resolves.toMatchObject({ status: HandoverStatus.VERIFIED });
+      expect(handoverProof.create).toHaveBeenCalled();
+    });
+
+    it('does not upload once the order has been handed over', async () => {
+      orderHandover.findFirst.mockResolvedValue(
+        row({ status: HandoverStatus.HANDED_OVER }),
+      );
+      await expect(service.addProof(agent, orderId, image)).rejects.toThrow(
+        'Proof cannot be added after handover; this one is HANDED_OVER',
+      );
+      expect(storage.uploadPrivateFile).not.toHaveBeenCalled();
+    });
+
+    it('404s another agent’s handover before uploading', async () => {
+      orderHandover.findFirst.mockResolvedValue(null);
+      await expect(
+        service.addProof(agent, orderId, image),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(storage.uploadPrivateFile).not.toHaveBeenCalled();
+    });
+
+    it('deletes the upload when recording it fails', async () => {
+      handoverProof.create.mockRejectedValue(new Error('db down'));
+      await expect(service.addProof(agent, orderId, image)).rejects.toThrow(
+        'db down',
+      );
+      expect(storage.deletePrivate).toHaveBeenCalledWith([proof.storageKey]);
+    });
+  });
+
+  describe('removeProof', () => {
+    const proofId = 'proof-1';
+    const proof = {
+      id: proofId,
+      orderId,
+      storageKey: 'handovers/order/x.jpg',
+      createdAt: new Date('2026-09-01'),
+      handover: { status: HandoverStatus.VERIFIED, agentId: agent.id },
+    };
+
+    it('deletes the photo and its stored file', async () => {
+      handoverProof.findFirst.mockResolvedValue(proof);
+      handoverProof.delete.mockResolvedValue(proof);
+      orderHandover.findFirst.mockResolvedValue(row());
+      await service.removeProof(agent, orderId, proofId);
+      expect(handoverProof.findFirst).toHaveBeenCalledWith({
+        where: { id: proofId, orderId, handover: { agentId: agent.id } },
+        include: { handover: { select: { status: true, agentId: true } } },
+      });
+      expect(handoverProof.delete).toHaveBeenCalledWith({
+        where: { id: proofId },
+      });
+      expect(storage.deletePrivate).toHaveBeenCalledWith([proof.storageKey]);
+    });
+
+    it('404s a photo that is not on this handover', async () => {
+      handoverProof.findFirst.mockResolvedValue(null);
+      await expect(
+        service.removeProof(agent, orderId, proofId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(handoverProof.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not delete a photo after handover', async () => {
+      handoverProof.findFirst.mockResolvedValue({
+        ...proof,
+        handover: { status: HandoverStatus.HANDED_OVER, agentId: agent.id },
+      });
+      await expect(
+        service.removeProof(agent, orderId, proofId),
+      ).rejects.toThrow(
+        'Proof cannot be removed after handover; this one is HANDED_OVER',
+      );
+      expect(handoverProof.delete).not.toHaveBeenCalled();
     });
   });
 });

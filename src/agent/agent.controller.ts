@@ -132,7 +132,7 @@ export class AgentController {
   @ApiOperation({
     summary: 'Onboard a farmer and their first farm',
     description:
-      'Verified agents only. Creates the farmer without a password: like self-signup, they get access, and a temporary password by invite, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. Upload the farmer’s ID and the ownership document through POST /verifications/{id}/documents; approval needs both. 409 when the email is registered.',
+      'Verified agents only. Creates the farmer without a password: like self-signup, they get access, and a temporary password by invite, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. The response includes verificationId; upload the farmer’s ID and the ownership document through POST /verifications/{verificationId}/documents. Approval needs both. 409 when the email is registered.',
   })
   @ApiEnvelope(RegisteredFarmerDto, { status: HttpStatus.CREATED })
   async onboardFarmer(

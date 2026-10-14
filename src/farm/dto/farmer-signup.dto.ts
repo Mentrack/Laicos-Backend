@@ -50,4 +50,10 @@ export class RegisteredFarmerDto {
 
   @ApiProperty({ type: FarmDto })
   farm: FarmDto;
+
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Open verification round; agents upload documents to it',
+  })
+  verificationId: string;
 }

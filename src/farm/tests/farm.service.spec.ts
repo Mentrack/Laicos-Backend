@@ -256,6 +256,21 @@ describe('FarmService', () => {
     );
   });
 
+  it('lets a cluster agent read a farm they manage', async () => {
+    const agent = { id: 'agent-user', role: Role.EXTENSION_AGENT } as User;
+    await expect(service.findOne(agent, farmId)).resolves.toMatchObject({
+      farmCode: 'LF-000001',
+    });
+    expect(farm.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: farmId,
+          cluster: { agent: { userId: agent.id } },
+        },
+      }),
+    );
+  });
+
   describe('update', () => {
     function current(status: FarmVerificationStatus) {
       farm.findFirst.mockResolvedValueOnce({
@@ -348,13 +363,15 @@ describe('FarmService', () => {
 
   it('opens the inserted farm’s round with the preferred agent', async () => {
     farm.create.mockResolvedValue(undefined);
-    await service.insertFarm(
+    assignment.openRound.mockResolvedValue('round-1');
+    const result = await service.insertFarm(
       tx as unknown as Prisma.TransactionClient,
       { ...dto, ownerId: 'farmer-1' },
       'agent-1',
     );
     const [[{ data }]] = farm.create.mock.calls as [[{ data: { id: string } }]];
     expect(assignment.openRound).toHaveBeenCalledWith(tx, data.id, 'agent-1');
+    expect(result).toEqual({ farm: row, verificationId: 'round-1' });
   });
 
   it('replaces documents only on a farm the user owns', async () => {

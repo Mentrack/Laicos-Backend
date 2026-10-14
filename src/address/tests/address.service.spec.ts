@@ -1,5 +1,6 @@
 import { BadRequestException, HttpException } from '@nestjs/common';
 import { Role, type User } from '../../../generated/client';
+import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AddressService } from '../address.service';
@@ -48,7 +49,9 @@ describe('AddressService', () => {
       findMany: jest.fn(),
     },
   };
+  const buyerModel = { findUnique: jest.fn() };
   const database = {
+    buyer: buyerModel,
     ...tx,
     $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
       callback(tx),
@@ -61,6 +64,7 @@ describe('AddressService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    buyerModel.findUnique.mockResolvedValue(buyerProfile(buyer.id));
     tx.address.create.mockResolvedValue(row());
     tx.address.update.mockResolvedValue(row());
     tx.address.delete.mockResolvedValue(row());

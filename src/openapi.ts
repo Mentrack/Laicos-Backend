@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import { ErrorResponseDto } from './common/dto/error-response.dto';
+import { ConversationReadEventDto } from './conversation/dto';
 
 /**
  * The single OpenAPI definition. Shared by main.ts (served) and
@@ -19,7 +20,7 @@ export function buildOpenApiDocument(
     // Tag descriptions head each group in Swagger UI, in this order.
     .addTag(
       'Auth',
-      'Registration, login (email/password or Google), token refresh, password reset and the signed-in user.',
+      'Registration, login (email/password or Google), token refresh, password reset, the signed-in user, and their name, phone and avatar.',
     )
     .addTag(
       'Locations',
@@ -74,6 +75,10 @@ export function buildOpenApiDocument(
       'The step between a farmer marking an order READY and logistics collecting it. The agent whose cluster holds the farm checks the goods (verify), then records who took them (complete), which ships the order. Verified agents only.',
     )
     .addTag(
+      'Messages',
+      "Text conversations between an order's buyer and its agent, one per order. Open from payment until the order is fulfilled or cancelled, then read-only. Live updates arrive over socket.io at /v1/chat (WebSocket transport, auth: { token: <Firebase ID token> }): message.created carries a Message, conversation.read carries a ConversationReadEvent.",
+    )
+    .addTag(
       'Bank accounts',
       "Where a farmer's payouts go. A farmer sets their own; an agent can set one for a farmer in their cluster. The account is checked with Paystack, and any change holds the farmer's payouts for 24 hours.",
     )
@@ -87,6 +92,6 @@ export function buildOpenApiDocument(
     // @ApiTags, since FarmController serves both Farms and Farmers.
     autoTagControllers: false,
     // Emitted by HttpExceptionFilter, not by any route, so register it here.
-    extraModels: [ErrorResponseDto],
+    extraModels: [ErrorResponseDto, ConversationReadEventDto],
   });
 }

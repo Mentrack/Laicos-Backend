@@ -11,7 +11,12 @@ import {
 } from '../../generated/client';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
+import {
+  IMAGE_SIGNATURES,
+  type StorageUploadFile,
+} from '../common/upload-pipes';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import {
   CompleteHandoverDto,
   HandoverQueryDto,
@@ -29,7 +34,10 @@ import {
  */
 @Injectable()
 export class HandoverService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly storage: StorageService,
+  ) {}
 
   async findAll(agent: Agent, query: HandoverQueryDto) {
     const { page, perPage, skip, take } = resolvePagination(query);
@@ -48,7 +56,9 @@ export class HandoverService {
       this.database.orderHandover.count({ where }),
     ]);
     return {
-      data: rows.map(formatHandover),
+      data: await Promise.all(
+        rows.map((row) => formatHandover(this.storage, row)),
+      ),
       metaData: paginationMeta(page, perPage, total),
     };
   }
@@ -61,7 +71,7 @@ export class HandoverService {
     if (!handover) {
       throw new NotFoundException('Handover not found');
     }
-    return formatHandover(handover);
+    return formatHandover(this.storage, handover);
   }
 
   async verify(agent: Agent, orderId: string, dto: VerifyHandoverDto) {
@@ -79,7 +89,7 @@ export class HandoverService {
         include: HANDOVER_INCLUDE,
       }),
     );
-    return formatHandover(handover);
+    return formatHandover(this.storage, handover);
   }
 
   /** Logistics has the goods: the order ships. */
@@ -114,13 +124,53 @@ export class HandoverService {
         });
         return handedOver;
       });
-      return formatHandover(handover);
+      return formatHandover(this.storage, handover);
     } catch (error) {
       if (isRecordNotFound(error)) {
         throw new ConflictException('Order is no longer ready for handover');
       }
       throw error;
     }
+  }
+
+  async addProof(agent: Agent, orderId: string, file: StorageUploadFile) {
+    await this.requireOpen(
+      agent,
+      orderId,
+      'Proof cannot be added after handover',
+    );
+    const storageKey = await this.storage.uploadPrivateFile(
+      `handovers/${orderId}`,
+      file,
+      IMAGE_SIGNATURES,
+    );
+    try {
+      await this.database.handoverProof.create({
+        data: { orderId, storageKey },
+      });
+    } catch (error) {
+      await this.storage.deletePrivate([storageKey]);
+      throw error;
+    }
+    return this.findOne(agent, orderId);
+  }
+
+  async removeProof(agent: Agent, orderId: string, proofId: string) {
+    const proof = await this.database.handoverProof.findFirst({
+      where: { id: proofId, orderId, handover: { agentId: agent.id } },
+      include: { handover: { select: { status: true, agentId: true } } },
+    });
+    if (!proof) {
+      throw new NotFoundException('Handover not found');
+    }
+    if (proof.handover.status === HandoverStatus.HANDED_OVER) {
+      throw new ConflictException(
+        `Proof cannot be removed after handover; this one is ${proof.handover.status}`,
+      );
+    }
+    await this.database.handoverProof.delete({ where: { id: proofId } });
+    await this.storage.deletePrivate([proof.storageKey]);
+    return this.findOne(agent, orderId);
   }
 
   /**
@@ -158,5 +208,22 @@ export class HandoverService {
       throw new NotFoundException('Handover not found');
     }
     throw new ConflictException(`${message}; this one is ${handover.status}`);
+  }
+
+  private async requireOpen(
+    agent: Agent,
+    orderId: string,
+    message: string,
+  ): Promise<void> {
+    const handover = await this.database.orderHandover.findFirst({
+      where: { orderId, agentId: agent.id },
+      select: { status: true },
+    });
+    if (!handover) {
+      throw new NotFoundException('Handover not found');
+    }
+    if (handover.status === HandoverStatus.HANDED_OVER) {
+      throw new ConflictException(`${message}; this one is ${handover.status}`);
+    }
   }
 }

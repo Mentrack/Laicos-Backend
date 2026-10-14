@@ -9,9 +9,10 @@ import { CartModule } from './cart/cart.module';
 import { PaymentModule } from './payment/payment.module';
 import { PayoutModule } from './payout/payout.module';
 import { PaystackModule } from './paystack/paystack.module';
-import { requireConfig } from './common/config';
+import { redisConnection } from './common/config';
 import { FarmModule } from './farm/farm.module';
 import { FxModule } from './fx/fx.module';
+import { ConversationModule } from './conversation/conversation.module';
 import { HandoverModule } from './handover/handover.module';
 import { OrderModule } from './order/order.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +20,7 @@ import { ProduceModule } from './produce/produce.module';
 import { SourcingRequestModule } from './sourcing-request/sourcing-request.module';
 import { StorageModule } from './storage/storage.module';
 import { AgentModule } from './agent/agent.module';
+import { BuyerModule } from './buyer/buyer.module';
 import { LocationModule } from './location/location.module';
 import { MailModule } from './mail/mail.module';
 import { VerificationModule } from './verification/verification.module';
@@ -28,26 +30,16 @@ import { VerificationModule } from './verification/verification.module';
     ConfigModule.forRoot({ isGlobal: true, expandVariables: true }),
     BullModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const port = Number(requireConfig(config, 'REDIS_PORT'));
-        if (!Number.isInteger(port)) {
-          throw new Error('REDIS_PORT must be an integer');
-        }
-        return {
-          connection: {
-            host: requireConfig(config, 'REDIS_HOST'),
-            port,
-            password: requireConfig(config, 'REDIS_PASSWORD'),
-          },
-          // Every queue shares these; a queue overrides only what it must.
-          defaultJobOptions: {
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 1000 },
-            removeOnComplete: { age: 3600, count: 1000 },
-            removeOnFail: { age: 86400 },
-          },
-        };
-      },
+      useFactory: (config: ConfigService) => ({
+        connection: redisConnection(config),
+        // Every queue shares these; a queue overrides only what it must.
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 1000 },
+          removeOnComplete: { age: 3600, count: 1000 },
+          removeOnFail: { age: 86400 },
+        },
+      }),
     }),
     PrismaModule,
     PaystackModule,
@@ -63,10 +55,12 @@ import { VerificationModule } from './verification/verification.module';
     SourcingRequestModule,
     StorageModule,
     AgentModule,
+    BuyerModule,
     LocationModule,
     AddressModule,
     VerificationModule,
     HandoverModule,
+    ConversationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

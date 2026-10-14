@@ -8,6 +8,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { addDays, lagosToday } from '../../common/dates';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -59,7 +60,9 @@ describe('OrderService', () => {
     address,
   };
   let transactionOptions: unknown;
+  const buyerModel = { findUnique: jest.fn() };
   const database = {
+    buyer: buyerModel,
     ...tx,
     // A plain function, not jest.fn, so resetAllMocks keeps it. Array form
     // for batched reads; callback form runs against the same mocks.
@@ -99,6 +102,7 @@ describe('OrderService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    buyerModel.findUnique.mockResolvedValue(buyerProfile(buyer.id));
     produce.update.mockResolvedValue(published);
   });
 

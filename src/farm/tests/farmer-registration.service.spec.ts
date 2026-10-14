@@ -109,7 +109,10 @@ describe('FarmerRegistrationService', () => {
     auth.createFirebaseUser.mockResolvedValue({ uid: 'uid-1' });
     auth.createLocalUser.mockResolvedValue(user);
     farmer.findUniqueOrThrow.mockResolvedValue(farmerRow);
-    farms.insertFarm.mockResolvedValue(farmRow);
+    farms.insertFarm.mockResolvedValue({
+      farm: farmRow,
+      verificationId: 'round-1',
+    });
     storage.presignedUrlOrNull.mockResolvedValue(null);
     documents.uploadAll.mockResolvedValue({
       idDocumentKey: 'farmers/f/id/x.pdf',
@@ -171,6 +174,7 @@ describe('FarmerRegistrationService', () => {
         user,
         farmer: { farmerId: 'FRM-000001' },
         farm: { farmCode: 'LF-000001' },
+        verificationId: 'round-1',
       });
       expect(result.farmer).not.toHaveProperty('idNumber');
     });

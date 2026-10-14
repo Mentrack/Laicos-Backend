@@ -20,7 +20,7 @@ export class OrderDto {
   @ApiProperty({ format: 'uuid' })
   farmId: string;
 
-  @ApiProperty({ format: 'uuid', description: 'User.id of the buyer' })
+  @ApiProperty({ format: 'uuid', description: 'Buyer.id' })
   buyerId: string;
 
   @ApiProperty({

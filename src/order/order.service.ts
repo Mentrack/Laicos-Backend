@@ -10,6 +10,7 @@ import {
   type Order,
   type User,
 } from '../../generated/client';
+import { requireBuyer } from '../buyer/utils/require-buyer';
 import { formatCheckout } from '../cart/formatters/checkout.formatter';
 import { lockCart } from '../cart/utils/cart-lock';
 import {
@@ -85,17 +86,22 @@ export class OrderService {
     return busyAsConflict(() => this.buyNow(user, idempotencyKey, dto));
   }
 
-  private buyNow(user: User, idempotencyKey: string, dto: CreateOrderDto) {
+  private async buyNow(
+    user: User,
+    idempotencyKey: string,
+    dto: CreateOrderDto,
+  ) {
+    const buyer = await requireBuyer(this.database, user);
     return this.database.$transaction(async (tx) => {
       // The cart's lock, so Buy Now and cart checkout share one replay check.
-      await lockCart(tx, user.id);
-      const replay = await findReplay(tx, user.id, idempotencyKey);
+      await lockCart(tx, buyer.id);
+      const replay = await findReplay(tx, buyer.id, idempotencyKey);
       if (replay) {
         return formatCheckout(replay);
       }
       const delivery = await resolveDelivery(
         tx,
-        user.id,
+        buyer.id,
         dto.addressId,
         dto.deliveryDate,
         this.config,
@@ -104,7 +110,7 @@ export class OrderService {
       const checkout = await createCheckout(
         tx,
         {
-          buyerId: user.id,
+          buyerId: buyer.id,
           idempotencyKey,
           lines: [orderLine(produce, dto.quantity)],
           delivery,
@@ -118,7 +124,7 @@ export class OrderService {
 
   async findAll(user: User, query: OrderQueryDto) {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const where = filtered(user, query);
+    const where = await filtered(this.database, user, query);
     const [data, total] = await this.database.$transaction([
       this.database.order.findMany({
         where,
@@ -134,7 +140,7 @@ export class OrderService {
   async count(user: User, filter: OrderFilterDto) {
     const groups = await this.database.order.groupBy({
       by: ['status'],
-      where: filtered(user, filter),
+      where: await filtered(this.database, user, filter),
       _count: { _all: true },
     });
     // Every status is listed so the client gets zeros rather than missing keys.
@@ -159,7 +165,7 @@ export class OrderService {
   // Until payments land there is no ledger, so earnings are simply what
   // delivered orders were worth; they only ever go up.
   async summary(user: User) {
-    const where = scopedTo(user);
+    const where = await scopedTo(this.database, user);
     const [earned, activeOrders] = await this.database.$transaction([
       this.database.order.aggregate({
         where: { ...where, status: OrderStatus.FULFILLED },
@@ -175,7 +181,7 @@ export class OrderService {
 
   async findOne(user: User, id: string) {
     const order = await this.database.order.findFirst({
-      where: { id, ...scopedTo(user) },
+      where: { id, ...(await scopedTo(this.database, user)) },
     });
     if (!order) {
       throw new NotFoundException('Order not found');
@@ -235,7 +241,7 @@ export class OrderService {
 
   async findChecklist(user: User, id: string) {
     const checklist = await this.database.orderChecklist.findFirst({
-      where: { orderId: id, order: scopedTo(user) },
+      where: { orderId: id, order: await scopedTo(this.database, user) },
     });
     if (!checklist) {
       throw new NotFoundException(
@@ -345,7 +351,8 @@ export class OrderService {
       });
     }
     // Once a farmer has acted on an order it is history; cancel it instead.
-    if (order.buyerId !== user.id || order.status !== OrderStatus.PENDING) {
+    const buyer = await requireBuyer(this.database, user);
+    if (order.buyerId !== buyer.id || order.status !== OrderStatus.PENDING) {
       throw new ConflictException('Only a pending order can be deleted');
     }
     try {
@@ -377,7 +384,10 @@ function assertNotAwaitingPayment(order: Order) {
   }
 }
 
-function scopedTo(user: User): Prisma.OrderWhereInput {
+async function scopedTo(
+  database: PrismaService,
+  user: User,
+): Promise<Prisma.OrderWhereInput> {
   if (user.role === Role.ADMIN) {
     return {};
   }
@@ -388,12 +398,17 @@ function scopedTo(user: User): Prisma.OrderWhereInput {
       NOT: { status: OrderStatus.AWAITING_PAYMENT },
     };
   }
-  return { buyerId: user.id };
+  const buyer = await requireBuyer(database, user);
+  return { buyerId: buyer.id };
 }
 
-function filtered(user: User, filter: OrderFilterDto): Prisma.OrderWhereInput {
+async function filtered(
+  database: PrismaService,
+  user: User,
+  filter: OrderFilterDto,
+): Promise<Prisma.OrderWhereInput> {
   return {
-    ...scopedTo(user),
+    ...(await scopedTo(database, user)),
     produceId: filter.produceId,
     status: filter.status,
     type: filter.type,

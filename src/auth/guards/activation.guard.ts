@@ -1,13 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../authenticated-request';
-import {
-  emailNotVerifiedError,
-  needsEmailVerification,
-} from '../utils/email-verification';
-import {
-  isPendingActivation,
-  verificationPendingError,
-} from '../utils/pending-access';
+import { assertActivated } from '../utils/session';
 
 /**
  * Locks a farmer or agent out until they are verified, and a buyer or rider
@@ -19,12 +12,7 @@ import {
 export class ActivationGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    if (isPendingActivation(user)) {
-      throw verificationPendingError(user.role);
-    }
-    if (needsEmailVerification(user)) {
-      throw emailNotVerifiedError();
-    }
+    assertActivated(user);
     return true;
   }
 }

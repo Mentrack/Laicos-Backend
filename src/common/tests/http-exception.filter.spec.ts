@@ -1,13 +1,17 @@
 import {
   ArgumentsHost,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpStatus,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ErrorResponseDto } from '../dto/error-response.dto';
-import { HttpExceptionFilter } from '../filters/http-exception.filter';
+import {
+  errorBody,
+  HttpExceptionFilter,
+} from '../filters/http-exception.filter';
 
 function run(exception: unknown) {
   const json = jest.fn<void, [ErrorResponseDto]>();
@@ -66,5 +70,14 @@ describe('HttpExceptionFilter', () => {
     expect(status).toBe(500);
     expect(body.message).not.toContain('connection refused');
     expect(body.error).toEqual({ code: 'INTERNAL_ERROR', statusCode: 500 });
+  });
+
+  it('builds the same body outside an HTTP context', () => {
+    expect(
+      errorBody(new ConflictException({ message: 'taken', code: 'TAKEN' })),
+    ).toEqual({
+      message: 'Taken',
+      error: { code: 'TAKEN', statusCode: 409 },
+    });
   });
 });

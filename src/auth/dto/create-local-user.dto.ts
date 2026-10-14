@@ -20,6 +20,8 @@ export class CreateLocalUserDto extends OmitType(RegisterDto, [
   farmer?: Prisma.FarmerCreateWithoutUserInput;
   /** The EXTENSION_AGENT user's profile; gets an empty cluster if none given. */
   agent?: Prisma.AgentCreateWithoutUserInput;
+  /** The BUYER user's profile, created in the same write. */
+  buyer?: Prisma.BuyerCreateWithoutUserInput;
   /** Stored in the same write, so no half-created user needs undoing. */
   refreshToken?: string;
 }

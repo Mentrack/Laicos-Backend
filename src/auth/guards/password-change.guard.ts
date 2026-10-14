@@ -1,12 +1,8 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { AuthenticatedRequest } from '../authenticated-request';
 import { AllowPendingPasswordChange } from '../decorators/allow-pending-password-change.decorator';
+import { passwordChangeRequiredError } from '../utils/session';
 
 /**
  * Holds a user on a temporary password (agent-onboarded farmers) to the
@@ -29,11 +25,6 @@ export class PasswordChangeGuard implements CanActivate {
     if (allowed) {
       return true;
     }
-    // A distinct code: the client routes it to the change-password screen
-    // rather than treating it as a role error.
-    throw new ForbiddenException({
-      message: 'Change your password to continue',
-      code: 'PASSWORD_CHANGE_REQUIRED',
-    });
+    throw passwordChangeRequiredError();
   }
 }

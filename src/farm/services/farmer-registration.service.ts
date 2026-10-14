@@ -141,7 +141,7 @@ export class FarmerRegistrationService {
         const farmer = await tx.farmer.findUniqueOrThrow({
           where: { id: farmerId },
         });
-        const farm = await this.farms.insertFarm(
+        const { farm, verificationId } = await this.farms.insertFarm(
           tx,
           {
             ...input.farm,
@@ -152,12 +152,13 @@ export class FarmerRegistrationService {
           } satisfies Prisma.FarmUncheckedCreateInput,
           input.preferredAgentId,
         );
-        return { user, farmer, farm };
+        return { user, farmer, farm, verificationId };
       });
       return {
         user: created.user,
         farmer: toFarmerDto(created.farmer),
         farm: await formatFarm(this.storage, created.farm),
+        verificationId: created.verificationId,
       };
     } catch (error) {
       await this.storage.deletePrivate(uploaded);

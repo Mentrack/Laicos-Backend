@@ -20,6 +20,13 @@ export class UserDto {
   @ApiProperty({ example: '+2348012345678', nullable: true, type: String })
   phoneNumber: string | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Public URL of the profile photo; null until one is uploaded',
+  })
+  avatarUrl: string | null;
+
   @ApiProperty({ enum: Role, enumName: 'Role', example: Role.FARMER })
   role: Role;
 

@@ -10,6 +10,7 @@ import {
   type Payment,
   type User,
 } from '../../generated/client';
+import { requireBuyer } from '../buyer/utils/require-buyer';
 import { ngnToUsd, toMinorUnits } from '../common/money';
 import { FxService } from '../fx/fx.service';
 import {
@@ -66,8 +67,9 @@ export class PaymentService {
     const { payment, created } = await this.database.$transaction(
       async (tx) => {
         await lockCheckout(tx, checkoutId);
+        const buyer = await requireBuyer(this.database, user);
         const checkout = await tx.checkout.findFirst({
-          where: { id: checkoutId, buyerId: user.id },
+          where: { id: checkoutId, buyerId: buyer.id },
         });
         if (!checkout) {
           throw checkoutNotFound();
