@@ -9,6 +9,19 @@ export function requireConfig(config: ConfigService, key: string): string {
   return value;
 }
 
+/** Shared by BullMQ and the chat gateway's socket.io adapter. */
+export function redisConnection(config: ConfigService) {
+  const port = Number(requireConfig(config, 'REDIS_PORT'));
+  if (!Number.isInteger(port)) {
+    throw new Error('REDIS_PORT must be an integer');
+  }
+  return {
+    host: requireConfig(config, 'REDIS_HOST'),
+    port,
+    password: requireConfig(config, 'REDIS_PASSWORD'),
+  };
+}
+
 /** The CORS allowlist: comma-separated, no wildcard. */
 export function webappOrigins(config: ConfigService): string[] {
   return requireConfig(config, 'FRONTEND_WEBAPP_URL')

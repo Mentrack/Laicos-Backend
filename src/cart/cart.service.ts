@@ -12,6 +12,7 @@ import {
   busyAsConflict,
 } from '../payment/utils/checkout-transaction';
 import { PrismaService } from '../prisma/prisma.service';
+import { requireBuyer } from '../buyer/utils/require-buyer';
 import { visibleTo } from '../produce/utils/produce-visibility';
 import {
   AddCartItemDto,
@@ -45,8 +46,9 @@ export class CartService {
   ) {}
 
   async find(user: User) {
+    const buyer = await requireBuyer(this.database, user);
     const items = await this.database.cartItem.findMany({
-      where: { buyerId: user.id },
+      where: { buyerId: buyer.id },
       include: CART_ITEM_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
@@ -79,10 +81,11 @@ export class CartService {
     };
   }
 
-  addItem(user: User, dto: AddCartItemDto) {
+  async addItem(user: User, dto: AddCartItemDto) {
+    const buyer = await requireBuyer(this.database, user);
     return this.database.$transaction(async (tx) => {
-      await lockCart(tx, user.id);
-      const result = await tryAddLine(tx, user.id, dto);
+      await lockCart(tx, buyer.id);
+      const result = await tryAddLine(tx, buyer.id, dto);
       if (result instanceof HttpException) {
         throw result;
       }
@@ -95,27 +98,28 @@ export class CartService {
    * and reports what it can't add, so one sold-out item doesn't lose the rest.
    * Adding isn't idempotent, so a repeated key replays instead of re-adding.
    */
-  mergeItems(
+  async mergeItems(
     user: User,
     idempotencyKey: string,
     dto: CartLinesDto,
   ): Promise<CartMergeDto> {
+    const buyer = await requireBuyer(this.database, user);
     return busyAsConflict(
       () =>
         this.database.$transaction(async (tx) => {
-          await lockCart(tx, user.id);
+          await lockCart(tx, buyer.id);
           const replay = await tx.cartMerge.findUnique({
             where: {
-              buyerId_idempotencyKey: { buyerId: user.id, idempotencyKey },
+              buyerId_idempotencyKey: { buyerId: buyer.id, idempotencyKey },
             },
           });
           const skipped = replay
             ? storedSkipped(replay.skipped)
-            : await addLines(tx, user.id, dto);
+            : await addLines(tx, buyer.id, dto);
           if (!replay) {
             await tx.cartMerge.create({
               data: {
-                buyerId: user.id,
+                buyerId: buyer.id,
                 idempotencyKey,
                 skipped: skipped.map(({ produceId, code, message }) => ({
                   produceId,
@@ -126,7 +130,7 @@ export class CartService {
             });
           }
           const items = await tx.cartItem.findMany({
-            where: { buyerId: user.id },
+            where: { buyerId: buyer.id },
             include: CART_ITEM_INCLUDE,
             orderBy: { createdAt: 'desc' },
           });
@@ -136,10 +140,11 @@ export class CartService {
     );
   }
 
-  updateItem(user: User, id: string, dto: UpdateCartItemDto) {
+  async updateItem(user: User, id: string, dto: UpdateCartItemDto) {
+    const buyer = await requireBuyer(this.database, user);
     return this.database.$transaction(async (tx) => {
-      await lockCart(tx, user.id);
-      const item = await findOwnItem(tx, user, id);
+      await lockCart(tx, buyer.id);
+      const item = await findOwnItem(tx, buyer.id, id);
       await assertOrderable(tx, item.produceId, dto.quantity);
       const updated = await tx.cartItem.update({
         where: { id },
@@ -150,10 +155,11 @@ export class CartService {
     });
   }
 
-  removeItem(user: User, id: string) {
+  async removeItem(user: User, id: string) {
+    const buyer = await requireBuyer(this.database, user);
     return this.database.$transaction(async (tx) => {
-      await lockCart(tx, user.id);
-      await findOwnItem(tx, user, id);
+      await lockCart(tx, buyer.id);
+      await findOwnItem(tx, buyer.id, id);
       const removed = await tx.cartItem.delete({
         where: { id },
         include: CART_ITEM_INCLUDE,
@@ -165,11 +171,11 @@ export class CartService {
 
 async function findOwnItem(
   tx: Prisma.TransactionClient,
-  user: User,
+  buyerId: string,
   id: string,
 ) {
   const item = await tx.cartItem.findFirst({
-    where: { id, buyerId: user.id },
+    where: { id, buyerId },
   });
   if (!item) {
     throw new NotFoundException({

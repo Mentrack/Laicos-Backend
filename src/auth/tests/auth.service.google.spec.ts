@@ -109,8 +109,26 @@ describe('AuthService Google sign-in', () => {
           role: Role.BUYER,
           isVerified: true,
           farmer: undefined,
+          agent: undefined,
+          buyer: { create: {} },
           refreshToken: { create: { token: 'firebase-refresh-token' } },
         },
+      });
+    });
+
+    it('does not create a buyer profile for a rider', async () => {
+      firebase.signInWithGoogle.mockResolvedValue(google);
+      user.create.mockResolvedValue({ id: 'user-2' });
+
+      await service.googleRegister({
+        idToken: 'google-token',
+        role: Role.RIDER,
+      });
+      expect(user.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          role: Role.RIDER,
+          buyer: undefined,
+        }),
       });
     });
 

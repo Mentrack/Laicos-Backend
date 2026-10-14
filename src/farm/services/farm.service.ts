@@ -21,7 +21,7 @@ import {
   isRecordNotFound,
   isUniqueViolation,
 } from '../../common/prisma-errors';
-import { farmOwnedBy } from '../../common/ownership';
+import { farmOwnedBy, farmReadableBy } from '../../common/ownership';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -46,7 +46,7 @@ const OPEN_ROUND_STATUSES: VerificationTaskStatus[] = [
   VerificationTaskStatus.IN_PROGRESS,
 ];
 
-/** Every method is scoped to farms owned by `user`'s Farmer. */
+/** Writes stay owner-scoped. Reads also allow a cluster agent. */
 @Injectable()
 export class FarmService {
   constructor(
@@ -82,7 +82,7 @@ export class FarmService {
       await this.documents.uploadAll(farmer.id, id, documents);
     let farm: FarmRow;
     try {
-      farm = await this.database.$transaction((tx) =>
+      const created = await this.database.$transaction((tx) =>
         this.insertFarm(tx, {
           id,
           ownerId: farmer.id,
@@ -99,6 +99,7 @@ export class FarmService {
           chiefConfirmationKey,
         }),
       );
+      farm = created.farm;
     } catch (error) {
       await this.storage.deletePrivate(uploaded);
       throw mapFarmSaveError(error);
@@ -115,11 +116,19 @@ export class FarmService {
     tx: Prisma.TransactionClient,
     data: Prisma.FarmUncheckedCreateInput,
     preferredAgentId?: string,
-  ): Promise<FarmRow> {
+  ): Promise<{ farm: FarmRow; verificationId: string }> {
     const id = data.id ?? randomUUID();
     await tx.farm.create({ data: { ...data, id } });
-    await this.assignment.openRound(tx, id, preferredAgentId);
-    return tx.farm.findUniqueOrThrow({ where: { id }, include: FARM_INCLUDE });
+    const verificationId = await this.assignment.openRound(
+      tx,
+      id,
+      preferredAgentId,
+    );
+    const farm = await tx.farm.findUniqueOrThrow({
+      where: { id },
+      include: FARM_INCLUDE,
+    });
+    return { farm, verificationId };
   }
 
   async findAll(user: User, query: PaginationQueryDto) {
@@ -145,7 +154,7 @@ export class FarmService {
 
   async findOne(user: User, id: string) {
     const farm = await this.database.farm.findFirst({
-      where: { id, ...farmOwnedBy(user) },
+      where: { id, ...farmReadableBy(user) },
       include: FARM_INCLUDE,
     });
     if (!farm) {

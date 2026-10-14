@@ -15,6 +15,8 @@ model User {
   lastName              String
   email                 String                 @unique
   phoneNumber           String?
+  // Public URL of the profile photo; null until they upload one.
+  avatarUrl             String?
   role                  Role
   agreedToTerms         Boolean                @default(false)
   // Mirrors Firebase's emailVerified;
@@ -30,12 +32,9 @@ model User {
   updatedAt             DateTime               @updatedAt
   farmer                Farmer?
   agent                 Agent?
-  orders                Order[]
-  cartItems             CartItem[]
-  cartMerges            CartMerge[]
-  checkouts             Checkout[]
-  sourcingRequests      SourcingRequest[]
-  addresses             Address[]
+  buyer                 Buyer?
+  conversationsAsAgent  Conversation[]         @relation("ConversationAgent")
+  messages              Message[]
   confirmedPayments     Payment[]              @relation("PaymentConfirmedBy")
   refundsInitiated      Refund[]               @relation("RefundInitiatedBy")
   bankAccountsSet       FarmerBankAccount[]    @relation("BankAccountSetBy")
@@ -67,6 +66,27 @@ model EmailVerificationCode {
   sendWindowStartedAt DateTime @default(now())
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+model Buyer {
+  id               String            @id @default(uuid())
+  // Public code (BY-000123), backed by a hand-made sequence like Farmer.farmerId.
+  buyerId          String            @unique @default(dbgenerated("('BY-'::text || lpad((nextval('\"Buyer_buyerId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId           String            @unique
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stateId          String?
+  state            State?            @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  lgaId            String?
+  lga              Lga?              @relation(fields: [lgaId], references: [id], onDelete: Restrict)
+  orders           Order[]
+  cartItems        CartItem[]
+  cartMerges       CartMerge[]
+  checkouts        Checkout[]
+  sourcingRequests SourcingRequest[]
+  addresses        Address[]
+  conversations    Conversation[]    @relation("ConversationBuyer")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 }
 
 model Farmer {
@@ -142,6 +162,7 @@ model State {
   lgas      Lga[]
   farms     Farm[]
   agents    Agent[]
+  buyers    Buyer[]
   addresses Address[]
 }
 
@@ -152,6 +173,7 @@ model Lga {
   name      String
   farms     Farm[]
   agents    Agent[]
+  buyers    Buyer[]
   addresses Address[]
 
   @@unique([stateId, name])
@@ -321,7 +343,7 @@ model Order {
   // Orders are history: Restrict stops a produce, farm or buyer delete from erasing them.
   produce            Produce         @relation(fields: [produceId, farmId], references: [id, farmId], onDelete: Restrict)
   farm               Farm            @relation(fields: [farmId], references: [id], onDelete: Restrict)
-  buyer              User            @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  buyer              Buyer           @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   quantity           Int
   totalPrice         Decimal         @db.Decimal(12, 2)
   status             OrderStatus     @default(PENDING)
@@ -344,6 +366,7 @@ model Order {
   fulfilledAt        DateTime?
   payoutItems        PayoutItem[]
   refunds            Refund[]
+  conversation       Conversation?
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
@@ -382,10 +405,22 @@ model OrderHandover {
   recipientPhone   String?
   handoverNote     String?
   handedOverAt     DateTime?
+  proofs           HandoverProof[]
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
   @@index([agentId, status])
+}
+
+// Photos the agent takes at the farm as proof of the goods.
+model HandoverProof {
+  id         String        @id @default(uuid())
+  orderId    String
+  handover   OrderHandover @relation(fields: [orderId], references: [orderId], onDelete: Cascade)
+  storageKey String
+  createdAt  DateTime      @default(now())
+
+  @@index([orderId])
 }
 
 // A buyer's cart is just their items: nothing is stored about the cart itself.
@@ -393,7 +428,7 @@ model OrderHandover {
 model CartItem {
   id        String   @id @default(uuid())
   buyerId   String
-  buyer     User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer     Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   produceId String
   produce   Produce  @relation(fields: [produceId], references: [id], onDelete: Cascade)
   quantity  Int
@@ -408,7 +443,7 @@ model CartItem {
 model CartMerge {
   id             String   @id @default(uuid())
   buyerId        String
-  buyer          User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer          Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   idempotencyKey String
   skipped        Json
   createdAt      DateTime @default(now())
@@ -423,7 +458,7 @@ model Checkout {
   checkoutNumber       String         @unique @default(dbgenerated("('CHK-'::text || lpad((nextval('\"Checkout_checkoutNumber_seq\"'::regclass))::text, 6, '0'::text))"))
   buyerId              String
   // Checkouts are history, like orders.
-  buyer                User           @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  buyer                Buyer          @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   // Client-generated per attempt (Idempotency-Key); a retry replays the original.
   idempotencyKey       String
   // subtotal + deliveryFee + serviceFee
@@ -457,7 +492,7 @@ model Checkout {
 model Address {
   id           String   @id @default(uuid())
   buyerId      String
-  buyer        User     @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer        Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   label        String
   street       String
   stateId      String
@@ -652,7 +687,7 @@ model SourcingRequest {
   requestNumber       String                @unique @default(dbgenerated("('REQ-'::text || lpad((nextval('\"SourcingRequest_requestNumber_seq\"'::regclass))::text, 6, '0'::text))"))
   buyerId             String
   // Requests are history, like orders.
-  buyer               User                  @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  buyer               Buyer                 @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   // Free text: sourcing can be anything a farm produces.
   produceName         String
   quantity            Float
@@ -670,6 +705,46 @@ model SourcingRequest {
   updatedAt           DateTime              @updatedAt
 
   @@index([buyerId, createdAt])
+}
+
+// One per order, opened on first use by either side. The buyer side is Buyer;
+// the agent side is the agent's User. Socket rooms still use User.id.
+model Conversation {
+  id              String    @id @default(uuid())
+  orderId         String    @unique
+  // Conversations are history, like orders.
+  order           Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  buyerId         String
+  buyer           Buyer     @relation("ConversationBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  // Fixed when the conversation opens and never re-resolved: a later cluster
+  // agent doesn't inherit a history they weren't part of.
+  agentUserId     String
+  agentUser       User      @relation("ConversationAgent", fields: [agentUserId], references: [id], onDelete: Restrict)
+  buyerLastReadAt DateTime?
+  agentLastReadAt DateTime?
+  // Null until the first message; lists sort on it without joining Message.
+  lastMessageAt   DateTime?
+  messages        Message[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([buyerId, lastMessageAt])
+  @@index([agentUserId, lastMessageAt])
+}
+
+model Message {
+  id              String       @id @default(uuid())
+  conversationId  String
+  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  senderId        String
+  sender          User         @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  body            String
+  // Client-generated per send; a retry with the same key returns the original.
+  clientMessageId String
+  createdAt       DateTime     @default(now())
+
+  @@unique([senderId, clientMessageId])
+  @@index([conversationId, createdAt])
 }
 
 enum SourcingUnit {

@@ -4,6 +4,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { CheckoutStatus, Role, type User } from '../../generated/client';
+import { requireBuyer } from '../buyer/utils/require-buyer';
 import {
   orderLine,
   tryReserveProduce,
@@ -46,18 +47,21 @@ export class CheckoutService {
     private readonly config: CheckoutConfig,
   ) {}
 
-  checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
-    return busyAsConflict(() => this.placeOrders(user, idempotencyKey, dto));
+  async checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
+    const buyer = await requireBuyer(this.database, user);
+    return busyAsConflict(() =>
+      this.placeOrders(buyer.id, idempotencyKey, dto),
+    );
   }
 
   private placeOrders(
-    user: User,
+    buyerId: string,
     idempotencyKey: string,
     dto: CreateCheckoutDto,
   ) {
     return this.database.$transaction(async (tx) => {
-      await lockCart(tx, user.id);
-      const replay = await findReplay(tx, user.id, idempotencyKey);
+      await lockCart(tx, buyerId);
+      const replay = await findReplay(tx, buyerId, idempotencyKey);
       if (replay) {
         return formatCheckout(replay);
       }
@@ -65,7 +69,7 @@ export class CheckoutService {
       // produceId order makes overlapping checkouts lock produce rows in the
       // same sequence, so they queue instead of deadlocking.
       const items = await tx.cartItem.findMany({
-        where: { buyerId: user.id },
+        where: { buyerId },
         include: CART_ITEM_INCLUDE,
         orderBy: { produceId: 'asc' },
       });
@@ -84,7 +88,7 @@ export class CheckoutService {
       }
       const delivery = await resolveDelivery(
         tx,
-        user.id,
+        buyerId,
         dto.addressId,
         dto.deliveryDate,
         this.config,
@@ -109,7 +113,7 @@ export class CheckoutService {
       const checkout = await createCheckout(
         tx,
         {
-          buyerId: user.id,
+          buyerId,
           idempotencyKey,
           lines,
           delivery,
@@ -117,14 +121,18 @@ export class CheckoutService {
         },
         this.config,
       );
-      await tx.cartItem.deleteMany({ where: { buyerId: user.id } });
+      await tx.cartItem.deleteMany({ where: { buyerId } });
       return formatCheckout(checkout);
     }, CHECKOUT_TRANSACTION);
   }
 
   async findOne(user: User, id: string) {
+    const buyerId =
+      user.role === Role.ADMIN
+        ? undefined
+        : (await requireBuyer(this.database, user)).id;
     const checkout = await this.database.checkout.findFirst({
-      where: { id, ...(user.role === Role.ADMIN ? {} : { buyerId: user.id }) },
+      where: { id, ...(buyerId ? { buyerId } : {}) },
       include: CHECKOUT_INCLUDE,
     });
     if (!checkout) {
@@ -133,15 +141,16 @@ export class CheckoutService {
     return formatCheckout(checkout);
   }
 
-  cancel(user: User, id: string) {
-    return busyAsConflict(() => this.release(user, id));
+  async cancel(user: User, id: string) {
+    const buyer = await requireBuyer(this.database, user);
+    return busyAsConflict(() => this.release(buyer.id, id));
   }
 
-  private release(user: User, id: string) {
+  private release(buyerId: string, id: string) {
     return this.database.$transaction(async (tx) => {
       await lockCheckout(tx, id);
       const checkout = await tx.checkout.findFirst({
-        where: { id, buyerId: user.id },
+        where: { id, buyerId },
       });
       if (!checkout) {
         throw checkoutNotFound();

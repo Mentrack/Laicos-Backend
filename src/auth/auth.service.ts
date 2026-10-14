@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
 import type { UserRecord } from 'firebase-admin/auth';
 import {
   RegisterDto,
@@ -17,6 +18,7 @@ import {
   GoogleRegisterDto,
   CreateLocalUserDto,
   FirebaseAuthTokensDto,
+  UpdateProfileDto,
   VerifyEmailDto,
 } from './dto';
 import { EmailOtpService } from './email-otp.service';
@@ -32,9 +34,15 @@ import {
   needsEmailVerification,
 } from './utils/email-verification';
 import { webappUrl } from '../common/config';
+import {
+  IMAGE_SIGNATURES,
+  matchSignature,
+  type StorageUploadFile,
+} from '../common/upload-pipes';
 import { MailService } from '../mail/mail.service';
 import { passwordResetEmail } from '../mail/templates';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageService } from '../storage/storage.service';
 import {
   Role,
   type Prisma,
@@ -52,6 +60,7 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly mail: MailService,
     private readonly otp: EmailOtpService,
+    private readonly storage: StorageService,
   ) {}
 
   async register(dto: RegisterDto): Promise<void> {
@@ -245,6 +254,26 @@ export class AuthService {
     });
   }
 
+  updateProfile(user: UserModel, dto: UpdateProfileDto) {
+    return this.database.user.update({
+      where: { id: user.id },
+      data: dto,
+    });
+  }
+
+  async uploadAvatar(user: UserModel, file: StorageUploadFile) {
+    const { contentType, extension } = matchSignature(IMAGE_SIGNATURES, file);
+    const avatarUrl = await this.storage.uploadPublic(
+      `users/${user.id}/${randomUUID()}.${extension}`,
+      file.buffer,
+      contentType,
+    );
+    return this.database.user.update({
+      where: { id: user.id },
+      data: { avatarUrl },
+    });
+  }
+
   // async bootstrapAdmin(firebaseUser: DecodedIdToken, dto: BootstrapAdminDto) {
   //   const adminCount = await this.database.adminProfile.count();
   //   if (adminCount > 0) {
@@ -303,7 +332,7 @@ export class AuthService {
 
   /** Takes `client` so a caller can create the user inside its transaction. */
   async createLocalUser(
-    { refreshToken, farmer, agent, ...input }: CreateLocalUserDto,
+    { refreshToken, farmer, agent, buyer, ...input }: CreateLocalUserDto,
     client: Prisma.TransactionClient = this.database,
   ) {
     try {
@@ -317,6 +346,8 @@ export class AuthService {
             input.role === Role.EXTENSION_AGENT
               ? { create: { cluster: { create: {} }, ...agent } }
               : undefined,
+          buyer:
+            input.role === Role.BUYER ? { create: buyer ?? {} } : undefined,
           refreshToken: refreshToken
             ? { create: { token: refreshToken } }
             : undefined,

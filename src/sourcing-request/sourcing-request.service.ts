@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { User } from '../../generated/client';
+import { requireBuyer } from '../buyer/utils/require-buyer';
 import { lagosToday, toDateColumn } from '../common/dates';
 import {
   PaginationQueryDto,
@@ -22,11 +23,12 @@ export class SourcingRequestService {
     if (dto.requiredDate < lagosToday()) {
       throw new BadRequestException('Required date cannot be in the past');
     }
+    const buyer = await requireBuyer(this.database, user);
     const request = await this.database.sourcingRequest.create({
       data: {
         ...dto,
         requiredDate: toDateColumn(dto.requiredDate),
-        buyerId: user.id,
+        buyerId: buyer.id,
       },
     });
     return formatSourcingRequest(request);
@@ -34,7 +36,8 @@ export class SourcingRequestService {
 
   async findAll(user: User, query: PaginationQueryDto) {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const where = { buyerId: user.id };
+    const buyer = await requireBuyer(this.database, user);
+    const where = { buyerId: buyer.id };
     const [requests, total] = await this.database.$transaction([
       this.database.sourcingRequest.findMany({
         where,
@@ -51,8 +54,9 @@ export class SourcingRequestService {
   }
 
   async findOne(user: User, id: string) {
+    const buyer = await requireBuyer(this.database, user);
     const request = await this.database.sourcingRequest.findFirst({
-      where: { id, buyerId: user.id },
+      where: { id, buyerId: buyer.id },
     });
     if (!request) {
       throw new NotFoundException('Sourcing request not found');

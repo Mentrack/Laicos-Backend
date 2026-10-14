@@ -433,6 +433,89 @@
         "tags": [
           "Auth"
         ]
+      },
+      "patch": {
+        "description": "Send any subset of firstName, lastName and phoneNumber. Email is the login identity and cannot be changed here.",
+        "operationId": "AuthController_updateProfile",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update my name or phone",
+        "tags": [
+          "Auth"
+        ]
+      }
+    },
+    "/auth/me/avatar": {
+      "post": {
+        "description": "Multipart: the image in `file` (JPEG, PNG or WebP, 5 MB). Replaces any earlier photo.",
+        "operationId": "AuthController_uploadAvatar",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload or replace my profile photo",
+        "tags": [
+          "Auth"
+        ]
       }
     },
     "/farms": {
@@ -541,7 +624,7 @@
     },
     "/farms/{id}": {
       "get": {
-        "description": "Farmers only. Another farmer's farm is 404, the same as a missing one.",
+        "description": "Farmers see their own farms; agents see a farm in their cluster. Anyone else's farm is 404, the same as a missing one.",
         "operationId": "FarmController_findFarm",
         "parameters": [
           {
@@ -570,7 +653,7 @@
             "bearer": []
           }
         ],
-        "summary": "Get one of my farms",
+        "summary": "Get a farm I own or manage",
         "tags": [
           "Farms"
         ]
@@ -3813,7 +3896,7 @@
     },
     "/agents/me/farmers": {
       "post": {
-        "description": "Verified agents only. Creates the farmer without a password: like self-signup, they get access, and a temporary password by invite, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. Upload the farmer’s ID and the ownership document through POST /verifications/{id}/documents; approval needs both. 409 when the email is registered.",
+        "description": "Verified agents only. Creates the farmer without a password: like self-signup, they get access, and a temporary password by invite, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. The response includes verificationId; upload the farmer’s ID and the ownership document through POST /verifications/{verificationId}/documents. Approval needs both. 409 when the email is registered.",
         "operationId": "AgentController_onboardFarmer",
         "parameters": [],
         "requestBody": {
@@ -3904,6 +3987,107 @@
         "summary": "List my open tasks",
         "tags": [
           "Agents"
+        ]
+      }
+    },
+    "/buyers/me": {
+      "get": {
+        "description": "Includes my public code and home location, if I have set one.",
+        "operationId": "BuyerController_findMine",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my buyer profile",
+        "tags": [
+          "Buyers"
+        ]
+      },
+      "patch": {
+        "description": "Send stateId and lgaId together.",
+        "operationId": "BuyerController_updateMine",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBuyerDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set my home location",
+        "tags": [
+          "Buyers"
+        ]
+      }
+    },
+    "/buyers/{id}": {
+      "get": {
+        "description": "{id} is the Buyer id, not the user id. Code only.",
+        "operationId": "BuyerController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuyerResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a buyer's public profile",
+        "tags": [
+          "Buyers"
         ]
       }
     },
@@ -4241,6 +4425,380 @@
           "Handovers"
         ]
       }
+    },
+    "/handovers/{orderId}/proof": {
+      "post": {
+        "description": "Multipart image in `file` (JPEG, PNG or WebP, 5 MB). Allowed while the handover is PENDING or VERIFIED. Call again to add another photo.",
+        "operationId": "HandoverController_addProof",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Upload a handover proof photo",
+        "tags": [
+          "Handovers"
+        ]
+      }
+    },
+    "/handovers/{orderId}/proof/{proofId}": {
+      "delete": {
+        "description": "Deletes the photo and its stored file. 409 once the order has been handed over.",
+        "operationId": "HandoverController_removeProof",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proofId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HandoverResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a handover proof photo",
+        "tags": [
+          "Handovers"
+        ]
+      }
+    },
+    "/orders/{orderId}/conversation": {
+      "post": {
+        "description": "Between the order's buyer and its agent (the handover agent once READY, else the farm's cluster agent). Returns the existing conversation if there is one. 403 NOT_A_PARTICIPANT; 409 CONVERSATION_NOT_OPEN while unpaid, NO_AGENT_ASSIGNED when the farm is in no cluster, CONVERSATION_CLOSED when the order is already fulfilled or cancelled.",
+        "operationId": "ConversationController_open",
+        "parameters": [
+          {
+            "name": "orderId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Open the conversation for an order",
+        "tags": [
+          "Messages"
+        ]
+      }
+    },
+    "/conversations": {
+      "get": {
+        "description": "Most recent message first; threads with no messages last.",
+        "operationId": "ConversationController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my conversations",
+        "tags": [
+          "Messages"
+        ]
+      }
+    },
+    "/conversations/{id}": {
+      "get": {
+        "operationId": "ConversationController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a conversation",
+        "tags": [
+          "Messages"
+        ]
+      }
+    },
+    "/conversations/{id}/messages": {
+      "get": {
+        "description": "Oldest first. Without a cursor, the newest page. before pages back through history; after catches up after a reconnect. 400 INVALID_CURSOR for both cursors at once or a message from another conversation.",
+        "operationId": "ConversationController_listMessages",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "required": false,
+            "in": "query",
+            "description": "Messages older than this one. Not with after.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "required": false,
+            "in": "query",
+            "description": "Messages newer than this one, e.g. to catch up after a reconnect. Not with before.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 30,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageArrayResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List messages in a conversation",
+        "tags": [
+          "Messages"
+        ]
+      },
+      "post": {
+        "description": "Both participants also get it as the message.created socket event. Retrying with the same clientMessageId returns the original. 409 CONVERSATION_CLOSED once the order is fulfilled or cancelled; 409 CLIENT_MESSAGE_ID_REUSED if the clientMessageId was used in another conversation.",
+        "operationId": "ConversationController_send",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Send a message",
+        "tags": [
+          "Messages"
+        ]
+      }
+    },
+    "/conversations/{id}/read": {
+      "post": {
+        "description": "Clears my unread count. Both participants get the conversation.read socket event.",
+        "operationId": "ConversationController_markRead",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark a conversation read",
+        "tags": [
+          "Messages"
+        ]
+      }
     }
   },
   "info": {
@@ -4252,7 +4810,7 @@
   "tags": [
     {
       "name": "Auth",
-      "description": "Registration, login (email/password or Google), token refresh, password reset and the signed-in user."
+      "description": "Registration, login (email/password or Google), token refresh, password reset, the signed-in user, and their name, phone and avatar."
     },
     {
       "name": "Locations",
@@ -4305,6 +4863,10 @@
     {
       "name": "Handovers",
       "description": "The step between a farmer marking an order READY and logistics collecting it. The agent whose cluster holds the farm checks the goods (verify), then records who took them (complete), which ships the order. Verified agents only."
+    },
+    {
+      "name": "Messages",
+      "description": "Text conversations between an order's buyer and its agent, one per order. Open from payment until the order is fulfilled or cancelled, then read-only. Live updates arrive over socket.io at /v1/chat (WebSocket transport, auth: { token: <Firebase ID token> }): message.created carries a Message, conversation.read carries a ConversationReadEvent."
     },
     {
       "name": "Bank accounts",
@@ -4407,19 +4969,17 @@
       "MessageResponseDto": {
         "type": "object",
         "properties": {
-          "data": {
-            "type": "object",
-            "nullable": true,
-            "example": null
-          },
           "message": {
             "type": "string",
             "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MessageDto"
           }
         },
         "required": [
-          "data",
-          "message"
+          "message",
+          "data"
         ]
       },
       "VerifyEmailDto": {
@@ -4478,6 +5038,11 @@
             "nullable": true,
             "example": "+2348012345678"
           },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Public URL of the profile photo; null until one is uploaded"
+          },
           "role": {
             "example": "FARMER",
             "allOf": [
@@ -4519,6 +5084,7 @@
           "lastName",
           "email",
           "phoneNumber",
+          "avatarUrl",
           "role",
           "agreedToTerms",
           "isVerified",
@@ -4760,6 +5326,24 @@
           "message",
           "data"
         ]
+      },
+      "UpdateProfileDto": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          }
+        }
       },
       "CreateFarmDto": {
         "type": "object",
@@ -5328,12 +5912,18 @@
           },
           "farm": {
             "$ref": "#/components/schemas/FarmDto"
+          },
+          "verificationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Open verification round; agents upload documents to it"
           }
         },
         "required": [
           "user",
           "farmer",
-          "farm"
+          "farm",
+          "verificationId"
         ]
       },
       "RegisteredFarmerResponseDto": {
@@ -6826,7 +7416,7 @@
           "buyerId": {
             "type": "string",
             "format": "uuid",
-            "description": "User.id of the buyer"
+            "description": "Buyer.id"
           },
           "quantity": {
             "type": "integer",
@@ -7008,7 +7598,7 @@
           "buyerId": {
             "type": "string",
             "format": "uuid",
-            "description": "User.id of the buyer"
+            "description": "Buyer.id"
           },
           "status": {
             "allOf": [
@@ -9075,6 +9665,28 @@
           "HANDED_OVER"
         ]
       },
+      "HandoverProofDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "createdAt"
+        ]
+      },
       "HandoverDto": {
         "type": "object",
         "properties": {
@@ -9145,6 +9757,12 @@
             "type": "string",
             "nullable": true
           },
+          "proof": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandoverProofDto"
+            }
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string",
@@ -9166,6 +9784,7 @@
           "recipientPhone",
           "handoverNote",
           "handedOverAt",
+          "proof",
           "createdAt"
         ]
       },
@@ -9237,6 +9856,123 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "BuyerProfileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "example": "BY-000123",
+            "description": "Public buyer code"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StateDto"
+              }
+            ]
+          },
+          "lga": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LgaDto"
+              }
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "buyerId",
+          "userId",
+          "state",
+          "lga",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "BuyerProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BuyerProfileDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "UpdateBuyerDto": {
+        "type": "object",
+        "properties": {
+          "stateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Send with stateId; either alone is 400"
+          }
+        }
+      },
+      "BuyerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "example": "BY-000123",
+            "description": "Public buyer code"
+          }
+        },
+        "required": [
+          "id",
+          "buyerId"
+        ]
+      },
+      "BuyerResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BuyerDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "AddressPlaceDto": {
@@ -9494,6 +10230,243 @@
           "recipientName"
         ]
       },
+      "ConversationParticipantDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Musa"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Bello"
+          },
+          "role": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              }
+            ]
+          }
+        },
+        "required": [
+          "userId",
+          "firstName",
+          "lastName",
+          "role"
+        ]
+      },
+      "MessageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "senderId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The sending user"
+          },
+          "body": {
+            "type": "string",
+            "example": "Can the cassava be delivered in 50kg sacks?"
+          },
+          "clientMessageId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Echoed back so the sending device can match its own send"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "senderId",
+          "body",
+          "clientMessageId",
+          "createdAt"
+        ]
+      },
+      "ConversationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "orderStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrderStatus"
+              }
+            ]
+          },
+          "produceName": {
+            "type": "string",
+            "example": "Cassava"
+          },
+          "quantity": {
+            "type": "number",
+            "example": 5
+          },
+          "unit": {
+            "type": "string",
+            "example": "tonnes",
+            "description": "The listing's current unit; orders don't snapshot it"
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceType"
+              }
+            ]
+          },
+          "isClosed": {
+            "type": "boolean",
+            "description": "The order is FULFILLED or CANCELLED: readable, but no new messages"
+          },
+          "counterpart": {
+            "$ref": "#/components/schemas/ConversationParticipantDto"
+          },
+          "lastMessage": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MessageDto"
+              }
+            ]
+          },
+          "unreadCount": {
+            "type": "number",
+            "example": 2,
+            "description": "Messages from the other side I have not read"
+          },
+          "lastMessageAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "orderNumber",
+          "orderStatus",
+          "produceName",
+          "quantity",
+          "unit",
+          "type",
+          "isClosed",
+          "counterpart",
+          "lastMessage",
+          "unreadCount",
+          "lastMessageAt",
+          "createdAt"
+        ]
+      },
+      "ConversationResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ConversationDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "ConversationListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "MessageArrayResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageDto"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "SendMessageDto": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "Can the cassava be delivered in 50kg sacks?",
+            "minLength": 1
+          },
+          "clientMessageId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Generated once per message on the device; a retry with the same value returns the original"
+          }
+        },
+        "required": [
+          "body",
+          "clientMessageId"
+        ]
+      },
       "ErrorDetailDto": {
         "type": "object",
         "properties": {
@@ -9535,6 +10508,29 @@
         "required": [
           "message",
           "error"
+        ]
+      },
+      "ConversationReadEventDto": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Who read it"
+          },
+          "readAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversationId",
+          "userId",
+          "readAt"
         ]
       }
     }

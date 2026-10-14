@@ -221,6 +221,7 @@ describe('AgentService', () => {
       handoverNote: null,
       handedOverAt: null,
       createdAt: new Date('2026-09-02'),
+      proofs: [],
       order: {
         id: 'order-1',
         orderNumber: 'ORD-000001',

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../authenticated-request';
 import { FirebaseService } from '../firebase/firebase.service';
+import { verifySessionToken } from '../utils/session';
 
 /** Verifies the bearer ID token and sets `req.firebaseUser`. */
 @Injectable()
@@ -21,16 +22,7 @@ export class FirebaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing bearer token');
     }
 
-    try {
-      // checkRevoked: logout revokes refresh tokens, and without this an
-      // already-issued ID token would keep working until it expires.
-      request.firebaseUser = await this.firebase.auth.verifyIdToken(
-        token,
-        true,
-      );
-    } catch {
-      throw new UnauthorizedException('Invalid or expired token');
-    }
+    request.firebaseUser = await verifySessionToken(this.firebase, token);
     return true;
   }
 }

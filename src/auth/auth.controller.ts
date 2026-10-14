@@ -6,7 +6,10 @@ import {
   HttpStatus,
   Patch,
   Post,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiCreatedResponse,
   ApiOkResponse,
@@ -15,6 +18,12 @@ import {
 } from '@nestjs/swagger';
 import type { User } from '../../generated/client';
 import { ApiEnvelope, MessageResponseDto } from '../common/dto/envelope';
+import { ApiImageUpload } from '../common/dto/image-upload';
+import {
+  IMAGE_MAX_BYTES,
+  imageUploadPipe,
+  type StorageUploadFile,
+} from '../common/upload-pipes';
 import { AuthService } from './auth.service';
 import { AllowPendingPasswordChange } from './decorators/allow-pending-password-change.decorator';
 import { Auth } from './decorators/auth.decorator';
@@ -31,6 +40,7 @@ import {
   RegisterDto,
   ResendVerificationDto,
   TokenPairDto,
+  UpdateProfileDto,
   UserDto,
   VerifyEmailDto,
 } from './dto';
@@ -210,5 +220,42 @@ export class AuthController {
   async getCurrentUser(@CurrentUser() user: User) {
     const data = await this.auth.getCurrentUser(user);
     return { data, message: 'User retrieved' };
+  }
+
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Update my name or phone',
+    description:
+      'Send any subset of firstName, lastName and phoneNumber. Email is the login identity and cannot be changed here.',
+  })
+  @Auth()
+  @ApiEnvelope(UserDto)
+  async updateProfile(
+    @CurrentUser() user: User,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    const data = await this.auth.updateProfile(user, dto);
+    return { data, message: 'Profile updated' };
+  }
+
+  @Post('me/avatar')
+  @ApiOperation({
+    summary: 'Upload or replace my profile photo',
+    description:
+      'Multipart: the image in `file` (JPEG, PNG or WebP, 5 MB). Replaces any earlier photo.',
+  })
+  @HttpCode(HttpStatus.OK)
+  @Auth()
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),
+  )
+  @ApiImageUpload()
+  @ApiEnvelope(UserDto)
+  async uploadAvatar(
+    @CurrentUser() user: User,
+    @UploadedFile(imageUploadPipe()) file: StorageUploadFile,
+  ) {
+    const data = await this.auth.uploadAvatar(user, file);
+    return { data, message: 'Avatar updated' };
   }
 }

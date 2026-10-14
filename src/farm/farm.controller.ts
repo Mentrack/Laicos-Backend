@@ -141,11 +141,11 @@ export class FarmController {
 
   @Get('farms/:id')
   @ApiOperation({
-    summary: 'Get one of my farms',
+    summary: 'Get a farm I own or manage',
     description:
-      "Farmers only. Another farmer's farm is 404, the same as a missing one.",
+      "Farmers see their own farms; agents see a farm in their cluster. Anyone else's farm is 404, the same as a missing one.",
   })
-  @Auth(Role.FARMER)
+  @Auth(Role.FARMER, Role.EXTENSION_AGENT)
   @ApiTags('Farms')
   @ApiEnvelope(FarmDto)
   async findFarm(

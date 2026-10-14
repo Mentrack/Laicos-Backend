@@ -2,6 +2,17 @@ import { ApiProperty } from '@nestjs/swagger';
 import { HandoverStatus, ProduceType } from '../../../generated/client';
 import { FarmSummaryDto } from '../../farm/dto';
 
+export class HandoverProofDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty({ description: 'Presigned; expires in 15 min' })
+  url: string;
+
+  @ApiProperty()
+  createdAt: Date;
+}
+
 export class HandoverDto {
   @ApiProperty({ format: 'uuid', description: 'The order’s id' })
   orderId: string;
@@ -44,6 +55,9 @@ export class HandoverDto {
 
   @ApiProperty({ type: Date, nullable: true })
   handedOverAt: Date | null;
+
+  @ApiProperty({ type: [HandoverProofDto] })
+  proof: HandoverProofDto[];
 
   @ApiProperty({ description: 'When the order was marked READY' })
   createdAt: Date;

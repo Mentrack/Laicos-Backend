@@ -9,6 +9,7 @@ import {
   SourcingUnit,
   type User,
 } from '../../../generated/client';
+import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { CreateSourcingRequestDto } from '../dto';
 import { SourcingRequestService } from '../sourcing-request.service';
@@ -43,7 +44,9 @@ function row() {
 }
 
 describe('SourcingRequestService', () => {
+  const buyerModel = { findUnique: jest.fn() };
   const database = {
+    buyer: buyerModel,
     sourcingRequest: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -58,6 +61,7 @@ describe('SourcingRequestService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    buyerModel.findUnique.mockResolvedValue(buyerProfile(buyer.id));
     jest.useFakeTimers();
     // 10:00 in Lagos (UTC+1) on 8 October.
     jest.setSystemTime(new Date('2026-10-08T09:00:00.000Z'));

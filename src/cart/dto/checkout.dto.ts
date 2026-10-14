@@ -30,7 +30,7 @@ export class CheckoutDto {
   @ApiProperty({ example: 'CHK-000123' })
   checkoutNumber: string;
 
-  @ApiProperty({ format: 'uuid', description: 'User.id of the buyer' })
+  @ApiProperty({ format: 'uuid', description: 'Buyer.id' })
   buyerId: string;
 
   @ApiProperty({ enum: CheckoutStatus, enumName: 'CheckoutStatus' })

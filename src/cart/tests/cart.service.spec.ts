@@ -7,6 +7,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { CHECKOUT_TRANSACTION } from '../../payment/utils/checkout-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -89,8 +90,10 @@ describe('CartService', () => {
     produce: { findUnique: jest.fn() },
     cartMerge: { findUnique: jest.fn(), create: jest.fn() },
   };
+  const buyerModel = { findUnique: jest.fn() };
   const database = {
     cartItem,
+    buyer: buyerModel,
     produce: { findMany: jest.fn() },
     // A plain function, not jest.fn, so resetAllMocks keeps it.
     $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
@@ -101,7 +104,10 @@ describe('CartService', () => {
     testCheckoutConfig(),
   );
 
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    buyerModel.findUnique.mockResolvedValue(buyerProfile(buyer.id));
+  });
 
   describe('find', () => {
     it('prices lines from the current price and totals only clean items', async () => {

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -8,7 +9,10 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Agent } from '../../generated/client';
 import {
@@ -16,6 +20,12 @@ import {
   VerifiedAgent,
 } from '../agent/decorators/verified-agent.decorator';
 import { ApiEnvelope } from '../common/dto/envelope';
+import { ApiImageUpload } from '../common/dto/image-upload';
+import {
+  IMAGE_MAX_BYTES,
+  imageUploadPipe,
+  type StorageUploadFile,
+} from '../common/upload-pipes';
 import {
   CompleteHandoverDto,
   HandoverDto,
@@ -92,5 +102,41 @@ export class HandoverController {
   ) {
     const data = await this.handovers.complete(agent, orderId, dto);
     return { data, message: 'Order handed over' };
+  }
+
+  @Post(':orderId/proof')
+  @ApiOperation({
+    summary: 'Upload a handover proof photo',
+    description:
+      'Multipart image in `file` (JPEG, PNG or WebP, 5 MB). Allowed while the handover is PENDING or VERIFIED. Call again to add another photo.',
+  })
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),
+  )
+  @ApiImageUpload()
+  @ApiEnvelope(HandoverDto, { status: HttpStatus.CREATED })
+  async addProof(
+    @CurrentAgent() agent: Agent,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @UploadedFile(imageUploadPipe()) file: StorageUploadFile,
+  ) {
+    const data = await this.handovers.addProof(agent, orderId, file);
+    return { data, message: 'Proof added' };
+  }
+
+  @Delete(':orderId/proof/:proofId')
+  @ApiOperation({
+    summary: 'Remove a handover proof photo',
+    description:
+      'Deletes the photo and its stored file. 409 once the order has been handed over.',
+  })
+  @ApiEnvelope(HandoverDto)
+  async removeProof(
+    @CurrentAgent() agent: Agent,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
+    @Param('proofId', ParseUUIDPipe) proofId: string,
+  ) {
+    const data = await this.handovers.removeProof(agent, orderId, proofId);
+    return { data, message: 'Proof removed' };
   }
 }

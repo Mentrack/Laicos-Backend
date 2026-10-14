@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma, User } from '../../generated/client';
 import { formatIdentity, replaceIdDocument } from '../common/identity';
+import { farmInAgentCluster } from '../common/ownership';
 import {
   PaginationQueryDto,
   paginateInMemory,
@@ -129,9 +130,7 @@ export class AgentService {
 
   async findClusterFarms(user: User, query: PaginationQueryDto) {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const where: Prisma.FarmWhereInput = {
-      cluster: { agent: { userId: user.id } },
-    };
+    const where: Prisma.FarmWhereInput = farmInAgentCluster(user);
     const [farms, total] = await this.database.$transaction([
       this.database.farm.findMany({
         where,
@@ -153,7 +152,7 @@ export class AgentService {
   /** Cluster farms are all VERIFIED, so these are my verified farmers. */
   async findClusterFarmers(user: User, query: PaginationQueryDto) {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const inMyCluster = { cluster: { agent: { userId: user.id } } };
+    const inMyCluster = farmInAgentCluster(user);
     const where: Prisma.FarmerWhereInput = { farms: { some: inMyCluster } };
     const [farmers, total] = await this.database.$transaction([
       this.database.farmer.findMany({
@@ -232,13 +231,15 @@ export class AgentService {
       },
       include: HANDOVER_INCLUDE,
     });
-    return handovers.map((handover) => ({
-      type: AgentTaskType.ORDER_HANDOVER,
-      id: handover.orderId,
-      createdAt: handover.createdAt,
-      verification: null,
-      handover: formatHandover(handover),
-    }));
+    return Promise.all(
+      handovers.map(async (handover) => ({
+        type: AgentTaskType.ORDER_HANDOVER,
+        id: handover.orderId,
+        createdAt: handover.createdAt,
+        verification: null,
+        handover: await formatHandover(this.storage, handover),
+      })),
+    );
   }
 
   private async requireAgent(user: User) {

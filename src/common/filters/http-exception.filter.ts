@@ -22,51 +22,52 @@ const CODES: Partial<Record<number, string>> = {
 
 const INTERNAL_MESSAGE = 'Something went wrong. Please try again later.';
 
+const logger = new Logger('HttpExceptionFilter');
+
 /** The one place an error becomes a response body. */
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
-
   catch(exception: unknown, host: ArgumentsHost): void {
-    const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
-        : HttpStatus.INTERNAL_SERVER_ERROR;
-
+    const body = errorBody(exception);
     host
       .switchToHttp()
       .getResponse<Response>()
-      .status(status)
-      .json(this.toBody(exception, status));
+      .status(body.error.statusCode)
+      .json(body);
   }
+}
 
-  private toBody(exception: unknown, status: number): ErrorResponseDto {
-    if (!(exception instanceof HttpException) || status >= 500) {
-      // Internal faults are logged in full but never echoed to the client.
-      this.logger.error(
-        exception instanceof Error ? exception.message : String(exception),
-        exception instanceof Error ? exception.stack : undefined,
-      );
-      return {
-        message: INTERNAL_MESSAGE,
-        error: { code: 'INTERNAL_ERROR', statusCode: status },
-      };
-    }
-
-    const error = {
-      code: exceptionCode(exception) ?? CODES[status] ?? 'REQUEST_FAILED',
-      statusCode: status,
+/** Also used by the chat gateway, whose handshake errors share this shape. */
+export function errorBody(exception: unknown): ErrorResponseDto {
+  const status =
+    exception instanceof HttpException
+      ? exception.getStatus()
+      : HttpStatus.INTERNAL_SERVER_ERROR;
+  if (!(exception instanceof HttpException) || status >= 500) {
+    // Internal faults are logged in full but never echoed to the client.
+    logger.error(
+      exception instanceof Error ? exception.message : String(exception),
+      exception instanceof Error ? exception.stack : undefined,
+    );
+    return {
+      message: INTERNAL_MESSAGE,
+      error: { code: 'INTERNAL_ERROR', statusCode: status },
     };
-    const message = exceptionMessage(exception);
-    if (Array.isArray(message)) {
-      // ValidationPipe reports string[]; the client renders one string.
-      return {
-        message: capitalise(message[0] ?? exception.message),
-        error: { ...error, details: message },
-      };
-    }
-    return { message: capitalise(message), error };
   }
+
+  const error = {
+    code: exceptionCode(exception) ?? CODES[status] ?? 'REQUEST_FAILED',
+    statusCode: status,
+  };
+  const message = exceptionMessage(exception);
+  if (Array.isArray(message)) {
+    // ValidationPipe reports string[]; the client renders one string.
+    return {
+      message: capitalise(message[0] ?? exception.message),
+      error: { ...error, details: message },
+    };
+  }
+  return { message: capitalise(message), error };
 }
 
 /** HttpException bodies are a string or `{ message: string | string[] }`. */

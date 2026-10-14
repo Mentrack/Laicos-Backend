@@ -9,6 +9,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import type { FxService } from '../../fx/fx.service';
 import type {
   PaystackClient,
@@ -83,7 +84,9 @@ describe('PaymentService', () => {
     order: { updateMany: jest.fn() },
   };
   let transactionOptions: unknown;
+  const buyerModel = { findUnique: jest.fn() };
   const database = {
+    buyer: buyerModel,
     payment: {
       findUnique: jest.fn(),
       update: jest.fn(),
@@ -113,6 +116,7 @@ describe('PaymentService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    buyerModel.findUnique.mockResolvedValue(buyerProfile('buyer-1'));
     tx.checkout.findFirst.mockResolvedValue(checkout());
     tx.payment.findUnique.mockResolvedValue(null);
     tx.payment.create.mockImplementation(

@@ -1447,7 +1447,12 @@ async function main() {
         Role.BUYER,
         passwordOnly,
       );
-      buyerIds.set(buyer.key, user.id);
+      const profile = await prisma.buyer.upsert({
+        where: { userId: user.id },
+        create: { id: seedId(`buyer:${buyer.key}`), userId: user.id },
+        update: {},
+      });
+      buyerIds.set(buyer.key, profile.id);
     }
 
     const agents = new Map<AgentKey, { id: string; clusterId: string }>();

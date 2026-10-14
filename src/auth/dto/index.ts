@@ -5,6 +5,7 @@ export { ConfirmForgotPasswordDto } from './confirm-forgort-password.dto';
 export { ChangePasswordDto } from './change-password.dto';
 export { RefreshTokenDto } from './refresh-token.dto';
 export { UserDto } from './user.dto';
+export { UpdateProfileDto } from './update-profile.dto';
 export { TokenPairDto, AuthSessionDto } from './token-pair.dto';
 export { GoogleLoginDto, GoogleRegisterDto } from './google-auth.dto';
 export { VerifyEmailDto, ResendVerificationDto } from './verify-email.dto';

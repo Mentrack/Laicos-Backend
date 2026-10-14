@@ -8,6 +8,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { addDays, lagosToday } from '../../common/dates';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -111,8 +112,10 @@ describe('CheckoutService', () => {
     },
   };
   let transactionOptions: unknown;
+  const buyerModel = { findUnique: jest.fn() };
   const database = {
     checkout: { findFirst: jest.fn() },
+    buyer: buyerModel,
     $transaction: (
       callback: (client: typeof tx) => Promise<unknown>,
       options?: unknown,
@@ -138,6 +141,7 @@ describe('CheckoutService', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
+    buyerModel.findUnique.mockResolvedValue(buyerProfile(buyer.id));
     tx.address.findFirst.mockResolvedValue({
       id: 'address-1',
       label: 'Warehouse A',
