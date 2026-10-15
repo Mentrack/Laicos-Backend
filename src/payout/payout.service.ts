@@ -1,5 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PayoutStatus, Prisma, type User } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  PayoutStatus,
+  Prisma,
+  type User,
+} from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { advisoryLock } from '../common/advisory-lock';
 import { toMinorUnits } from '../common/money';
 import {
@@ -45,6 +53,7 @@ export class PayoutService {
     private readonly database: PrismaService,
     private readonly paystack: PaystackClient,
     private readonly config: PayoutConfig,
+    private readonly audit: AuditService,
   ) {}
 
   async findEligible(query: PaginationQueryDto) {
@@ -245,6 +254,35 @@ export class PayoutService {
         where: { payoutId: payout.id },
         data: { status },
       });
+      if (status === PayoutStatus.SUCCEEDED) {
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: payout.farmerId,
+          agentId: null,
+          farmId: null,
+          category: AuditCategory.PAYOUT,
+          title: `Payout ${payout.reference} paid`,
+          summary: `₦${payout.amount.toFixed(2)} to ${payout.bankName}`,
+          actionLabel: 'View payout',
+          resource: AuditResource.PAYOUT,
+          resourceId: payout.id,
+        });
+      } else if (status === PayoutStatus.REVERSED) {
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: payout.farmerId,
+          agentId: null,
+          farmId: null,
+          category: AuditCategory.PAYOUT,
+          title: `Payout ${payout.reference} reversed`,
+          summary:
+            result.reason ??
+            `₦${payout.amount.toFixed(2)} to ${payout.bankName}`,
+          actionLabel: 'View payout',
+          resource: AuditResource.PAYOUT,
+          resourceId: payout.id,
+        });
+      }
     });
   }
 

@@ -1,10 +1,14 @@
 import { ConfigService } from '@nestjs/config';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   PayoutStatus,
   Prisma,
   Role,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import type { PaystackClient } from '../../paystack/paystack.client';
 import { PaystackError } from '../../paystack/paystack-error';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -57,10 +61,12 @@ describe('PayoutService', () => {
     $transaction: jest.fn(),
   };
   const paystack = { bulkTransfer: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new PayoutService(
     database as unknown as PrismaService,
     paystack as unknown as PaystackClient,
     new PayoutConfig(new ConfigService({})),
+    audit as unknown as AuditService,
   );
 
   beforeEach(() => {
@@ -278,6 +284,114 @@ describe('PayoutService', () => {
         reason: null,
       });
       expect(tx.payout.update).not.toHaveBeenCalled();
+    });
+
+    it('records a paid row once', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({
+          amount: d('1200.00'),
+          bankName: 'GTBank',
+          reference: 'PO-000001',
+          farmerId: FARMER_A,
+        }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'success',
+        reason: null,
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: FARMER_A,
+        agentId: null,
+        farmId: null,
+        category: AuditCategory.PAYOUT,
+        title: 'Payout PO-000001 paid',
+        summary: '₦1200.00 to GTBank',
+        actionLabel: 'View payout',
+        resource: AuditResource.PAYOUT,
+        resourceId: 'payout-a',
+      });
+    });
+
+    it('a second success writes nothing', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({ status: PayoutStatus.SUCCEEDED }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'success',
+        reason: null,
+      });
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('a success after FAILED writes nothing', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({ status: PayoutStatus.FAILED }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'success',
+        reason: null,
+      });
+      expect(tx.payout.update).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('records a reversal', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({
+          status: PayoutStatus.SUCCEEDED,
+          reference: 'PO-000001',
+          farmerId: FARMER_A,
+        }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'reversed',
+        reason: 'Account closed',
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          title: 'Payout PO-000001 reversed',
+          summary: 'Account closed',
+          farmId: null,
+          farmerId: FARMER_A,
+        }),
+      );
+    });
+
+    it('a failed transfer writes nothing', async () => {
+      tx.payout.findUnique.mockResolvedValue(payoutRow());
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'failed',
+        reason: 'Account closed',
+      });
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('a reversal without a reason uses the amount and bank', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({
+          status: PayoutStatus.SUCCEEDED,
+          amount: d('1200.00'),
+          bankName: 'GTBank',
+          reference: 'PO-000001',
+          farmerId: FARMER_A,
+        }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'reversed',
+        reason: null,
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ summary: '₦1200.00 to GTBank' }),
+      );
     });
   });
 });
