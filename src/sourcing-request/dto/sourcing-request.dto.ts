@@ -24,6 +24,9 @@ export class SourcingRequestDto extends OmitType(CreateSourcingRequestDto, [
   })
   status: SourcingRequestStatus;
 
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  checkoutId: string | null;
+
   @ApiProperty()
   createdAt: Date;
 

@@ -1,12 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEmail,
+  IsEnum,
   IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
+  MaxLength,
+  Validate,
+  ValidateIf,
 } from 'class-validator';
-import { Role } from '../../../generated/client';
+import { BuyerType, Role } from '../../../generated/client';
+import { BuyerKindConstraint } from '../../buyer/utils/buyer-kind';
 import { NormalizedEmail } from '../../common/dto/normalized-email';
 
 export class RegisterDto {
@@ -48,5 +53,41 @@ export class RegisterDto {
   })
   @IsNotEmpty()
   @IsIn([Role.BUYER, Role.RIDER])
+  @Validate(BuyerKindConstraint)
   role: typeof Role.BUYER | typeof Role.RIDER;
+
+  @ApiPropertyOptional({ enum: BuyerType, enumName: 'BuyerType' })
+  @ValidateIf((dto: RegisterDto) => dto.role === Role.BUYER)
+  @IsEnum(BuyerType)
+  buyerType?: BuyerType;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  legalName?: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  department?: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  contactName?: string;
+
+  @ApiPropertyOptional({ maxLength: 30 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  contactPhone?: string;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  paymentTerms?: string;
 }

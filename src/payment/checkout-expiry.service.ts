@@ -1,6 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { CheckoutStatus } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  CheckoutStatus,
+} from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  recordLinkedAudit,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { lockCheckout } from './utils/checkout-lock';
 import { CHECKOUT_TRANSACTION } from './utils/checkout-transaction';
 import { releaseCheckout } from './utils/release-checkout';
@@ -61,6 +70,22 @@ export class CheckoutExpiryService {
         CheckoutStatus.EXPIRED,
         'Payment not received',
       );
+      if (checkout.sourcingRequestId) {
+        await syncSourcingRequest(tx, checkout.sourcingRequestId);
+        await recordLinkedAudit(tx, {
+          actorType: AuditActorType.SYSTEM,
+          farmerId: null,
+          agentId: null,
+          farmId: null,
+          category: AuditCategory.ORDER,
+          title: 'Checkout expired',
+          summary: 'Payment not received',
+          actionLabel: 'View request',
+          resource: AuditResource.SOURCING_REQUEST,
+          resourceId: checkout.sourcingRequestId,
+          sourcingRequestId: checkout.sourcingRequestId,
+        });
+      }
       return true;
     }, CHECKOUT_TRANSACTION);
   }

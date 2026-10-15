@@ -6,6 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   OrderStatus,
   Role,
   type Conversation,
@@ -13,6 +16,11 @@ import {
   type Prisma,
   type User,
 } from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
+import {
+  sourcingRequestIdForOrder,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { requireBuyer } from '../buyer/utils/require-buyer';
 import {
   paginationMeta,
@@ -51,6 +59,7 @@ export class ConversationService {
   constructor(
     private readonly database: PrismaService,
     private readonly chat: ChatGateway,
+    private readonly audit: AuditService,
   ) {}
 
   async open(user: User, orderId: string): Promise<ConversationDto> {
@@ -229,6 +238,56 @@ export class ConversationService {
           where: { id },
           data: { lastMessageAt: created.createdAt },
         });
+        const sourcingRequestId = await sourcingRequestIdForOrder(
+          tx,
+          conversation.orderId,
+        );
+        if (user.role === Role.EXTENSION_AGENT) {
+          const [agent, order] = await Promise.all([
+            tx.agent.findUnique({
+              where: { userId: user.id },
+              select: { id: true },
+            }),
+            tx.order.findUnique({
+              where: { id: conversation.orderId },
+              select: { orderNumber: true, farmId: true },
+            }),
+          ]);
+          await this.audit.record(tx, {
+            actorType: AuditActorType.EXTENSION_AGENT,
+            farmerId: null,
+            agentId: agent!.id,
+            farmId: order!.farmId,
+            category: AuditCategory.CHAT,
+            title: 'Message sent to buyer',
+            summary: `${order!.orderNumber}. ${dto.body.slice(0, 120)}`,
+            actionLabel: 'View chat',
+            resource: AuditResource.CONVERSATION,
+            resourceId: id,
+            sourcingRequestId,
+          });
+        } else if (user.role === Role.BUYER && sourcingRequestId) {
+          const order = await tx.order.findUnique({
+            where: { id: conversation.orderId },
+            select: { orderNumber: true },
+          });
+          await this.audit.record(tx, {
+            actorType: AuditActorType.BUYER,
+            farmerId: null,
+            agentId: null,
+            farmId: null,
+            category: AuditCategory.CHAT,
+            title: 'Message sent to agent',
+            summary: `${order?.orderNumber ?? ''}. ${dto.body.slice(0, 120)}`,
+            actionLabel: 'View chat',
+            resource: AuditResource.CONVERSATION,
+            resourceId: id,
+            sourcingRequestId,
+          });
+        }
+        if (sourcingRequestId) {
+          await syncSourcingRequest(tx, sourcingRequestId);
+        }
         return created;
       });
     } catch (error) {

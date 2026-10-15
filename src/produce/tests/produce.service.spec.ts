@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   FarmVerificationStatus,
   Prisma,
   ProduceCategory,
@@ -12,6 +15,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -22,6 +26,8 @@ const user = { id: 'user-1', role: Role.FARMER } as User;
 const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
 const farmId = '6f1c1c3e-2b8e-4a55-9d0e-3b6b1f0c9a11';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
+const farmCode = 'LF-000001';
+const ownedFarm = { id: farmId, farmCode, ownerId: 'farmer-1' };
 const ownedByUser = { owner: { userId: user.id } };
 // Other farmers' produce shows only while it is on sale, on a verified farm.
 const visible = {
@@ -72,16 +78,22 @@ describe('ProduceService', () => {
     update: jest.fn(),
     delete: jest.fn(),
   };
+  const sourcingAllocation = { count: jest.fn() };
+  const tx = { produce, sourcingAllocation };
   const database = {
     farm,
     produce,
-    // A plain function, not jest.fn, so resetAllMocks keeps it.
-    $transaction: (queries: Promise<unknown>[]) => Promise.all(queries),
+    // Array form for batched reads; callback form runs against the same mocks.
+    $transaction: (
+      arg: Promise<unknown>[] | ((client: typeof tx) => Promise<unknown>),
+    ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
   };
   const storage = { uploadPublic: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new ProduceService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
+    audit as unknown as AuditService,
   );
   const dto = {
     farmId,
@@ -98,8 +110,26 @@ describe('ProduceService', () => {
       storage.uploadPublic.mockResolvedValue(imageUrl);
     });
 
+    it('records the listing on create', async () => {
+      farm.findFirst.mockResolvedValue(ownedFarm);
+      produce.create.mockResolvedValue({ id: produceId, ...dto });
+      await service.create(user, dto, imageFile);
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId,
+        category: AuditCategory.LISTING,
+        title: 'Listing created',
+        summary: `${dto.name} on ${farmCode}`,
+        actionLabel: 'View product',
+        resource: AuditResource.PRODUCE,
+        resourceId: expect.any(String),
+      });
+    });
+
     it('starts quantity, actualQuantity and floatingQuantity equal, DRAFT by default', async () => {
-      farm.findFirst.mockResolvedValue({ id: farmId });
+      farm.findFirst.mockResolvedValue(ownedFarm);
       await service.create(user, dto, imageFile);
       expect(farm.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: farmId, ...ownedByUser } }),
@@ -117,7 +147,7 @@ describe('ProduceService', () => {
     });
 
     it('is immediately SOLD_OUT when published with no stock', async () => {
-      farm.findFirst.mockResolvedValue({ id: farmId });
+      farm.findFirst.mockResolvedValue(ownedFarm);
       await service.create(
         user,
         { ...dto, actualQuantity: 0, status: ProduceStatus.PUBLISHED },
@@ -129,7 +159,7 @@ describe('ProduceService', () => {
     });
 
     it('stores the image under the id the row is created with', async () => {
-      farm.findFirst.mockResolvedValue({ id: farmId });
+      farm.findFirst.mockResolvedValue(ownedFarm);
       let key = '';
       storage.uploadPublic.mockImplementation((uploadKey: string) => {
         key = uploadKey;
@@ -300,10 +330,13 @@ describe('ProduceService', () => {
     // 100 on hand, 30 reserved by orders.
     const current = {
       id: produceId,
+      farmId,
+      name: 'Maize',
       actualQuantity: 100,
       floatingQuantity: 70,
       unit: 'kg',
       status: ProduceStatus.PUBLISHED,
+      farm: { farmCode, ownerId: 'farmer-1' },
     };
 
     it('404s on produce the user does not own', async () => {
@@ -313,8 +346,27 @@ describe('ProduceService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(produce.findFirst).toHaveBeenCalledWith({
         where: { id: produceId, farm: ownedByUser },
+        include: { farm: { select: { farmCode: true, ownerId: true } } },
       });
       expect(produce.update).not.toHaveBeenCalled();
+    });
+
+    it('records the listing on update', async () => {
+      produce.findFirst.mockResolvedValue(current);
+      produce.update.mockResolvedValue({ ...current, name: 'New' });
+      await service.update(user, produceId, { name: 'New' });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId,
+        category: AuditCategory.LISTING,
+        title: 'Listing updated',
+        summary: 'New on LF-000001',
+        actionLabel: 'View product',
+        resource: AuditResource.PRODUCE,
+        resourceId: produceId,
+      });
     });
 
     it('leaves quantities untouched when actualQuantity is not sent', async () => {
@@ -413,11 +465,56 @@ describe('ProduceService', () => {
     });
   });
 
-  it('maps a delete blocked by orders to 409', async () => {
-    produce.delete.mockRejectedValue(prismaError('P2003'));
-    await expect(service.remove(user, produceId)).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+  describe('remove', () => {
+    it('records the listing without a deep link', async () => {
+      produce.findFirst.mockResolvedValue({
+        id: produceId,
+        name: 'Maize',
+        farmId,
+        farm: { farmCode, ownerId: 'farmer-1' },
+      });
+      produce.delete.mockResolvedValue({ id: produceId });
+      await service.remove(user, produceId);
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId,
+        category: AuditCategory.LISTING,
+        title: 'Listing removed',
+        summary: 'Maize on LF-000001',
+        actionLabel: null,
+        resource: null,
+        resourceId: null,
+      });
+    });
+
+    it('maps a delete blocked by orders to 409', async () => {
+      produce.findFirst.mockResolvedValue({
+        id: produceId,
+        name: 'Maize',
+        farmId,
+        farm: { farmCode, ownerId: 'farmer-1' },
+      });
+      produce.delete.mockRejectedValue(prismaError('P2003'));
+      await expect(service.remove(user, produceId)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('refuses to delete a listing still in a sourcing selection', async () => {
+      produce.findFirst.mockResolvedValue({
+        id: produceId,
+        name: 'Maize',
+        farmId,
+        farm: { farmCode, ownerId: 'farmer-1' },
+      });
+      sourcingAllocation.count.mockResolvedValue(1);
+      await expect(service.remove(user, produceId)).rejects.toThrow(
+        'Produce is part of a sourcing selection and cannot be deleted',
+      );
+      expect(produce.delete).not.toHaveBeenCalled();
+    });
   });
 
   describe('attachImage', () => {
@@ -427,6 +524,14 @@ describe('ProduceService', () => {
         service.attachImage(user, produceId, imageFile),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(storage.uploadPublic).not.toHaveBeenCalled();
+    });
+
+    it('does not write an audit row', async () => {
+      produce.findFirst.mockResolvedValue({ id: produceId });
+      storage.uploadPublic.mockResolvedValue(imageUrl);
+      produce.update.mockResolvedValue({ id: produceId, imageUrl });
+      await service.attachImage(user, produceId, imageFile);
+      expect(audit.record).not.toHaveBeenCalled();
     });
 
     it('uploads to the public bucket and persists the returned URL', async () => {

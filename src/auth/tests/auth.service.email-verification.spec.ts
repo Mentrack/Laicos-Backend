@@ -4,9 +4,11 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Role } from '../../../generated/client';
+import { BuyerType, Role } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
 import { AuthService } from '../auth.service';
 import { EmailOtpService } from '../email-otp.service';
 import { FirebaseService } from '../firebase/firebase.service';
@@ -33,6 +35,7 @@ const registerDto = {
   firstName: 'Ada',
   lastName: 'Okafor',
   role: Role.BUYER,
+  buyerType: BuyerType.PERSON,
 } as const;
 
 describe('AuthService email verification', () => {
@@ -70,6 +73,8 @@ describe('AuthService email verification', () => {
     {} as ConfigService,
     {} as MailService,
     otp as unknown as EmailOtpService,
+    {} as StorageService,
+    { record: jest.fn() } as unknown as AuditService,
   );
 
   beforeEach(() => {

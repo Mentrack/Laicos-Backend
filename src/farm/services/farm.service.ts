@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   FarmVerificationStatus,
   VerificationTaskStatus,
   type Prisma,
   type User,
 } from '../../../generated/client';
+import { AuditService, type AuditWrite } from '../../audit/audit.service';
 import {
   PaginationQueryDto,
   paginationMeta,
@@ -31,6 +35,7 @@ import {
   type FarmDocumentUploads,
 } from '../../verification/services/farm-documents.service';
 import { CreateFarmDto, UpdateFarmDto } from '../dto';
+import { farmDocumentsSummary } from '../utils/farm-document-summary';
 import {
   FARM_INCLUDE,
   formatFarm,
@@ -55,6 +60,7 @@ export class FarmService {
     private readonly locations: LocationService,
     private readonly assignment: AssignmentService,
     private readonly documents: FarmDocumentsService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Creates the farm and opens its first verification round. */
@@ -82,8 +88,8 @@ export class FarmService {
       await this.documents.uploadAll(farmer.id, id, documents);
     let farm: FarmRow;
     try {
-      const created = await this.database.$transaction((tx) =>
-        this.insertFarm(tx, {
+      const created = await this.database.$transaction(async (tx) => {
+        const result = await this.insertFarm(tx, {
           id,
           ownerId: farmer.id,
           name: dto.name,
@@ -97,8 +103,40 @@ export class FarmService {
           referralAgentId: dto.referralAgentId,
           ownershipDocumentKey,
           chiefConfirmationKey,
-        }),
-      );
+        });
+        const { farm: inserted } = result;
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: farmer.id,
+          agentId: null,
+          farmId: inserted.id,
+          category: AuditCategory.FARM,
+          title: `Farm ${inserted.farmCode} created`,
+          summary: `${inserted.name}, ${inserted.mainProduce}`,
+          actionLabel: 'View farm',
+          resource: AuditResource.FARM,
+          resourceId: inserted.id,
+        });
+        const docSummary = farmDocumentsSummary(
+          ownershipDocumentKey,
+          chiefConfirmationKey,
+        );
+        if (docSummary) {
+          await this.audit.record(tx, {
+            actorType: AuditActorType.FARMER,
+            farmerId: farmer.id,
+            agentId: null,
+            farmId: inserted.id,
+            category: AuditCategory.DOCUMENTS,
+            title: 'Farm documents uploaded',
+            summary: docSummary,
+            actionLabel: 'View farm',
+            resource: AuditResource.FARM,
+            resourceId: inserted.id,
+          });
+        }
+        return result;
+      });
       farm = created.farm;
     } catch (error) {
       await this.storage.deletePrivate(uploaded);
@@ -176,6 +214,9 @@ export class FarmService {
         lgaId: true,
         location: true,
         verificationStatus: true,
+        farmCode: true,
+        name: true,
+        ownerId: true,
       },
     });
     if (!current) {
@@ -217,6 +258,19 @@ export class FarmService {
             }),
           },
         });
+        const name = dto.name ?? current.name;
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: current.ownerId,
+          agentId: null,
+          farmId: id,
+          category: AuditCategory.FARM,
+          title: `Farm ${current.farmCode} updated`,
+          summary: name,
+          actionLabel: 'View farm',
+          resource: AuditResource.FARM,
+          resourceId: id,
+        });
         if (reopen) {
           // A resubmission goes back to the agent who decided the last round,
           // if they still cover the farm's LGA.
@@ -244,8 +298,24 @@ export class FarmService {
     return this.findOne(user, id);
   }
 
-  async replaceDocuments(user: User, id: string, documents: FarmDocuments) {
-    await this.documents.replace(id, farmOwnedBy(user), documents);
+  async replaceDocuments(
+    user: User,
+    id: string,
+    documents: FarmDocumentUploads,
+  ) {
+    const farmer = await this.database.farmer.findUnique({
+      where: { userId: user.id },
+      select: { id: true, idType: true },
+    });
+    if (!farmer) {
+      throw new NotFoundException('Farmer profile not found');
+    }
+    await this.documents.replace(
+      id,
+      farmOwnedBy(user),
+      documents,
+      farmerDocumentEvents(farmer, id, documents),
+    );
     return this.findOne(user, id);
   }
 
@@ -319,6 +389,55 @@ export function mapFarmSaveError(error: unknown): unknown {
     return new ConflictException('Farm is already awaiting verification');
   }
   return error;
+}
+
+function farmerDocumentEvents(
+  farmer: { id: string; idType: string | null | undefined },
+  farmId: string,
+  documents: FarmDocumentUploads,
+): AuditWrite[] {
+  const events: AuditWrite[] = [];
+  if (documents.idDocument) {
+    events.push({
+      actorType: AuditActorType.FARMER,
+      farmerId: farmer.id,
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.DOCUMENTS,
+      title: 'ID document uploaded',
+      summary: farmer.idType ?? 'ID document',
+      actionLabel: 'View profile',
+      resource: AuditResource.FARMER,
+      resourceId: farmer.id,
+    });
+  }
+  const docSummary = farmDocumentsSummary(
+    documents.ownershipDocument ? 'ownership' : null,
+    documents.chiefConfirmation ? 'chief' : null,
+  );
+  if (docSummary) {
+    events.push(farmDocumentEvent(farmer.id, farmId, docSummary));
+  }
+  return events;
+}
+
+function farmDocumentEvent(
+  farmerId: string,
+  farmId: string,
+  summary: string,
+): AuditWrite {
+  return {
+    actorType: AuditActorType.FARMER,
+    farmerId,
+    agentId: null,
+    farmId,
+    category: AuditCategory.DOCUMENTS,
+    title: 'Farm documents uploaded',
+    summary,
+    actionLabel: 'View farm',
+    resource: AuditResource.FARM,
+    resourceId: farmId,
+  };
 }
 
 function mapFarmDeleteError(error: unknown): unknown {

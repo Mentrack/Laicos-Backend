@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { Role } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -25,6 +26,7 @@ describe('AuthService.createLocalUser', () => {
     {} as MailService,
     {} as EmailOtpService,
     {} as StorageService,
+    { record: jest.fn() } as unknown as AuditService,
   );
 
   beforeEach(() => {

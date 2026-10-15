@@ -1,11 +1,15 @@
 import { HttpException } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   OrderStatus,
   Prisma,
   ProduceType,
   Role,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import type { PrismaService } from '../../prisma/prisma.service';
 import type { ChatGateway } from '../chat.gateway';
@@ -86,6 +90,9 @@ describe('ConversationService', () => {
     $queryRaw: jest.fn(),
     message: { create: jest.fn() },
     conversation: { update: jest.fn() },
+    agent: { findUnique: jest.fn() },
+    order: { findUnique: jest.fn() },
+    sourcingRequest: { findUnique: jest.fn(), update: jest.fn() },
   };
   const buyerModel = { findUnique: jest.fn() };
   const database = {
@@ -112,9 +119,11 @@ describe('ConversationService', () => {
     ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
   };
   const chat = { emitToUsers: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new ConversationService(
     database as unknown as PrismaService,
     chat as unknown as ChatGateway,
+    audit as unknown as AuditService,
   );
 
   beforeEach(() => {
@@ -522,6 +531,72 @@ describe('ConversationService', () => {
         status: 409,
         body: { code: 'CLIENT_MESSAGE_ID_REUSED' },
       });
+    });
+
+    it('records an agent message and cuts the body at 120 characters', async () => {
+      tx.agent.findUnique.mockResolvedValue({ id: 'agent-1' });
+      tx.order.findUnique.mockResolvedValue({
+        orderNumber: 'ORD-000001',
+        farmId: 'farm-1',
+      });
+      const body = 'a'.repeat(150);
+      await service.send(agent, conversation.id, {
+        body,
+        clientMessageId: 'msg-1',
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.EXTENSION_AGENT,
+        farmerId: null,
+        agentId: 'agent-1',
+        farmId: 'farm-1',
+        category: AuditCategory.CHAT,
+        title: 'Message sent to buyer',
+        summary: `ORD-000001. ${'a'.repeat(120)}`,
+        actionLabel: 'View chat',
+        resource: AuditResource.CONVERSATION,
+        resourceId: conversation.id,
+        sourcingRequestId: null,
+      });
+    });
+
+    it('a buyer message writes nothing', async () => {
+      await service.send(buyer, conversation.id, {
+        body: 'hello',
+        clientMessageId: 'msg-2',
+      });
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('records a buyer message when the order came from a sourcing request', async () => {
+      tx.order.findUnique
+        .mockResolvedValueOnce({
+          checkout: { sourcingRequestId: 'req-1' },
+        })
+        .mockResolvedValueOnce({ orderNumber: 'ORD-000001' });
+      await service.send(buyer, conversation.id, {
+        body: 'hello',
+        clientMessageId: 'msg-3',
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          actorType: AuditActorType.BUYER,
+          title: 'Message sent to agent',
+          sourcingRequestId: 'req-1',
+        }),
+      );
+    });
+
+    it('a replayed agent message writes nothing', async () => {
+      database.message.findUnique.mockResolvedValue({
+        ...message,
+        senderId: agent.id,
+      });
+      await service.send(agent, conversation.id, {
+        body: 'hello',
+        clientMessageId: 'msg-1',
+      });
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

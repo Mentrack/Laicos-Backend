@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID, MaxLength, ValidateIf } from 'class-validator';
+import { BuyerType } from '../../../generated/client';
 import { LgaDto, StateDto } from '../../location/dto';
 
 export class BuyerDto {
@@ -13,6 +14,24 @@ export class BuyerDto {
 export class BuyerProfileDto extends BuyerDto {
   @ApiProperty({ format: 'uuid' })
   userId: string;
+
+  @ApiProperty({ enum: BuyerType, enumName: 'BuyerType' })
+  buyerType: BuyerType;
+
+  @ApiProperty({ type: String, nullable: true })
+  legalName: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  department: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  contactName: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  contactPhone: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  paymentTerms: string | null;
 
   @ApiProperty({ type: StateDto, nullable: true })
   state: StateDto | null;
@@ -40,4 +59,39 @@ export class UpdateBuyerDto {
   @IsOptional()
   @IsUUID()
   lgaId?: string;
+
+  @ApiPropertyOptional({ enum: BuyerType, enumName: 'BuyerType' })
+  @IsOptional()
+  @IsEnum(BuyerType)
+  buyerType?: BuyerType;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @ValidateIf((dto: UpdateBuyerDto) => dto.legalName !== undefined)
+  @IsString()
+  @MaxLength(200)
+  legalName?: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @ValidateIf((dto: UpdateBuyerDto) => dto.department !== undefined)
+  @IsString()
+  @MaxLength(120)
+  department?: string;
+
+  @ApiPropertyOptional({ maxLength: 120 })
+  @ValidateIf((dto: UpdateBuyerDto) => dto.contactName !== undefined)
+  @IsString()
+  @MaxLength(120)
+  contactName?: string;
+
+  @ApiPropertyOptional({ maxLength: 30 })
+  @ValidateIf((dto: UpdateBuyerDto) => dto.contactPhone !== undefined)
+  @IsString()
+  @MaxLength(30)
+  contactPhone?: string;
+
+  @ApiPropertyOptional({ maxLength: 200 })
+  @ValidateIf((dto: UpdateBuyerDto) => dto.paymentTerms !== undefined)
+  @IsString()
+  @MaxLength(200)
+  paymentTerms?: string;
 }

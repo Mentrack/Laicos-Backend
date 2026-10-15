@@ -1,11 +1,15 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   HandoverStatus,
   OrderStatus,
   Prisma,
   ProduceType,
   type Agent,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -61,6 +65,7 @@ describe('HandoverService', () => {
     findMany: jest.fn(),
     count: jest.fn(),
     findFirst: jest.fn(),
+    findFirstOrThrow: jest.fn(),
     update: jest.fn(),
   };
   const handoverProof = {
@@ -68,7 +73,7 @@ describe('HandoverService', () => {
     findFirst: jest.fn(),
     delete: jest.fn(),
   };
-  const order = { update: jest.fn() };
+  const order = { update: jest.fn(), findUnique: jest.fn() };
   const tx = { orderHandover, order, handoverProof };
   const database = {
     ...tx,
@@ -83,10 +88,25 @@ describe('HandoverService', () => {
       Promise.resolve(`https://signed/${key}`),
     ),
   };
+  const audit = { record: jest.fn() };
   const service = new HandoverService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
+    audit as unknown as AuditService,
   );
+  const handoverAudit = (title: string) => ({
+    actorType: AuditActorType.EXTENSION_AGENT,
+    farmerId: null,
+    agentId: agent.id,
+    farmId: 'farm-1',
+    category: AuditCategory.HANDOVER,
+    title,
+    summary: 'ORD-000001 at LF-000001',
+    actionLabel: 'View order',
+    resource: AuditResource.ORDER,
+    resourceId: orderId,
+    sourcingRequestId: null,
+  });
   const image: StorageUploadFile = {
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0]),
     mimetype: 'image/jpeg',
@@ -97,6 +117,7 @@ describe('HandoverService', () => {
     jest.clearAllMocks();
     orderHandover.findFirst.mockResolvedValue(row());
     orderHandover.update.mockResolvedValue(row());
+    order.update.mockResolvedValue(undefined);
   });
 
   it('lists only the agent’s own handovers', async () => {
@@ -164,6 +185,17 @@ describe('HandoverService', () => {
         NotFoundException,
       );
     });
+
+    it('records the agent', async () => {
+      orderHandover.update.mockResolvedValue(
+        row({ status: HandoverStatus.VERIFIED }),
+      );
+      await service.verify(agent, orderId, {});
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        handoverAudit('Handover verified'),
+      );
+    });
   });
 
   describe('complete', () => {
@@ -214,6 +246,17 @@ describe('HandoverService', () => {
         service.complete(agent, orderId, dto),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it('records the agent', async () => {
+      orderHandover.update.mockResolvedValue(
+        row({ status: HandoverStatus.HANDED_OVER }),
+      );
+      await service.complete(agent, orderId, dto);
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        handoverAudit('Handover completed'),
+      );
+    });
   });
 
   describe('addProof', () => {
@@ -228,6 +271,9 @@ describe('HandoverService', () => {
       storage.uploadPrivateFile.mockResolvedValue(proof.storageKey);
       handoverProof.create.mockResolvedValue(proof);
       orderHandover.findFirst.mockResolvedValue(
+        row({ proofs: [proof], status: HandoverStatus.PENDING }),
+      );
+      orderHandover.findFirstOrThrow.mockResolvedValue(
         row({ proofs: [proof], status: HandoverStatus.PENDING }),
       );
     });
@@ -288,6 +334,14 @@ describe('HandoverService', () => {
       );
       expect(storage.deletePrivate).toHaveBeenCalledWith([proof.storageKey]);
     });
+
+    it('records the agent', async () => {
+      await service.addProof(agent, orderId, image);
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        handoverAudit('Handover proof added'),
+      );
+    });
   });
 
   describe('removeProof', () => {
@@ -334,6 +388,14 @@ describe('HandoverService', () => {
         'Proof cannot be removed after handover; this one is HANDED_OVER',
       );
       expect(handoverProof.delete).not.toHaveBeenCalled();
+    });
+
+    it('does not record an audit row', async () => {
+      handoverProof.findFirst.mockResolvedValue(proof);
+      handoverProof.delete.mockResolvedValue(proof);
+      orderHandover.findFirst.mockResolvedValue(row());
+      await service.removeProof(agent, orderId, proofId);
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 });

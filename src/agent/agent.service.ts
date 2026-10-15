@@ -4,7 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma, User } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  type Prisma,
+  type User,
+} from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { formatIdentity, replaceIdDocument } from '../common/identity';
 import { farmInAgentCluster } from '../common/ownership';
 import {
@@ -53,6 +60,7 @@ export class AgentService {
     private readonly database: PrismaService,
     private readonly storage: StorageService,
     private readonly locations: LocationService,
+    private readonly audit: AuditService,
   ) {}
 
   async findMine(user: User): Promise<AgentProfileDto> {
@@ -105,9 +113,26 @@ export class AgentService {
         cluster: { update: { name: clusterName(lga.name) } },
       };
     }
-    await this.database.agent.update({
-      where: { id: agent.id },
-      data: { idType: dto.idType, idNumber: dto.idNumber, ...location },
+    const summary = agentProfileUpdateSummary(dto);
+    await this.database.$transaction(async (tx) => {
+      await tx.agent.update({
+        where: { id: agent.id },
+        data: { idType: dto.idType, idNumber: dto.idNumber, ...location },
+      });
+      if (summary) {
+        await this.audit.record(tx, {
+          actorType: AuditActorType.EXTENSION_AGENT,
+          farmerId: null,
+          agentId: agent.id,
+          farmId: null,
+          category: AuditCategory.PROFILE,
+          title: 'Profile updated',
+          summary,
+          actionLabel: 'View profile',
+          resource: AuditResource.AGENT,
+          resourceId: agent.id,
+        });
+      }
     });
     return this.findMine(user);
   }
@@ -119,11 +144,26 @@ export class AgentService {
       `agents/${agent.id}/id`,
       file,
       agent.idDocumentKey,
-      (idDocumentKey) =>
-        this.database.agent.update({
-          where: { id: agent.id },
-          data: { idDocumentKey },
-        }),
+      async (idDocumentKey) => {
+        await this.database.$transaction(async (tx) => {
+          await tx.agent.update({
+            where: { id: agent.id },
+            data: { idDocumentKey },
+          });
+          await this.audit.record(tx, {
+            actorType: AuditActorType.EXTENSION_AGENT,
+            farmerId: null,
+            agentId: agent.id,
+            farmId: null,
+            category: AuditCategory.DOCUMENTS,
+            title: 'ID document uploaded',
+            summary: agent.idType ?? 'ID document',
+            actionLabel: 'View profile',
+            resource: AuditResource.AGENT,
+            resourceId: agent.id,
+          });
+        });
+      },
     );
     return this.findMine(user);
   }
@@ -251,4 +291,19 @@ export class AgentService {
     }
     return agent;
   }
+}
+
+function agentProfileUpdateSummary(dto: UpdateAgentDto): string | null {
+  const hasLocation = dto.stateId !== undefined || dto.lgaId !== undefined;
+  const hasId = dto.idType !== undefined || dto.idNumber !== undefined;
+  if (!hasLocation && !hasId) {
+    return null;
+  }
+  if (hasLocation && hasId) {
+    return 'Location and ID details';
+  }
+  if (hasLocation) {
+    return 'Location';
+  }
+  return 'ID details';
 }

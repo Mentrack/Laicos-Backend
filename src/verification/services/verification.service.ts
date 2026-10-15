@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   EvidenceKind,
   FarmerStatus,
   FarmVerificationStatus,
@@ -13,6 +16,8 @@ import {
   type Agent,
   type VerificationCheckKey,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
+import { verificationDocumentsSummary } from '../../farm/utils/farm-document-summary';
 import { paginationMeta, resolvePagination } from '../../common/pagination';
 import {
   IMAGE_SIGNATURES,
@@ -74,6 +79,7 @@ export class VerificationService {
     private readonly assignment: AssignmentService,
     private readonly activation: FarmerActivationService,
     private readonly documents: FarmDocumentsService,
+    private readonly audit: AuditService,
   ) {}
 
   async findAll(agent: Agent, query: VerificationQueryDto) {
@@ -123,7 +129,20 @@ export class VerificationService {
           discrepancyLng: dto.longitude ?? null,
           discrepancyNote: dto.note ?? null,
         };
-    await this.database.$transaction((tx) => this.record(tx, agent, id, data));
+    await this.database.$transaction(async (tx) => {
+      const round = await this.record(tx, agent, id, data);
+      const farm = await tx.farm.findUniqueOrThrow({
+        where: { id: round.farmId },
+        select: { farmCode: true },
+      });
+      await this.auditVerificationRound(
+        tx,
+        agent,
+        round.farmId,
+        'Verification location saved',
+        farm.farmCode,
+      );
+    });
     return this.findOne(agent, id);
   }
 
@@ -138,12 +157,23 @@ export class VerificationService {
     }
     const values = { result: dto.result, note: dto.note ?? null };
     await this.database.$transaction(async (tx) => {
-      await this.record(tx, agent, id, {});
+      const round = await this.record(tx, agent, id, {});
       await tx.verificationCheck.upsert({
         where: { verificationId_key: { verificationId: id, key } },
         create: { verificationId: id, key, ...values },
         update: values,
       });
+      const farm = await tx.farm.findUniqueOrThrow({
+        where: { id: round.farmId },
+        select: { farmCode: true },
+      });
+      await this.auditVerificationRound(
+        tx,
+        agent,
+        round.farmId,
+        'Verification check saved',
+        `${key} on ${farm.farmCode}`,
+      );
     });
     return this.findOne(agent, id);
   }
@@ -184,7 +214,18 @@ export class VerificationService {
     let replaced: string[];
     try {
       replaced = await this.database.$transaction(async (tx) => {
-        await this.record(tx, agent, id, {});
+        const round = await this.record(tx, agent, id, {});
+        const farm = await tx.farm.findUniqueOrThrow({
+          where: { id: round.farmId },
+          select: { farmCode: true },
+        });
+        await this.auditVerificationRound(
+          tx,
+          agent,
+          round.farmId,
+          'Verification evidence saved',
+          farm.farmCode,
+        );
         if (dto.document) {
           const current = await tx.farmVerification.findUnique({
             where: { id },
@@ -237,6 +278,10 @@ export class VerificationService {
     uploads: FarmDocumentUploads,
   ) {
     const { farmId } = await this.requireOpen(this.database, agent, id);
+    const farm = await this.database.farm.findUniqueOrThrow({
+      where: { id: farmId },
+      select: { farmCode: true },
+    });
     await this.documents.replace(
       farmId,
       {
@@ -249,6 +294,20 @@ export class VerificationService {
         },
       },
       uploads,
+      [
+        {
+          actorType: AuditActorType.EXTENSION_AGENT,
+          farmerId: null,
+          agentId: agent.id,
+          farmId,
+          category: AuditCategory.VERIFICATION,
+          title: 'Verification documents saved',
+          summary: verificationDocumentsSummary(farm.farmCode, uploads),
+          actionLabel: 'View farm',
+          resource: AuditResource.FARM,
+          resourceId: farmId,
+        },
+      ],
     );
     return this.findOne(agent, id);
   }
@@ -273,13 +332,20 @@ export class VerificationService {
   /** Hands the round to the next eligible agent; this one is never re-picked. */
   async decline(agent: Agent, id: string, dto: VerificationReasonDto) {
     const keys = await this.database.$transaction(async (tx) => {
-      await this.transition(tx, agent, id, {
+      const { farmId } = await this.transition(tx, agent, id, {
         status: VerificationTaskStatus.UNASSIGNED,
         agentId: null,
       });
       await tx.assignmentDecline.create({
         data: { verificationId: id, agentId: agent.id, reason: dto.reason },
       });
+      await this.auditVerificationRound(
+        tx,
+        agent,
+        farmId,
+        'Verification declined',
+        dto.reason,
+      );
       const deleted = await this.assignment.resetRound(tx, id);
       await this.assignment.assign(tx, id);
       return deleted;
@@ -313,6 +379,17 @@ export class VerificationService {
         status: VerificationTaskStatus.APPROVED,
         decidedAt: new Date(),
       });
+      const verifiedFarm = await tx.farm.findUniqueOrThrow({
+        where: { id: farmId },
+        select: { farmCode: true, name: true },
+      });
+      await this.auditVerificationRound(
+        tx,
+        agent,
+        farmId,
+        `Farm ${verifiedFarm.farmCode} verified`,
+        verifiedFarm.name,
+      );
       const cluster = await tx.cluster.findUniqueOrThrow({
         where: { agentId: agent.id },
         select: { id: true },
@@ -354,6 +431,17 @@ export class VerificationService {
         rejectionReason: dto.reason,
         decidedAt: new Date(),
       });
+      const rejectedFarm = await tx.farm.findUniqueOrThrow({
+        where: { id: farmId },
+        select: { farmCode: true },
+      });
+      await this.auditVerificationRound(
+        tx,
+        agent,
+        farmId,
+        `Farm ${rejectedFarm.farmCode} rejected`,
+        dto.reason,
+      );
       return tx.farm.update({
         where: { id: farmId },
         data: {
@@ -426,5 +514,27 @@ export class VerificationService {
         data: { startedAt: new Date() },
       });
     }
+    return round;
+  }
+
+  private async auditVerificationRound(
+    tx: Tx,
+    agent: Agent,
+    farmId: string,
+    title: string,
+    summary: string,
+  ) {
+    await this.audit.record(tx, {
+      actorType: AuditActorType.EXTENSION_AGENT,
+      farmerId: null,
+      agentId: agent.id,
+      farmId,
+      category: AuditCategory.VERIFICATION,
+      title,
+      summary,
+      actionLabel: 'View farm',
+      resource: AuditResource.FARM,
+      resourceId: farmId,
+    });
   }
 }

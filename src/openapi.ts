@@ -64,7 +64,7 @@ export function buildOpenApiDocument(
     )
     .addTag(
       'Sourcing Requests',
-      'A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts UNDER_REVIEW.',
+      'A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts NEW. Admins match them from /admin/sourcing-requests.',
     )
     .addTag(
       'Agents',

@@ -4,19 +4,30 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   HandoverStatus,
+  IdType,
   ProduceType,
   Role,
   VerificationTaskStatus,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import type { StorageUploadFile } from '../../common/upload-pipes';
 import { AgentService } from '../agent.service';
 import { AgentTaskType } from '../dto';
 
 const user = { id: 'user-1', role: Role.EXTENSION_AGENT } as User;
+const pdf: StorageUploadFile = {
+  buffer: Buffer.from('%PDF-1.4'),
+  mimetype: 'application/pdf',
+  size: 8,
+};
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -44,24 +55,36 @@ describe('AgentService', () => {
   const farmer = { findMany: jest.fn(), count: jest.fn() };
   const farmVerification = { findMany: jest.fn() };
   const orderHandover = { findMany: jest.fn() };
+  const audit = { record: jest.fn() };
+  const tx = { agent };
   const database = {
     agent,
     farm,
     farmer,
     farmVerification,
     orderHandover,
-    $transaction: (queries: Promise<unknown>[]) => Promise.all(queries),
+    $transaction: (
+      arg: Promise<unknown>[] | ((client: typeof tx) => Promise<unknown>),
+    ) => {
+      if (typeof arg === 'function') {
+        return arg(tx);
+      }
+      return Promise.all(arg);
+    },
   };
   const storage = {
     presignedUrlOrNull: jest.fn((key: string | null) =>
       Promise.resolve(key && `https://signed/${key}`),
     ),
+    uploadPrivateFile: jest.fn(),
+    deletePrivate: jest.fn(),
   };
   const locations = { requireLga: jest.fn() };
   const service = new AgentService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
     locations as unknown as LocationService,
+    audit as unknown as AuditService,
   );
 
   beforeEach(() => {
@@ -116,6 +139,84 @@ describe('AgentService', () => {
     expect(agent.update).toHaveBeenCalledWith({
       where: { id: 'agent-1' },
       data: { idType: undefined, idNumber: '123' },
+    });
+  });
+
+  describe('audit on updateMine', () => {
+    it('records Location when state or LGA changes', async () => {
+      await service.updateMine(user, { stateId: 'state-1', lgaId: 'lga-2' });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.EXTENSION_AGENT,
+        farmerId: null,
+        agentId: 'agent-1',
+        farmId: null,
+        category: AuditCategory.PROFILE,
+        title: 'Profile updated',
+        summary: 'Location',
+        actionLabel: 'View profile',
+        resource: AuditResource.AGENT,
+        resourceId: 'agent-1',
+      });
+    });
+
+    it('records ID details when only identity fields change', async () => {
+      await service.updateMine(user, { idType: IdType.NIN });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.EXTENSION_AGENT,
+        farmerId: null,
+        agentId: 'agent-1',
+        farmId: null,
+        category: AuditCategory.PROFILE,
+        title: 'Profile updated',
+        summary: 'ID details',
+        actionLabel: 'View profile',
+        resource: AuditResource.AGENT,
+        resourceId: 'agent-1',
+      });
+    });
+
+    it('joins Location and ID details when both change', async () => {
+      await service.updateMine(user, {
+        lgaId: 'lga-2',
+        idType: IdType.NIN,
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.EXTENSION_AGENT,
+        farmerId: null,
+        agentId: 'agent-1',
+        farmId: null,
+        category: AuditCategory.PROFILE,
+        title: 'Profile updated',
+        summary: 'Location and ID details',
+        actionLabel: 'View profile',
+        resource: AuditResource.AGENT,
+        resourceId: 'agent-1',
+      });
+    });
+
+    it('records nothing when no auditable fields were sent', async () => {
+      await service.updateMine(user, {});
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  it('records an ID upload with the document type', async () => {
+    agent.findUnique.mockResolvedValue(
+      row({ idType: IdType.NIN, idDocumentKey: 'agents/agent-1/id/old.pdf' }),
+    );
+    storage.uploadPrivateFile.mockResolvedValue('agents/agent-1/id/new.pdf');
+    await service.uploadIdDocument(user, pdf);
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.EXTENSION_AGENT,
+      farmerId: null,
+      agentId: 'agent-1',
+      farmId: null,
+      category: AuditCategory.DOCUMENTS,
+      title: 'ID document uploaded',
+      summary: 'NIN',
+      actionLabel: 'View profile',
+      resource: AuditResource.AGENT,
+      resourceId: 'agent-1',
     });
   });
 

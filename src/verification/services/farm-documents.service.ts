@@ -10,6 +10,7 @@ import {
   DOCUMENT_SIGNATURES,
   type StorageUploadFile,
 } from '../../common/upload-pipes';
+import { AuditService, type AuditWrite } from '../../audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { refreshFarmEvidenceStatus } from '../utils/evidence-status';
@@ -41,6 +42,7 @@ export class FarmDocumentsService {
   constructor(
     private readonly database: PrismaService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Uploads what is given; a failure part-way deletes what it stored. */
@@ -93,6 +95,7 @@ export class FarmDocumentsService {
     farmId: string,
     scope: Prisma.FarmWhereInput,
     documents: FarmDocumentUploads,
+    events: AuditWrite[],
   ): Promise<void> {
     if (
       !documents.idDocument &&
@@ -148,6 +151,9 @@ export class FarmDocumentsService {
           });
         }
         await refreshFarmEvidenceStatus(tx, farmId);
+        for (const event of events) {
+          await this.audit.record(tx, event);
+        }
       });
     } catch (error) {
       await this.storage.deletePrivate(uploaded);

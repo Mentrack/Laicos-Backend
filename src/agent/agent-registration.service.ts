@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Role } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  Role,
+} from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import type { CreateLocalUserDto } from '../auth/dto';
 import { FirebaseService } from '../auth/firebase/firebase.service';
@@ -10,6 +16,7 @@ import {
   type StorageUploadFile,
 } from '../common/upload-pipes';
 import { LocationService } from '../location/location.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { AgentService } from './agent.service';
 import type {
@@ -45,6 +52,8 @@ export class AgentRegistrationService {
     private readonly firebase: FirebaseService,
     private readonly locations: LocationService,
     private readonly agents: AgentService,
+    private readonly database: PrismaService,
+    private readonly audit: AuditService,
   ) {}
 
   async signUp(dto: AgentSignupDto, idDocument: StorageUploadFile) {
@@ -110,19 +119,42 @@ export class AgentRegistrationService {
         input.idDocument,
         DOCUMENT_SIGNATURES,
       );
-      user = await this.auth.createLocalUser({
-        firebaseUid: input.account.uid,
-        ...input.user,
-        role: Role.EXTENSION_AGENT,
-        agent: {
-          id: agentId,
-          state: { connect: { id: input.stateId } },
-          lga: { connect: { id: input.lgaId } },
-          idType: input.identity.idType,
-          idNumber: input.identity.idNumber,
-          idDocumentKey,
-          cluster: { create: { name: clusterName(lga.name) } },
-        },
+      user = await this.database.$transaction(async (tx) => {
+        const created = await this.auth.createLocalUser(
+          {
+            firebaseUid: input.account.uid,
+            ...input.user,
+            role: Role.EXTENSION_AGENT,
+            agent: {
+              id: agentId,
+              state: { connect: { id: input.stateId } },
+              lga: { connect: { id: input.lgaId } },
+              idType: input.identity.idType,
+              idNumber: input.identity.idNumber,
+              idDocumentKey,
+              cluster: { create: { name: clusterName(lga.name) } },
+            },
+          },
+          tx,
+        );
+        const agent = await tx.agent.findUniqueOrThrow({
+          where: { id: agentId },
+          select: { id: true, agentId: true },
+        });
+        const fullName = `${input.user.firstName} ${input.user.lastName}`;
+        await this.audit.record(tx, {
+          actorType: AuditActorType.EXTENSION_AGENT,
+          farmerId: null,
+          agentId: agent.id,
+          farmId: null,
+          category: AuditCategory.APPLICATION,
+          title: 'Account created',
+          summary: `${fullName} (${agent.agentId})`,
+          actionLabel: 'View profile',
+          resource: AuditResource.AGENT,
+          resourceId: agent.id,
+        });
+        return created;
       });
     } catch (error) {
       await this.storage.deletePrivate([idDocumentKey]);

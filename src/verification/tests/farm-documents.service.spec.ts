@@ -3,7 +3,15 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { FarmVerificationStatus, Prisma } from '../../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  FarmVerificationStatus,
+  Prisma,
+} from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
+import type { AuditWrite } from '../../audit/audit.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -42,10 +50,36 @@ describe('FarmDocumentsService', () => {
       callback(tx),
   };
   const storage = { uploadPrivateFile: jest.fn(), deletePrivate: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new FarmDocumentsService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
+    audit as unknown as AuditService,
   );
+  const idRow: AuditWrite = {
+    actorType: AuditActorType.FARMER,
+    farmerId: 'farmer-1',
+    agentId: null,
+    farmId: null,
+    category: AuditCategory.DOCUMENTS,
+    title: 'ID document uploaded',
+    summary: 'NIN',
+    actionLabel: 'View profile',
+    resource: AuditResource.FARMER,
+    resourceId: 'farmer-1',
+  };
+  const ownershipRow: AuditWrite = {
+    actorType: AuditActorType.FARMER,
+    farmerId: 'farmer-1',
+    agentId: null,
+    farmId: 'farm-1',
+    category: AuditCategory.DOCUMENTS,
+    title: 'Farm documents uploaded',
+    summary: 'ownership',
+    actionLabel: 'View farm',
+    resource: AuditResource.FARM,
+    resourceId: 'farm-1',
+  };
   const notVerified = {
     id: farmId,
     verificationStatus: { not: FarmVerificationStatus.VERIFIED },
@@ -92,7 +126,7 @@ describe('FarmDocumentsService', () => {
 
   describe('replace', () => {
     it('stores the new farm file, then deletes only the one it replaced', async () => {
-      await service.replace(farmId, scope, { ownershipDocument: pdf });
+      await service.replace(farmId, scope, { ownershipDocument: pdf }, []);
       expect(farm.update).toHaveBeenCalledWith({
         where: notVerified,
         data: { ownershipDocumentKey: 'farms/farm-1/ownership/x.pdf' },
@@ -106,7 +140,7 @@ describe('FarmDocumentsService', () => {
     });
 
     it('replaces the farmer’s ID document on the farm’s owner', async () => {
-      await service.replace(farmId, scope, { idDocument: pdf });
+      await service.replace(farmId, scope, { idDocument: pdf }, []);
       expect(farmer.update).toHaveBeenCalledWith({
         where: { id: 'farmer-1' },
         data: { idDocumentKey: 'farmers/farmer-1/id/x.pdf' },
@@ -119,16 +153,16 @@ describe('FarmDocumentsService', () => {
     });
 
     it('needs at least one file', async () => {
-      await expect(service.replace(farmId, scope, {})).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        service.replace(farmId, scope, {}, []),
+      ).rejects.toBeInstanceOf(BadRequestException);
       expect(farm.findFirst).not.toHaveBeenCalled();
     });
 
     it('404s a farm outside the scope', async () => {
       farm.findFirst.mockResolvedValue(null);
       await expect(
-        service.replace(farmId, scope, { ownershipDocument: pdf }),
+        service.replace(farmId, scope, { ownershipDocument: pdf }, []),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(storage.uploadPrivateFile).not.toHaveBeenCalled();
     });
@@ -138,7 +172,7 @@ describe('FarmDocumentsService', () => {
         stored({ verificationStatus: FarmVerificationStatus.VERIFIED }),
       );
       await expect(
-        service.replace(farmId, scope, { ownershipDocument: pdf }),
+        service.replace(farmId, scope, { ownershipDocument: pdf }, []),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(storage.uploadPrivateFile).not.toHaveBeenCalled();
     });
@@ -151,11 +185,21 @@ describe('FarmDocumentsService', () => {
         }),
       );
       await expect(
-        service.replace(farmId, scope, { chiefConfirmation: pdf }),
+        service.replace(farmId, scope, { chiefConfirmation: pdf }, []),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(storage.deletePrivate).toHaveBeenCalledWith([
         'farms/farm-1/chief-confirmation/x.pdf',
       ]);
+    });
+
+    it('writes the farmer rows it was given', async () => {
+      const events = [idRow, ownershipRow];
+      const docs = { idDocument: pdf, ownershipDocument: pdf };
+      await service.replace(farmId, { ownerId: 'farmer-1' }, docs, events);
+      expect(audit.record).toHaveBeenCalledTimes(2);
+      for (const event of events) {
+        expect(audit.record).toHaveBeenCalledWith(tx, event);
+      }
     });
   });
 });

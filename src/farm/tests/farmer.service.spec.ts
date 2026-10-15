@@ -1,5 +1,13 @@
 import { NotFoundException } from '@nestjs/common';
-import { IdType, Role, type User } from '../../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  IdType,
+  Role,
+  type User,
+} from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
@@ -30,12 +38,19 @@ describe('FarmerService', () => {
     update: jest.fn(),
   };
   const farm = { findMany: jest.fn().mockResolvedValue([]) };
+  const audit = { record: jest.fn() };
+  const tx = { farmer };
   const database = {
     farmer,
     farm,
     farmVerification: { update: jest.fn() },
-    $transaction: jest.fn((queries: Promise<unknown>[]) =>
-      Promise.all(queries),
+    $transaction: jest.fn(
+      (arg: Promise<unknown>[] | ((client: typeof tx) => Promise<unknown>)) => {
+        if (typeof arg === 'function') {
+          return arg(tx);
+        }
+        return Promise.all(arg);
+      },
     ),
   };
   const storage = {
@@ -48,6 +63,7 @@ describe('FarmerService', () => {
   const service = new FarmerService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
+    audit as unknown as AuditService,
   );
 
   beforeEach(() => jest.clearAllMocks());
@@ -110,6 +126,42 @@ describe('FarmerService', () => {
     await expect(service.findOne('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('records ID details when identity fields change', async () => {
+    farmer.findUnique.mockResolvedValue(row);
+    farmer.update.mockResolvedValue(row);
+    await service.updateMine(user, { idType: IdType.NIN, idNumber: '99' });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: row.id,
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.PROFILE,
+      title: 'Profile updated',
+      summary: 'ID details',
+      actionLabel: 'View profile',
+      resource: AuditResource.FARMER,
+      resourceId: row.id,
+    });
+  });
+
+  it('records an ID upload with the document type', async () => {
+    farmer.findUnique.mockResolvedValue(row);
+    storage.uploadPrivateFile.mockResolvedValue('farmers/farmer-1/id/new.pdf');
+    await service.uploadIdDocument(user, pdf);
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: row.id,
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.DOCUMENTS,
+      title: 'ID document uploaded',
+      summary: 'NIN',
+      actionLabel: 'View profile',
+      resource: AuditResource.FARMER,
+      resourceId: row.id,
+    });
   });
 
   it('returns a page with metaData', async () => {

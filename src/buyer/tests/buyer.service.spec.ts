@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { Role, type User } from '../../../generated/client';
+import { BuyerType, Role, type User } from '../../../generated/client';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BuyerService } from '../buyer.service';
@@ -18,6 +18,12 @@ function row(overrides: Record<string, unknown> = {}) {
     lga: null,
     createdAt: created,
     updatedAt: created,
+    buyerType: BuyerType.PERSON,
+    legalName: null,
+    department: null,
+    contactName: null,
+    contactPhone: null,
+    paymentTerms: null,
     ...overrides,
   };
 }
@@ -50,6 +56,12 @@ describe('BuyerService', () => {
       lga: null,
       createdAt: created,
       updatedAt: created,
+      buyerType: BuyerType.PERSON,
+      legalName: null,
+      department: null,
+      contactName: null,
+      contactPhone: null,
+      paymentTerms: null,
     });
   });
 

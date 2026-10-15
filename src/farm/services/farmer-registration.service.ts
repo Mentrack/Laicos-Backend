@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Role, type Prisma } from '../../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  Role,
+  type Prisma,
+} from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { AuthService } from '../../auth/auth.service';
 import type { CreateLocalUserDto } from '../../auth/dto';
 import { FirebaseService } from '../../auth/firebase/firebase.service';
@@ -20,6 +27,7 @@ import type {
 } from '../dto';
 import { formatFarm } from '../formatters/farm.formatter';
 import { toFarmerDto } from '../formatters/farmer.formatter';
+import { farmDocumentsSummary } from '../utils/farm-document-summary';
 import { FarmService, mapFarmSaveError } from './farm.service';
 
 export interface FarmerRegistration {
@@ -61,6 +69,7 @@ export class FarmerRegistrationService {
     private readonly farms: FarmService,
     private readonly documents: FarmDocumentsService,
     private readonly locations: LocationService,
+    private readonly audit: AuditService,
   ) {}
 
   async signUp(dto: FarmerSignupDto, documents: FarmDocumentUploads) {
@@ -152,6 +161,77 @@ export class FarmerRegistrationService {
           } satisfies Prisma.FarmUncheckedCreateInput,
           input.preferredAgentId,
         );
+        const fullName = `${input.user.firstName} ${input.user.lastName}`;
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: farmer.id,
+          agentId: null,
+          farmId: null,
+          category: AuditCategory.APPLICATION,
+          title: 'Account created',
+          summary: `${fullName} (${farmer.farmerId})`,
+          actionLabel: 'View profile',
+          resource: AuditResource.FARMER,
+          resourceId: farmer.id,
+        });
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: farmer.id,
+          agentId: null,
+          farmId: farm.id,
+          category: AuditCategory.FARM,
+          title: `Farm ${farm.farmCode} created`,
+          summary: `${farm.name}, ${farm.mainProduce}`,
+          actionLabel: 'View farm',
+          resource: AuditResource.FARM,
+          resourceId: farm.id,
+        });
+        if (stored.idDocumentKey) {
+          await this.audit.record(tx, {
+            actorType: AuditActorType.FARMER,
+            farmerId: farmer.id,
+            agentId: null,
+            farmId: null,
+            category: AuditCategory.DOCUMENTS,
+            title: 'ID document uploaded',
+            summary: input.identity?.idType ?? 'ID document',
+            actionLabel: 'View profile',
+            resource: AuditResource.FARMER,
+            resourceId: farmer.id,
+          });
+        }
+        const farmDocSummary = farmDocumentsSummary(
+          stored.ownershipDocumentKey,
+          stored.chiefConfirmationKey,
+        );
+        if (farmDocSummary) {
+          await this.audit.record(tx, {
+            actorType: AuditActorType.FARMER,
+            farmerId: farmer.id,
+            agentId: null,
+            farmId: farm.id,
+            category: AuditCategory.DOCUMENTS,
+            title: 'Farm documents uploaded',
+            summary: farmDocSummary,
+            actionLabel: 'View farm',
+            resource: AuditResource.FARM,
+            resourceId: farm.id,
+          });
+        }
+        if (input.preferredAgentId) {
+          await this.audit.record(tx, {
+            actorType: AuditActorType.EXTENSION_AGENT,
+            farmerId: null,
+            agentId: input.preferredAgentId,
+            farmId: farm.id,
+            category: AuditCategory.ONBOARDING,
+            title: 'Farmer onboarded',
+            summary: `${fullName}, ${farm.farmCode}`,
+            actionLabel: 'View farm',
+            resource: AuditResource.FARM,
+            resourceId: farm.id,
+          });
+        }
         return { user, farmer, farm, verificationId };
       });
       return {

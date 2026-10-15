@@ -5,7 +5,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { Prisma, ProduceStatus, Role, type User } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  Prisma,
+  ProduceStatus,
+  Role,
+  type User,
+} from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { farmOwnedBy } from '../common/ownership';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import {
@@ -31,12 +40,13 @@ export class ProduceService {
   constructor(
     private readonly database: PrismaService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async create(user: User, dto: CreateProduceDto, file: StorageUploadFile) {
     const farm = await this.database.farm.findFirst({
       where: { id: dto.farmId, ...farmOwnedBy(user) },
-      select: { id: true },
+      select: { id: true, farmCode: true, ownerId: true },
     });
     if (!farm) {
       throw new NotFoundException('Farm not found');
@@ -55,15 +65,30 @@ export class ProduceService {
     // orphaned rather than the listing photo-less.
     const id = randomUUID();
     const imageUrl = await this.uploadImage(id, file);
-    return this.database.produce.create({
-      data: {
-        ...dto,
-        id,
-        quantity: actualQuantity,
-        floatingQuantity: actualQuantity,
-        status,
-        imageUrl,
-      },
+    return this.database.$transaction(async (tx) => {
+      const listing = await tx.produce.create({
+        data: {
+          ...dto,
+          id,
+          quantity: actualQuantity,
+          floatingQuantity: actualQuantity,
+          status,
+          imageUrl,
+        },
+      });
+      await this.audit.record(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: farm.ownerId,
+        agentId: null,
+        farmId: dto.farmId,
+        category: AuditCategory.LISTING,
+        title: 'Listing created',
+        summary: `${dto.name} on ${farm.farmCode}`,
+        actionLabel: 'View product',
+        resource: AuditResource.PRODUCE,
+        resourceId: id,
+      });
+      return listing;
     });
   }
 
@@ -141,6 +166,7 @@ export class ProduceService {
   async update(user: User, id: string, dto: UpdateProduceDto) {
     const current = await this.database.produce.findFirst({
       where: { id, farm: farmOwnedBy(user) },
+      include: { farm: { select: { farmCode: true, ownerId: true } } },
     });
     if (!current) {
       throw new NotFoundException('Produce not found');
@@ -169,13 +195,29 @@ export class ProduceService {
     try {
       // Guarding on the values just read makes a concurrent order or
       // confirmation fail this write instead of skewing the stock.
-      return await this.database.produce.update({
-        where: {
-          id,
-          actualQuantity: current.actualQuantity,
-          floatingQuantity: current.floatingQuantity,
-        },
-        data: { ...dto, actualQuantity, floatingQuantity, status },
+      return await this.database.$transaction(async (tx) => {
+        const updated = await tx.produce.update({
+          where: {
+            id,
+            actualQuantity: current.actualQuantity,
+            floatingQuantity: current.floatingQuantity,
+          },
+          data: { ...dto, actualQuantity, floatingQuantity, status },
+        });
+        const name = dto.name ?? current.name;
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: current.farm.ownerId,
+          agentId: null,
+          farmId: current.farmId,
+          category: AuditCategory.LISTING,
+          title: 'Listing updated',
+          summary: `${name} on ${current.farm.farmCode}`,
+          actionLabel: 'View product',
+          resource: AuditResource.PRODUCE,
+          resourceId: id,
+        });
+        return updated;
       });
     } catch (error) {
       if (isRecordNotFound(error)) {
@@ -186,9 +228,43 @@ export class ProduceService {
   }
 
   async remove(user: User, id: string) {
+    const current = await this.database.produce.findFirst({
+      where: { id, farm: farmOwnedBy(user) },
+      select: {
+        name: true,
+        farmId: true,
+        farm: { select: { farmCode: true, ownerId: true } },
+      },
+    });
+    if (!current) {
+      throw new NotFoundException('Produce not found');
+    }
     try {
-      return await this.database.produce.delete({
-        where: { id, farm: farmOwnedBy(user) },
+      return await this.database.$transaction(async (tx) => {
+        const selected = await tx.sourcingAllocation.count({
+          where: { produceId: id },
+        });
+        if (selected > 0) {
+          throw new ConflictException(
+            'Produce is part of a sourcing selection and cannot be deleted',
+          );
+        }
+        const deleted = await tx.produce.delete({
+          where: { id, farm: farmOwnedBy(user) },
+        });
+        await this.audit.record(tx, {
+          actorType: AuditActorType.FARMER,
+          farmerId: current.farm.ownerId,
+          agentId: null,
+          farmId: current.farmId,
+          category: AuditCategory.LISTING,
+          title: 'Listing removed',
+          summary: `${current.name} on ${current.farm.farmCode}`,
+          actionLabel: null,
+          resource: null,
+          resourceId: null,
+        });
+        return deleted;
       });
     } catch (error) {
       throw mapProduceWriteError(error);

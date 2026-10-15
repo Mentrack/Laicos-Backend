@@ -4,12 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   OrderStatus,
   Prisma,
   Role,
   type Order,
   type User,
 } from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { requireBuyer } from '../buyer/utils/require-buyer';
 import { formatCheckout } from '../cart/formatters/checkout.formatter';
 import { lockCart } from '../cart/utils/cart-lock';
@@ -27,6 +31,10 @@ import {
   busyAsConflict,
 } from '../payment/utils/checkout-transaction';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  sourcingRequestIdForOrder,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
 import { orderLine, releaseStock, reserveProduce } from './utils/reservation';
 import {
@@ -79,6 +87,7 @@ export class OrderService {
   constructor(
     private readonly database: PrismaService,
     private readonly config: CheckoutConfig,
+    private readonly audit: AuditService,
   ) {}
 
   /** Buy Now: a one-line checkout that leaves the cart alone. */
@@ -215,6 +224,15 @@ export class OrderService {
             }),
           },
         });
+        await this.recordFarmerOrder(
+          tx,
+          user,
+          order,
+          `Order ${order.orderNumber} confirmed`,
+          undefined,
+          undefined,
+          true,
+        );
         return confirmed;
       });
     } catch (error) {
@@ -230,9 +248,21 @@ export class OrderService {
       );
     }
     try {
-      return await this.database.order.update({
-        where: { id, status: OrderStatus.CONFIRMED },
-        data: { status: OrderStatus.PREPARING, checklist: { create: {} } },
+      return await this.database.$transaction(async (tx) => {
+        const preparing = await tx.order.update({
+          where: { id, status: OrderStatus.CONFIRMED },
+          data: { status: OrderStatus.PREPARING, checklist: { create: {} } },
+        });
+        await this.recordFarmerOrder(
+          tx,
+          user,
+          order,
+          `Order ${order.orderNumber} prepared`,
+          undefined,
+          undefined,
+          true,
+        );
+        return preparing;
       });
     } catch (error) {
       throw mapOrderRaceError(error);
@@ -260,9 +290,18 @@ export class OrderService {
     }
     try {
       // Guarded on PREPARING so a tick can't land after the order moved on.
-      return await this.database.orderChecklist.update({
-        where: { orderId: id, order: { status: OrderStatus.PREPARING } },
-        data: dto,
+      return await this.database.$transaction(async (tx) => {
+        const checklist = await tx.orderChecklist.update({
+          where: { orderId: id, order: { status: OrderStatus.PREPARING } },
+          data: dto,
+        });
+        await this.recordFarmerOrder(
+          tx,
+          user,
+          order,
+          `Order ${order.orderNumber} checklist updated`,
+        );
+        return checklist;
       });
     } catch (error) {
       throw mapOrderRaceError(error);
@@ -288,21 +327,37 @@ export class OrderService {
     // The agent whose cluster holds the farm takes the order from here. A farm
     // out of every cluster (mid re-verification) leaves it unassigned until
     // its next round is approved.
-    const farm = await this.database.farm.findUniqueOrThrow({
-      where: { id: order.farmId },
-      select: { cluster: { select: { agentId: true } } },
-    });
     try {
-      return await this.database.order.update({
-        where: {
-          id,
-          status: OrderStatus.PREPARING,
-          checklist: { is: CHECKLIST_COMPLETE },
-        },
-        data: {
-          status: OrderStatus.READY,
-          handover: { create: { agentId: farm.cluster?.agentId ?? null } },
-        },
+      return await this.database.$transaction(async (tx) => {
+        const farm = await tx.farm.findUniqueOrThrow({
+          where: { id: order.farmId },
+          select: {
+            farmCode: true,
+            ownerId: true,
+            cluster: { select: { agentId: true } },
+          },
+        });
+        const ready = await tx.order.update({
+          where: {
+            id,
+            status: OrderStatus.PREPARING,
+            checklist: { is: CHECKLIST_COMPLETE },
+          },
+          data: {
+            status: OrderStatus.READY,
+            handover: { create: { agentId: farm.cluster?.agentId ?? null } },
+          },
+        });
+        await this.recordFarmerOrder(
+          tx,
+          user,
+          order,
+          `Order ${order.orderNumber} marked ready`,
+          undefined,
+          farm,
+          true,
+        );
+        return ready;
       });
     } catch (error) {
       throw mapOrderRaceError(error);
@@ -332,10 +387,77 @@ export class OrderService {
           },
         });
         await releaseStock(tx, order);
+        await this.recordFarmerOrder(
+          tx,
+          user,
+          order,
+          `Order ${order.orderNumber} cancelled`,
+          dto.reason,
+          undefined,
+          true,
+        );
         return cancelled;
       });
     } catch (error) {
       throw mapOrderRaceError(error);
+    }
+  }
+
+  private async recordFarmerOrder(
+    tx: Prisma.TransactionClient,
+    user: User,
+    order: Order,
+    title: string,
+    summary?: string,
+    farm?: { farmCode: string; ownerId: string },
+    linkSourcing = false,
+  ): Promise<void> {
+    const sourcingRequestId = linkSourcing
+      ? await sourcingRequestIdForOrder(tx, order.id)
+      : null;
+    if (user.role === Role.FARMER) {
+      const resolved =
+        farm ??
+        (await tx.farm.findUniqueOrThrow({
+          where: { id: order.farmId },
+          select: { farmCode: true, ownerId: true },
+        }));
+      await this.audit.record(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: resolved.ownerId,
+        agentId: null,
+        farmId: order.farmId,
+        category: AuditCategory.ORDER,
+        title,
+        summary: summary ?? resolved.farmCode,
+        actionLabel: 'View order',
+        resource: AuditResource.ORDER,
+        resourceId: order.id,
+        sourcingRequestId,
+      });
+    } else if (
+      sourcingRequestId &&
+      (user.role === Role.ADMIN || user.role === Role.BUYER)
+    ) {
+      await this.audit.record(tx, {
+        actorType:
+          user.role === Role.ADMIN
+            ? AuditActorType.ADMIN
+            : AuditActorType.BUYER,
+        farmerId: null,
+        agentId: null,
+        farmId: order.farmId,
+        category: AuditCategory.ORDER,
+        title,
+        summary: summary ?? order.orderNumber,
+        actionLabel: 'View order',
+        resource: AuditResource.ORDER,
+        resourceId: order.id,
+        sourcingRequestId,
+      });
+    }
+    if (sourcingRequestId) {
+      await syncSourcingRequest(tx, sourcingRequestId);
     }
   }
 

@@ -16,5 +16,14 @@ export class GoogleLoginDto {
 /** Body of `POST /auth/google/register`: Google supplies the name and email. */
 export class GoogleRegisterDto extends IntersectionType(
   GoogleLoginDto,
-  PickType(RegisterDto, ['role', 'phoneNumber'] as const),
+  PickType(RegisterDto, [
+    'role',
+    'phoneNumber',
+    'buyerType',
+    'legalName',
+    'department',
+    'contactName',
+    'contactPhone',
+    'paymentTerms',
+  ] as const),
 ) {}

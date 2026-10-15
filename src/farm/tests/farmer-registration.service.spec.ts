@@ -1,5 +1,8 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   FarmVerificationStatus,
   Prisma,
   Role,
@@ -93,6 +96,7 @@ describe('FarmerRegistrationService', () => {
   const farms = { insertFarm: jest.fn() };
   const documents = { uploadAll: jest.fn() };
   const locations = { requireLga: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new FarmerRegistrationService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
@@ -101,6 +105,7 @@ describe('FarmerRegistrationService', () => {
     farms as unknown as FarmService,
     documents as unknown as FarmDocumentsService,
     locations as unknown as LocationService,
+    audit as unknown as import('../../audit/audit.service').AuditService,
   );
   const user = { id: 'user-1', role: Role.FARMER };
 
@@ -177,6 +182,55 @@ describe('FarmerRegistrationService', () => {
         verificationId: 'round-1',
       });
       expect(result.farmer).not.toHaveProperty('idNumber');
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId: null,
+        category: AuditCategory.APPLICATION,
+        title: 'Account created',
+        summary: 'Ada Okafor (FRM-000001)',
+        actionLabel: 'View profile',
+        resource: AuditResource.FARMER,
+        resourceId: 'farmer-1',
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId: 'farm-1',
+        category: AuditCategory.FARM,
+        title: 'Farm LF-000001 created',
+        summary: 'Green Acres, Maize',
+        actionLabel: 'View farm',
+        resource: AuditResource.FARM,
+        resourceId: 'farm-1',
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId: null,
+        category: AuditCategory.DOCUMENTS,
+        title: 'ID document uploaded',
+        summary: 'NIN',
+        actionLabel: 'View profile',
+        resource: AuditResource.FARMER,
+        resourceId: 'farmer-1',
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId: 'farm-1',
+        category: AuditCategory.DOCUMENTS,
+        title: 'Farm documents uploaded',
+        summary: 'ownership',
+        actionLabel: 'View farm',
+        resource: AuditResource.FARM,
+        resourceId: 'farm-1',
+      });
+      expect(audit.record).toHaveBeenCalledTimes(4);
     });
 
     it('checks the LGA, then deletes the new account it already made', async () => {
@@ -288,5 +342,83 @@ describe('FarmerRegistrationService', () => {
       expect.objectContaining({ referralAgentId: 'agent-1' }),
       'agent-1',
     );
+  });
+
+  it('writes onboarding audit when a preferred agent is set', async () => {
+    await service.register({
+      account: { uid: 'uid-1', isNew: true },
+      user: {
+        email: 'ada@example.com',
+        firstName: 'Ada',
+        lastName: 'Okafor',
+        phoneNumber: '+2348012345678',
+        isVerified: false,
+      },
+      identity: { idType: 'NIN', idNumber: '12345678901' },
+      farm: { ...farm, referralAgentId: 'agent-1' },
+      documents: { idDocument: pdf, ownershipDocument: pdf },
+      preferredAgentId: 'agent-1',
+    });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.APPLICATION,
+      title: 'Account created',
+      summary: 'Ada Okafor (FRM-000001)',
+      actionLabel: 'View profile',
+      resource: AuditResource.FARMER,
+      resourceId: 'farmer-1',
+    });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: 'farm-1',
+      category: AuditCategory.FARM,
+      title: 'Farm LF-000001 created',
+      summary: 'Green Acres, Maize',
+      actionLabel: 'View farm',
+      resource: AuditResource.FARM,
+      resourceId: 'farm-1',
+    });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.DOCUMENTS,
+      title: 'ID document uploaded',
+      summary: 'NIN',
+      actionLabel: 'View profile',
+      resource: AuditResource.FARMER,
+      resourceId: 'farmer-1',
+    });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: 'farm-1',
+      category: AuditCategory.DOCUMENTS,
+      title: 'Farm documents uploaded',
+      summary: 'ownership',
+      actionLabel: 'View farm',
+      resource: AuditResource.FARM,
+      resourceId: 'farm-1',
+    });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.EXTENSION_AGENT,
+      farmerId: null,
+      agentId: 'agent-1',
+      farmId: 'farm-1',
+      category: AuditCategory.ONBOARDING,
+      title: 'Farmer onboarded',
+      summary: 'Ada Okafor, LF-000001',
+      actionLabel: 'View farm',
+      resource: AuditResource.FARM,
+      resourceId: 'farm-1',
+    });
+    expect(audit.record).toHaveBeenCalledTimes(5);
   });
 });

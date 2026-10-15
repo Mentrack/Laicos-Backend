@@ -14,6 +14,12 @@ export function toBuyerProfileDto(buyer: BuyerWithLocation): BuyerProfileDto {
   return {
     ...toBuyerDto(buyer),
     userId: buyer.userId,
+    buyerType: buyer.buyerType,
+    legalName: buyer.legalName,
+    department: buyer.department,
+    contactName: buyer.contactName,
+    contactPhone: buyer.contactPhone,
+    paymentTerms: buyer.paymentTerms,
     state: buyer.state,
     lga: buyer.lga,
     createdAt: buyer.createdAt,
