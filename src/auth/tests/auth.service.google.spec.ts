@@ -1,8 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, Role } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { StorageService } from '../../storage/storage.service';
 import { AuthService } from '../auth.service';
 import { EmailOtpService } from '../email-otp.service';
 import { FirebaseGoogleSignInDto } from '../dto';
@@ -39,6 +41,8 @@ describe('AuthService Google sign-in', () => {
     {} as ConfigService,
     {} as MailService,
     {} as EmailOtpService,
+    {} as StorageService,
+    { record: jest.fn() } as unknown as AuditService,
   );
 
   beforeEach(() => {

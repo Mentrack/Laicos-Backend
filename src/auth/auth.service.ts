@@ -41,9 +41,13 @@ import {
 } from '../common/upload-pipes';
 import { MailService } from '../mail/mail.service';
 import { passwordResetEmail } from '../mail/templates';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   Role,
   type Prisma,
   type User as UserModel,
@@ -61,6 +65,7 @@ export class AuthService {
     private readonly mail: MailService,
     private readonly otp: EmailOtpService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async register(dto: RegisterDto): Promise<void> {
@@ -255,9 +260,56 @@ export class AuthService {
   }
 
   updateProfile(user: UserModel, dto: UpdateProfileDto) {
-    return this.database.user.update({
-      where: { id: user.id },
-      data: dto,
+    const summary = profileFieldSummary(dto);
+    if (user.role !== Role.FARMER && user.role !== Role.EXTENSION_AGENT) {
+      return this.database.user.update({
+        where: { id: user.id },
+        data: dto,
+      });
+    }
+    return this.database.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: user.id },
+        data: dto,
+      });
+      if (summary) {
+        if (user.role === Role.FARMER) {
+          const farmer = await tx.farmer.findUniqueOrThrow({
+            where: { userId: user.id },
+            select: { id: true },
+          });
+          await this.audit.record(tx, {
+            actorType: AuditActorType.FARMER,
+            farmerId: farmer.id,
+            agentId: null,
+            farmId: null,
+            category: AuditCategory.PROFILE,
+            title: 'Profile updated',
+            summary,
+            actionLabel: 'View profile',
+            resource: AuditResource.FARMER,
+            resourceId: farmer.id,
+          });
+        } else {
+          const agent = await tx.agent.findUniqueOrThrow({
+            where: { userId: user.id },
+            select: { id: true },
+          });
+          await this.audit.record(tx, {
+            actorType: AuditActorType.EXTENSION_AGENT,
+            farmerId: null,
+            agentId: agent.id,
+            farmId: null,
+            category: AuditCategory.PROFILE,
+            title: 'Profile updated',
+            summary,
+            actionLabel: 'View profile',
+            resource: AuditResource.AGENT,
+            resourceId: agent.id,
+          });
+        }
+      }
+      return updated;
     });
   }
 
@@ -378,6 +430,33 @@ export class AuthService {
   private async deleteRefreshToken(userId: string): Promise<void> {
     await this.database.refreshToken.deleteMany({ where: { userId } });
   }
+}
+
+function profileFieldSummary(dto: UpdateProfileDto): string | null {
+  const parts: string[] = [];
+  if (dto.firstName !== undefined) {
+    parts.push('first name');
+  }
+  if (dto.lastName !== undefined) {
+    parts.push('last name');
+  }
+  if (dto.phoneNumber !== undefined) {
+    parts.push('phone');
+  }
+  return joinAuditSummaryParts(parts);
+}
+
+function joinAuditSummaryParts(parts: string[]): string | null {
+  if (parts.length === 0) {
+    return null;
+  }
+  if (parts.length === 1) {
+    return parts[0];
+  }
+  if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  }
+  return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
 }
 
 function toTokenPair(tokens: FirebaseAuthTokensDto) {

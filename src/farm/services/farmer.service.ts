@@ -1,5 +1,11 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import type { User } from '../../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  type User,
+} from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import type { UpdateIdentityDto } from '../../common/dto/identity.dto';
 import { formatIdentity, replaceIdDocument } from '../../common/identity';
 import {
@@ -22,6 +28,7 @@ export class FarmerService {
   constructor(
     private readonly database: PrismaService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async findMine(user: User): Promise<FarmerProfileDto> {
@@ -34,26 +41,55 @@ export class FarmerService {
 
   async updateMine(user: User, dto: UpdateIdentityDto) {
     const farmer = await requireFarmer(this.database, user);
-    await this.database.farmer.update({
-      where: { id: farmer.id },
-      data: { idType: dto.idType, idNumber: dto.idNumber },
+    await this.database.$transaction(async (tx) => {
+      await tx.farmer.update({
+        where: { id: farmer.id },
+        data: { idType: dto.idType, idNumber: dto.idNumber },
+      });
+      await this.audit.record(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: farmer.id,
+        agentId: null,
+        farmId: null,
+        category: AuditCategory.PROFILE,
+        title: 'Profile updated',
+        summary: 'ID details',
+        actionLabel: 'View profile',
+        resource: AuditResource.FARMER,
+        resourceId: farmer.id,
+      });
     });
     return this.findMine(user);
   }
 
   async uploadIdDocument(user: User, file: StorageUploadFile) {
     const farmer = await requireFarmer(this.database, user);
-    await replaceIdDocument(
-      this.storage,
-      `farmers/${farmer.id}/id`,
-      file,
-      farmer.idDocumentKey,
-      (idDocumentKey) =>
-        this.database.farmer.update({
-          where: { id: farmer.id },
-          data: { idDocumentKey },
-        }),
-    );
+    await this.database.$transaction(async (tx) => {
+      await replaceIdDocument(
+        this.storage,
+        `farmers/${farmer.id}/id`,
+        file,
+        farmer.idDocumentKey,
+        async (idDocumentKey) => {
+          await tx.farmer.update({
+            where: { id: farmer.id },
+            data: { idDocumentKey },
+          });
+          await this.audit.record(tx, {
+            actorType: AuditActorType.FARMER,
+            farmerId: farmer.id,
+            agentId: null,
+            farmId: null,
+            category: AuditCategory.DOCUMENTS,
+            title: 'ID document uploaded',
+            summary: farmer.idType ?? 'ID document',
+            actionLabel: 'View profile',
+            resource: AuditResource.FARMER,
+            resourceId: farmer.id,
+          });
+        },
+      );
+    });
     await refreshFarmerEvidenceStatus(this.database, farmer.id);
     return this.findMine(user);
   }
