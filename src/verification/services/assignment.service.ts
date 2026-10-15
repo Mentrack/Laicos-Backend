@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, VerificationTaskStatus } from '../../../generated/client';
+import {
+  EvidenceStatus,
+  Prisma,
+  VerificationTaskStatus,
+} from '../../../generated/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { pickAgent } from '../utils/pick-agent';
 
@@ -22,6 +26,13 @@ const CLEARED_ROUND = {
   estimatedYield: null,
   estimatedYieldUnit: null,
   generalNote: null,
+  evidenceStatus: EvidenceStatus.MISSING_DOCS,
+  locationEvidenceKey: null,
+  productionEvidenceKey: null,
+  farmPlotSketchKey: null,
+  harvestEstimateKey: null,
+  informationRequestNote: null,
+  informationRequestedAt: null,
   startedAt: null,
 } satisfies Prisma.FarmVerificationUncheckedUpdateInput;
 
@@ -116,10 +127,21 @@ export class AssignmentService {
     tx: Prisma.TransactionClient,
     roundId: string,
   ): Promise<string[]> {
-    const evidence = await tx.verificationEvidence.findMany({
-      where: { verificationId: roundId },
-      select: { storageKey: true },
-    });
+    const [evidence, documents] = await Promise.all([
+      tx.verificationEvidence.findMany({
+        where: { verificationId: roundId },
+        select: { storageKey: true },
+      }),
+      tx.farmVerification.findUnique({
+        where: { id: roundId },
+        select: {
+          locationEvidenceKey: true,
+          productionEvidenceKey: true,
+          farmPlotSketchKey: true,
+          harvestEstimateKey: true,
+        },
+      }),
+    ]);
     await tx.verificationEvidence.deleteMany({
       where: { verificationId: roundId },
     });
@@ -130,7 +152,13 @@ export class AssignmentService {
       where: { id: roundId },
       data: CLEARED_ROUND,
     });
-    return evidence.map(({ storageKey }) => storageKey);
+    return [
+      ...evidence.map(({ storageKey }) => storageKey),
+      documents?.locationEvidenceKey,
+      documents?.productionEvidenceKey,
+      documents?.farmPlotSketchKey,
+      documents?.harvestEstimateKey,
+    ].filter((key): key is string => Boolean(key));
   }
 
   /** The retry job: one transaction per waiting round, oldest first. */

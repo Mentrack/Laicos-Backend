@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { randomBytes } from 'node:crypto';
 import { Role } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { FarmerInviteService } from './farmer-invite.service';
 import { FirebaseService } from './firebase/firebase.service';
+import { temporaryPassword } from './utils/temporary-password';
 
 /**
  * Gives a farmer access once their first farm is verified, and tells them
@@ -99,9 +99,4 @@ export class FarmerActivationService {
       throw error;
     }
   }
-}
-
-/** 12 URL-safe characters (72 bits); one per farmer, never a shared default. */
-function temporaryPassword(): string {
-  return randomBytes(9).toString('base64url');
 }

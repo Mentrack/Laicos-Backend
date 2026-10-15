@@ -5,6 +5,7 @@ import {
   VerificationCheckKey,
   type Prisma,
 } from '../../../generated/client';
+import type { RoundDocuments } from './expected-document';
 
 // Identity documents can be impossible to see on the day (UNABLE); farm
 // parameters and production can simply not apply (NOT_APPLICABLE).
@@ -35,12 +36,6 @@ export const CHECK_RESULTS: Record<
   [VerificationCheckKey.ESTIMATED_YIELD]: FIELD_RESULTS,
 };
 
-export const REQUIRED_PHOTOS: readonly PhotoSlot[] = [
-  PhotoSlot.ENTRANCE,
-  PhotoSlot.FARM_AREA,
-  PhotoSlot.PRODUCE,
-];
-
 export function isResultAllowed(
   key: VerificationCheckKey,
   result: CheckResult,
@@ -48,24 +43,7 @@ export function isResultAllowed(
   return CHECK_RESULTS[key].includes(result);
 }
 
-/** A kind's evidence names exactly what that kind needs, and nothing else. */
-export function evidenceShapeError(evidence: {
-  kind: EvidenceKind;
-  checkKey?: VerificationCheckKey | null;
-  photoSlot?: PhotoSlot | null;
-}): string | null {
-  const hasCheck = Boolean(evidence.checkKey);
-  const hasSlot = Boolean(evidence.photoSlot);
-  if ((evidence.kind === EvidenceKind.CHECK) !== hasCheck) {
-    return 'checkKey is required for CHECK evidence and only allowed there';
-  }
-  if ((evidence.kind === EvidenceKind.PHOTO) !== hasSlot) {
-    return 'photoSlot is required for PHOTO evidence and only allowed there';
-  }
-  return null;
-}
-
-export interface ChecklistState {
+export interface ChecklistState extends RoundDocuments {
   locationMatches: boolean | null;
   discrepancyLat: Prisma.Decimal | null;
   discrepancyLng: Prisma.Decimal | null;
@@ -115,9 +93,6 @@ export function checklistGaps(round: ChecklistState): string[] {
     ) {
       gaps.push('Location discrepancy needs coordinates and a note');
     }
-    if (!hasEvidence(EvidenceKind.LOCATION_DISCREPANCY)) {
-      gaps.push('Location discrepancy needs evidence');
-    }
   }
 
   const checks = new Map(round.checks.map((check) => [check.key, check]));
@@ -147,10 +122,17 @@ export function checklistGaps(round: ChecklistState): string[] {
     gaps.push('Identity note is required');
   }
 
-  for (const slot of REQUIRED_PHOTOS) {
-    if (!hasEvidence(EvidenceKind.PHOTO, (item) => item.photoSlot === slot)) {
-      gaps.push(`${slot} photo is required`);
-    }
+  if (!round.locationEvidenceKey) {
+    gaps.push('Location evidence is required');
+  }
+  if (!round.productionEvidenceKey) {
+    gaps.push('Production evidence is required');
+  }
+  if (!round.farmPlotSketchKey) {
+    gaps.push('Farm plot sketch is required');
+  }
+  if (!round.harvestEstimateKey) {
+    gaps.push('Harvest estimate is required');
   }
   if (!round.generalNote) {
     gaps.push('General note is required');

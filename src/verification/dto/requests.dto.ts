@@ -14,11 +14,11 @@ import {
 } from 'class-validator';
 import {
   CheckResult,
-  EvidenceKind,
-  PhotoSlot,
+  EvidenceStatus,
   VerificationCheckKey,
   VerificationTaskStatus,
 } from '../../../generated/client';
+import { ExpectedDocument } from '../utils/expected-document';
 import { PaginationQueryDto } from '../../common/pagination';
 
 export class VerificationQueryDto extends PaginationQueryDto {
@@ -107,32 +107,39 @@ export class UpdateVerificationDto {
   @IsNotEmpty()
   @MaxLength(2000)
   generalNote?: string;
+
+  @ApiPropertyOptional({
+    enum: EvidenceStatus,
+    enumName: 'EvidenceStatus',
+    description:
+      'AWAITING_DOCS and FOLLOW_UP stay until set again. MISSING_DOCS and INCOMPLETE are also recalculated when a document changes.',
+  })
+  @IsOptional()
+  @IsEnum(EvidenceStatus)
+  evidenceStatus?: EvidenceStatus;
 }
 
 // Multipart (it carries the image), so every field arrives as a string; the
 // enums need no conversion.
 export class AddEvidenceDto {
-  @ApiProperty({ enum: EvidenceKind, enumName: 'EvidenceKind' })
-  @IsEnum(EvidenceKind)
-  kind: EvidenceKind;
+  @ApiPropertyOptional({
+    enum: ExpectedDocument,
+    enumName: 'ExpectedDocument',
+    description:
+      'One of the documents the round collects. Replaces that document. Send this or checkKey, not both.',
+  })
+  @IsOptional()
+  @IsEnum(ExpectedDocument)
+  document?: ExpectedDocument;
 
   @ApiPropertyOptional({
     enum: VerificationCheckKey,
     enumName: 'VerificationCheckKey',
-    description: 'Required for CHECK evidence only',
+    description: 'The check an ISSUE photo belongs to',
   })
   @IsOptional()
   @IsEnum(VerificationCheckKey)
   checkKey?: VerificationCheckKey;
-
-  @ApiPropertyOptional({
-    enum: PhotoSlot,
-    enumName: 'PhotoSlot',
-    description: 'Required for PHOTO evidence only; replaces that slot’s photo',
-  })
-  @IsOptional()
-  @IsEnum(PhotoSlot)
-  photoSlot?: PhotoSlot;
 }
 
 export class VerificationReasonDto {

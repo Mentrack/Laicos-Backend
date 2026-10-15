@@ -45,6 +45,47 @@ function paragraph(html: string): string {
   return `<p style="margin:0 0 14px;line-height:1.5">${html}</p>`;
 }
 
+export function adminInviteEmail(input: {
+  firstName: string;
+  email: string;
+  temporaryPassword: string;
+  loginUrl: string;
+}): RenderedEmail {
+  const title = 'Your LAICOS admin account';
+  return {
+    subject: 'Your LAICOS admin account',
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(
+          'An admin created a LAICOS account for you. Log in with these details:',
+        ),
+        `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 14px;background:#f4f6f5;border-radius:12px;padding:16px;width:100%">
+          <tr><td style="padding:4px 0;color:#6b7570">Email</td><td style="padding:4px 0;font-weight:600">${escapeHtml(input.email)}</td></tr>
+          <tr><td style="padding:4px 0;color:#6b7570">Temporary password</td><td style="padding:4px 0;font-weight:600;font-family:monospace">${escapeHtml(input.temporaryPassword)}</td></tr>
+        </table>`,
+        paragraph(
+          'You’ll be asked to change your password as soon as you log in.',
+        ),
+        button('Log in', input.loginUrl),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      'An admin created a LAICOS account for you. Log in with these details:',
+      '',
+      `Email: ${input.email}`,
+      `Temporary password: ${input.temporaryPassword}`,
+      '',
+      'You’ll be asked to change your password as soon as you log in.',
+      '',
+      `Log in: ${input.loginUrl}`,
+    ].join('\n'),
+  };
+}
+
 export function farmerInviteEmail(input: {
   firstName: string;
   email: string;
@@ -140,6 +181,36 @@ export function farmRejectedEmail(input: {
       input.reason,
       '',
       'Our team will be in touch about what happens next.',
+    ].join('\n'),
+  };
+}
+
+export function informationRequestEmail(input: {
+  firstName: string;
+  farmCode: string;
+  documents: string[];
+  note: string;
+}): RenderedEmail {
+  const title = `Documents needed for ${input.farmCode}`;
+  const names = input.documents.join(', ');
+  return {
+    subject: title,
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(
+          `An admin needs these documents for ${escapeHtml(input.farmCode)} before the farm can be approved: ${escapeHtml(names)}.`,
+        ),
+        paragraph(escapeHtml(input.note)),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      `An admin needs these documents for ${input.farmCode} before the farm can be approved: ${names}.`,
+      '',
+      input.note,
     ].join('\n'),
   };
 }

@@ -51,14 +51,16 @@ describe('FarmProfileService', () => {
     );
   });
 
-  it('lists only non-draft listings for the primary produce', async () => {
+  it('lists only on-sale listings for the primary produce', async () => {
     farm.findFirst.mockResolvedValue(row);
     await service.findOne(buyer, farmId);
     expect(farm.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         select: expect.objectContaining({
           produce: {
-            where: { status: { not: ProduceStatus.DRAFT } },
+            where: {
+              status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
+            },
             select: { name: true },
             orderBy: { createdAt: 'asc' },
           },

@@ -155,7 +155,13 @@ export class ProduceService {
         `${reserved} ${current.unit} is reserved by orders`,
       );
     }
-    const status = deriveProduceStatus(dto.status ?? current.status, {
+    // An admin disable stays until an admin removes the listing. A farmer
+    // edit can change stock and text, not put it back on the shop.
+    const requested =
+      current.status === ProduceStatus.DISABLED
+        ? ProduceStatus.DISABLED
+        : (dto.status ?? current.status);
+    const status = deriveProduceStatus(requested, {
       actualQuantity,
       floatingQuantity,
     });

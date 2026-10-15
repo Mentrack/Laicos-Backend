@@ -33,6 +33,7 @@ model User {
   farmer                Farmer?
   agent                 Agent?
   buyer                 Buyer?
+  admin                 Admin?
   conversationsAsAgent  Conversation[]         @relation("ConversationAgent")
   messages              Message[]
   confirmedPayments     Payment[]              @relation("PaymentConfirmedBy")
@@ -89,10 +90,18 @@ model Buyer {
   updatedAt        DateTime          @updatedAt
 }
 
+model Admin {
+  id        String   @id @default(uuid())
+  // Public code (AD-000123), backed by a hand-made sequence like Farmer.farmerId.
+  adminId   String   @unique @default(dbgenerated("('AD-'::text || lpad((nextval('\"Admin_adminId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Farmer {
   id            String             @id @default(uuid())
-  // Public, human-readable code (FRM-000123). The sequence is created by hand in
-  // the migration; Prisma only knows the column default that reads it.
   farmerId      String             @unique @default(dbgenerated("('FRM-'::text || lpad((nextval('\"Farmer_farmerId_seq\"'::regclass))::text, 6, '0'::text))"))
   userId        String             @unique
   user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -104,6 +113,8 @@ model Farmer {
   farms         Farm[]
   bankAccount   FarmerBankAccount?
   payouts       Payout[]
+  // Account standing. DISABLED locks farmer routes; an approved verification sets it back to ACTIVE.
+  status        FarmerStatus       @default(ACTIVE)
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 }
@@ -120,12 +131,10 @@ model Farm {
   country              String                 @default("NG")
   stateId              String
   state                State                  @relation(fields: [stateId], references: [id], onDelete: Restrict)
-  // Verification is assigned to agents in this LGA.
   lgaId                String
   lga                  Lga                    @relation(fields: [lgaId], references: [id], onDelete: Restrict)
   // Street address; state and LGA are the structured part.
   location             String
-  // Hectares.
   size                 Float
   unit                 String                 @default("ha")
   mainProduce          String
@@ -243,6 +252,19 @@ model FarmVerification {
   estimatedYieldUnit String?
   generalNote        String?
   rejectionReason    String?
+  // MISSING_DOCS and INCOMPLETE follow the expected documents. AWAITING_DOCS
+  // and FOLLOW_UP stay until someone sets a different status. An information
+  // request sets AWAITING_DOCS.
+  evidenceStatus     EvidenceStatus         @default(MISSING_DOCS)
+  // The files a round always collects. Identity and ownership stay on the
+  // farmer and the farm; issue photos stay in VerificationEvidence.
+  locationEvidenceKey    String?
+  productionEvidenceKey  String?
+  farmPlotSketchKey      String?
+  harvestEstimateKey     String?
+  // The note sent to the assigned agent with the last information request.
+  informationRequestNote String?
+  informationRequestedAt DateTime?
   startedAt          DateTime?
   decidedAt          DateTime?
   checks             VerificationCheck[]
@@ -269,8 +291,8 @@ model VerificationCheck {
   @@unique([verificationId, key])
 }
 
-// A CHECK constraint in the migration ties checkKey to kind CHECK and
-// photoSlot to kind PHOTO.
+// Issue photos only. The expected documents are columns on FarmVerification.
+// A CHECK constraint ties checkKey to kind CHECK and photoSlot to kind PHOTO.
 model VerificationEvidence {
   id             String                @id @default(uuid())
   verificationId String
@@ -806,6 +828,13 @@ enum FarmVerificationStatus {
   PENDING
   VERIFIED
   REJECTED
+  SUSPENDED
+}
+
+enum FarmerStatus {
+  ACTIVE
+  INACTIVE
+  DISABLED
 }
 
 enum VerificationTaskStatus {
@@ -841,6 +870,13 @@ enum EvidenceKind {
   PHOTO
 }
 
+enum EvidenceStatus {
+  INCOMPLETE
+  AWAITING_DOCS
+  FOLLOW_UP
+  MISSING_DOCS
+}
+
 enum PhotoSlot {
   ENTRANCE
   FARM_AREA
@@ -864,6 +900,7 @@ enum ProduceStatus {
   DRAFT
   PUBLISHED
   SOLD_OUT
+  DISABLED
 }
 
 enum ProduceCategory {

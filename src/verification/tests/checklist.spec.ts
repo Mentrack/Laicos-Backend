@@ -1,16 +1,18 @@
 import {
   CheckResult,
   EvidenceKind,
-  PhotoSlot,
   Prisma,
   VerificationCheckKey,
 } from '../../../generated/client';
 import {
   checklistGaps,
-  evidenceShapeError,
   isResultAllowed,
   type ChecklistState,
 } from '../utils/checklist';
+import {
+  evidenceRequestError,
+  ExpectedDocument,
+} from '../utils/expected-document';
 
 function complete(): ChecklistState {
   return {
@@ -25,9 +27,11 @@ function complete(): ChecklistState {
       result: CheckResult.VERIFIED,
       note: null,
     })),
-    evidence: [PhotoSlot.ENTRANCE, PhotoSlot.FARM_AREA, PhotoSlot.PRODUCE].map(
-      (photoSlot) => ({ kind: EvidenceKind.PHOTO, checkKey: null, photoSlot }),
-    ),
+    locationEvidenceKey: 'location',
+    productionEvidenceKey: 'production',
+    farmPlotSketchKey: 'plot',
+    harvestEstimateKey: 'harvest',
+    evidence: [],
     farm: { ownershipDocumentKey: 'own', owner: { idDocumentKey: 'id' } },
   };
 }
@@ -46,33 +50,24 @@ describe('isResultAllowed', () => {
   });
 });
 
-describe('evidenceShapeError', () => {
+describe('evidenceRequestError', () => {
   it.each([
-    [{ kind: EvidenceKind.CHECK, checkKey: VerificationCheckKey.FARM_ACTIVE }],
-    [{ kind: EvidenceKind.PHOTO, photoSlot: PhotoSlot.ENTRANCE }],
-    [{ kind: EvidenceKind.LOCATION_DISCREPANCY }],
-  ])('accepts %j', (evidence) => {
-    expect(evidenceShapeError(evidence)).toBeNull();
+    [{ document: ExpectedDocument.LOCATION_EVIDENCE }],
+    [{ checkKey: VerificationCheckKey.FARM_ACTIVE }],
+  ])('accepts %j', (request) => {
+    expect(evidenceRequestError(request)).toBeNull();
   });
 
   it.each([
-    [{ kind: EvidenceKind.CHECK }],
-    [{ kind: EvidenceKind.PHOTO }],
+    [{}],
     [
       {
-        kind: EvidenceKind.LOCATION_DISCREPANCY,
-        photoSlot: PhotoSlot.ENTRANCE,
-      },
-    ],
-    [
-      {
-        kind: EvidenceKind.PHOTO,
-        photoSlot: PhotoSlot.ENTRANCE,
+        document: ExpectedDocument.PRODUCTION_EVIDENCE,
         checkKey: VerificationCheckKey.FARM_ACTIVE,
       },
     ],
-  ])('rejects %j', (evidence) => {
-    expect(evidenceShapeError(evidence)).not.toBeNull();
+  ])('rejects %j', (request) => {
+    expect(evidenceRequestError(request)).not.toBeNull();
   });
 });
 
@@ -100,6 +95,10 @@ describe('checklistGaps', () => {
       identityNote: null,
       generalNote: null,
       checks: [],
+      locationEvidenceKey: null,
+      productionEvidenceKey: null,
+      farmPlotSketchKey: null,
+      harvestEstimateKey: null,
       evidence: [],
     });
     expect(gaps).toEqual([
@@ -108,34 +107,25 @@ describe('checklistGaps', () => {
         (key) => `${key} is not recorded`,
       ),
       'Identity note is required',
-      'ENTRANCE photo is required',
-      'FARM_AREA photo is required',
-      'PRODUCE photo is required',
+      'Location evidence is required',
+      'Production evidence is required',
+      'Farm plot sketch is required',
+      'Harvest estimate is required',
       'General note is required',
     ]);
   });
 
-  it('requires coordinates, a note and evidence for a location discrepancy', () => {
+  it('requires coordinates and a note for a location discrepancy', () => {
     expect(checklistGaps({ ...complete(), locationMatches: false })).toEqual([
       'Location discrepancy needs coordinates and a note',
-      'Location discrepancy needs evidence',
     ]);
-    const state = complete();
     expect(
       checklistGaps({
-        ...state,
+        ...complete(),
         locationMatches: false,
         discrepancyLat: new Prisma.Decimal('8.1'),
         discrepancyLng: new Prisma.Decimal('4.2'),
         discrepancyNote: 'East of the address',
-        evidence: [
-          ...state.evidence,
-          {
-            kind: EvidenceKind.LOCATION_DISCREPANCY,
-            checkKey: null,
-            photoSlot: null,
-          },
-        ],
       }),
     ).toEqual([]);
   });
@@ -157,15 +147,5 @@ describe('checklistGaps', () => {
       'FARMER_ID issue needs a note',
       'FARMER_ID issue needs evidence',
     ]);
-  });
-
-  it('treats the infrastructure photo as optional', () => {
-    const state = complete();
-    expect(
-      state.evidence.some(
-        (item) => item.photoSlot === PhotoSlot.INFRASTRUCTURE,
-      ),
-    ).toBe(false);
-    expect(checklistGaps(state)).toEqual([]);
   });
 });

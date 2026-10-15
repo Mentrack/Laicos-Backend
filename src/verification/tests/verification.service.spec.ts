@@ -6,13 +6,15 @@ import {
 import {
   CheckResult,
   EvidenceKind,
+  EvidenceStatus,
   FarmVerificationStatus,
+  FarmerStatus,
   HandoverStatus,
-  PhotoSlot,
   VerificationCheckKey,
   VerificationTaskStatus,
   type Agent,
 } from '../../../generated/client';
+import { ExpectedDocument } from '../utils/expected-document';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { FarmerActivationService } from '../../auth/farmer-activation.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -52,6 +54,13 @@ function detail(overrides: Record<string, unknown> = {}) {
     estimatedYieldUnit: null,
     generalNote: null,
     rejectionReason: null,
+    evidenceStatus: EvidenceStatus.MISSING_DOCS,
+    locationEvidenceKey: null,
+    productionEvidenceKey: null,
+    farmPlotSketchKey: null,
+    harvestEstimateKey: null,
+    informationRequestNote: null,
+    informationRequestedAt: null,
     startedAt: new Date('2026-09-01'),
     decidedAt: null,
     createdAt: new Date('2026-09-01'),
@@ -89,6 +98,7 @@ describe('VerificationService', () => {
     findMany: jest.fn(),
     count: jest.fn(),
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     updateMany: jest.fn(),
     update: jest.fn(),
   };
@@ -102,7 +112,8 @@ describe('VerificationService', () => {
   };
   const assignmentDecline = { create: jest.fn() };
   const cluster = { findUniqueOrThrow: jest.fn() };
-  const farm = { update: jest.fn() };
+  const farm = { update: jest.fn(), findUnique: jest.fn() };
+  const farmer = { update: jest.fn() };
   const orderHandover = { updateMany: jest.fn() };
   const tx = {
     farmVerification,
@@ -111,6 +122,7 @@ describe('VerificationService', () => {
     assignmentDecline,
     cluster,
     farm,
+    farmer,
     orderHandover,
   };
   const database = {
@@ -153,7 +165,7 @@ describe('VerificationService', () => {
     cluster.findUniqueOrThrow.mockResolvedValue({ id: 'cluster-1' });
     farm.update.mockResolvedValue({
       name: 'Green Acres',
-      owner: { userId: 'farmer-user-1' },
+      owner: { id: 'farmer-1', userId: 'farmer-user-1' },
     });
   });
 
@@ -178,7 +190,9 @@ describe('VerificationService', () => {
     );
     expect(result.farm.ownershipDocumentUrl).toBe('https://signed/own');
     expect(result.farm.farmer.idDocumentUrl).toBe('https://signed/farmer-id');
-    expect(result.outstanding).toContain('Location match is not recorded');
+    expect(result.evidenceStatus).toBe(EvidenceStatus.MISSING_DOCS);
+    expect(result.locationEvidenceUrl).toBeNull();
+    expect(result.outstanding).toContain('Location evidence is required');
   });
 
   it('404s another agent’s round', async () => {
@@ -276,18 +290,36 @@ describe('VerificationService', () => {
   });
 
   describe('evidence', () => {
+    const storedRound = {
+      locationEvidenceKey: 'old-key',
+      productionEvidenceKey: 'production',
+      farmPlotSketchKey: 'plot',
+      harvestEstimateKey: 'harvest',
+    };
+
     beforeEach(() => {
       storage.uploadPrivateFile.mockResolvedValue('new-key');
+      farmVerification.findUnique.mockResolvedValue(storedRound);
+      farm.findUnique.mockResolvedValue({
+        ownershipDocumentKey: 'own',
+        owner: { idDocumentKey: 'farmer-id' },
+        verifications: [
+          {
+            id: roundId,
+            status: VerificationTaskStatus.IN_PROGRESS,
+            evidenceStatus: EvidenceStatus.MISSING_DOCS,
+            ...storedRound,
+            locationEvidenceKey: 'new-key',
+          },
+        ],
+      });
     });
 
-    it('replaces the photo already in a slot', async () => {
-      verificationEvidence.findMany.mockResolvedValue([
-        { id: 'old', storageKey: 'old-key' },
-      ]);
+    it('replaces the location evidence and marks the documents incomplete', async () => {
       await service.addEvidence(
         agent,
         roundId,
-        { kind: EvidenceKind.PHOTO, photoSlot: PhotoSlot.ENTRANCE },
+        { document: ExpectedDocument.LOCATION_EVIDENCE },
         image,
       );
       expect(storage.uploadPrivateFile).toHaveBeenCalledWith(
@@ -295,27 +327,74 @@ describe('VerificationService', () => {
         image,
         expect.any(Array),
       );
-      expect(verificationEvidence.deleteMany).toHaveBeenCalledWith({
-        where: { id: { in: ['old'] } },
+      expect(farmVerification.update).toHaveBeenCalledWith({
+        where: { id: roundId },
+        data: { locationEvidenceKey: 'new-key' },
       });
+      expect(farmVerification.update).toHaveBeenCalledWith({
+        where: { id: roundId },
+        data: { evidenceStatus: EvidenceStatus.INCOMPLETE },
+      });
+      expect(storage.deletePrivate).toHaveBeenCalledWith(['old-key']);
+      expect(verificationEvidence.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps awaiting-docs when the last document arrives', async () => {
+      farm.findUnique.mockResolvedValue({
+        ownershipDocumentKey: 'own',
+        owner: { idDocumentKey: 'farmer-id' },
+        verifications: [
+          {
+            id: roundId,
+            evidenceStatus: EvidenceStatus.AWAITING_DOCS,
+            ...storedRound,
+            locationEvidenceKey: 'new-key',
+          },
+        ],
+      });
+      await service.addEvidence(
+        agent,
+        roundId,
+        { document: ExpectedDocument.LOCATION_EVIDENCE },
+        image,
+      );
+      expect(farmVerification.update).not.toHaveBeenCalledWith({
+        where: { id: roundId },
+        data: { evidenceStatus: EvidenceStatus.INCOMPLETE },
+      });
+    });
+
+    it('stores an issue photo against its check', async () => {
+      await service.addEvidence(
+        agent,
+        roundId,
+        { checkKey: VerificationCheckKey.FARMER_ID },
+        image,
+      );
       expect(verificationEvidence.create).toHaveBeenCalledWith({
         data: {
           verificationId: roundId,
-          kind: EvidenceKind.PHOTO,
-          checkKey: null,
-          photoSlot: PhotoSlot.ENTRANCE,
+          kind: EvidenceKind.CHECK,
+          checkKey: VerificationCheckKey.FARMER_ID,
           storageKey: 'new-key',
         },
       });
-      expect(storage.deletePrivate).toHaveBeenCalledWith(['old-key']);
+      expect(farmVerification.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ locationEvidenceKey: 'new-key' }),
+        }),
+      );
     });
 
-    it('rejects a malformed evidence kind before uploading', async () => {
+    it('rejects a request that names both a document and a check before uploading', async () => {
       await expect(
         service.addEvidence(
           agent,
           roundId,
-          { kind: EvidenceKind.CHECK },
+          {
+            document: ExpectedDocument.HARVEST_ESTIMATE,
+            checkKey: VerificationCheckKey.ESTIMATED_YIELD,
+          },
           image,
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
@@ -328,7 +407,7 @@ describe('VerificationService', () => {
         service.addEvidence(
           agent,
           roundId,
-          { kind: EvidenceKind.LOCATION_DISCREPANCY },
+          { document: ExpectedDocument.PRODUCTION_EVIDENCE },
           image,
         ),
       ).rejects.toBeInstanceOf(ConflictException);
@@ -336,12 +415,12 @@ describe('VerificationService', () => {
     });
 
     it('deletes the upload when recording it fails', async () => {
-      verificationEvidence.create.mockRejectedValueOnce(new Error('db down'));
+      farmVerification.update.mockRejectedValueOnce(new Error('db down'));
       await expect(
         service.addEvidence(
           agent,
           roundId,
-          { kind: EvidenceKind.LOCATION_DISCREPANCY },
+          { document: ExpectedDocument.FARM_PLOT_SKETCH },
           image,
         ),
       ).rejects.toThrow('db down');
@@ -432,18 +511,10 @@ describe('VerificationService', () => {
           result: CheckResult.VERIFIED,
           note: null,
         })),
-        evidence: [
-          PhotoSlot.ENTRANCE,
-          PhotoSlot.FARM_AREA,
-          PhotoSlot.PRODUCE,
-        ].map((photoSlot) => ({
-          id: photoSlot,
-          kind: EvidenceKind.PHOTO,
-          checkKey: null,
-          photoSlot,
-          storageKey: photoSlot,
-          createdAt: new Date(),
-        })),
+        locationEvidenceKey: 'location',
+        productionEvidenceKey: 'production',
+        farmPlotSketchKey: 'plot',
+        harvestEstimateKey: 'harvest',
       });
       await service.approve(agent, roundId);
       expect(farmVerification.updateMany).toHaveBeenCalledWith({
@@ -464,7 +535,14 @@ describe('VerificationService', () => {
           clusterId: 'cluster-1',
           isClustered: true,
         },
-        select: { name: true, owner: { select: { userId: true } } },
+        select: {
+          name: true,
+          owner: { select: { id: true, userId: true } },
+        },
+      });
+      expect(farmer.update).toHaveBeenCalledWith({
+        where: { id: 'farmer-1' },
+        data: { status: FarmerStatus.ACTIVE },
       });
       expect(activation.activate).toHaveBeenCalledWith('farmer-user-1');
       expect(orderHandover.updateMany).toHaveBeenCalledWith({
@@ -533,12 +611,13 @@ describe('VerificationService', () => {
         clusterId: null,
         isClustered: false,
       },
-      select: { name: true, owner: { select: { userId: true } } },
+      select: { name: true, owner: { select: { id: true, userId: true } } },
     });
     expect(activation.notifyRejection).toHaveBeenCalledWith(
       'farmer-user-1',
       'Green Acres',
       'No farm at the address',
     );
+    expect(farmer.update).not.toHaveBeenCalled();
   });
 });

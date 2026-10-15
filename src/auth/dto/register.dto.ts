@@ -44,7 +44,7 @@ export class RegisterDto {
     enum: [Role.BUYER, Role.RIDER],
     example: Role.BUYER,
     description:
-      'Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup instead: they get no password until they are verified.',
+      'Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins.',
   })
   @IsNotEmpty()
   @IsIn([Role.BUYER, Role.RIDER])

@@ -29,8 +29,11 @@ describe('FarmerService', () => {
     count: jest.fn(),
     update: jest.fn(),
   };
+  const farm = { findMany: jest.fn().mockResolvedValue([]) };
   const database = {
     farmer,
+    farm,
+    farmVerification: { update: jest.fn() },
     $transaction: jest.fn((queries: Promise<unknown>[]) =>
       Promise.all(queries),
     ),

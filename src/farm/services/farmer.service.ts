@@ -13,6 +13,7 @@ import { StorageService } from '../../storage/storage.service';
 import type { FarmerProfileDto } from '../dto';
 import { toFarmerDto } from '../formatters/farmer.formatter';
 import { requireFarmer } from '../utils/require-farmer';
+import { refreshFarmerEvidenceStatus } from '../../verification/utils/evidence-status';
 
 // Farmer rows are created with their FARMER user (AuthService.createLocalUser)
 // and deleted with it (onDelete: Cascade), so there is no create or delete here.
@@ -53,6 +54,7 @@ export class FarmerService {
           data: { idDocumentKey },
         }),
     );
+    await refreshFarmerEvidenceStatus(this.database, farmer.id);
     return this.findMine(user);
   }
 

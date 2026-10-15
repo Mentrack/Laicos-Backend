@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import {
   EvidenceKind,
+  FarmerStatus,
   FarmVerificationStatus,
   Prisma,
   VerificationTaskStatus,
@@ -38,9 +39,14 @@ import {
 import {
   CHECKLIST_DOCUMENTS_SELECT,
   checklistGaps,
-  evidenceShapeError,
   isResultAllowed,
 } from '../utils/checklist';
+import { refreshFarmEvidenceStatus } from '../utils/evidence-status';
+import {
+  documentUpdate,
+  evidenceRequestError,
+  storedDocumentKey,
+} from '../utils/expected-document';
 import { AssignmentService, OPEN_TASK_STATUSES } from './assignment.service';
 import {
   FarmDocumentsService,
@@ -52,7 +58,7 @@ type Tx = Prisma.TransactionClient;
 // What the farmer's notification needs once the decision commits.
 const FARM_OWNER_SELECT = {
   name: true,
-  owner: { select: { userId: true } },
+  owner: { select: { id: true, userId: true } },
 } satisfies Prisma.FarmSelect;
 
 /**
@@ -150,6 +156,7 @@ export class VerificationService {
         estimatedYield: dto.estimatedYield,
         estimatedYieldUnit: dto.estimatedYieldUnit,
         generalNote: dto.generalNote,
+        evidenceStatus: dto.evidenceStatus,
       }),
     );
     return this.findOne(agent, id);
@@ -161,13 +168,13 @@ export class VerificationService {
     dto: AddEvidenceDto,
     file: StorageUploadFile,
   ) {
-    const shapeError = evidenceShapeError(dto);
+    const shapeError = evidenceRequestError(dto);
     if (shapeError) {
       throw new BadRequestException(shapeError);
     }
     // Checked before uploading, so a closed or foreign round doesn't leave an
     // object behind; record() below re-checks inside the transaction.
-    await this.requireOpen(this.database, agent, id);
+    const { farmId } = await this.requireOpen(this.database, agent, id);
     const storageKey = await this.storage.uploadPrivateFile(
       `verifications/${id}`,
       file,
@@ -178,27 +185,39 @@ export class VerificationService {
     try {
       replaced = await this.database.$transaction(async (tx) => {
         await this.record(tx, agent, id, {});
-        // One photo per slot: a new one replaces the old.
-        const previous =
-          dto.kind === EvidenceKind.PHOTO
-            ? await tx.verificationEvidence.findMany({
-                where: { verificationId: id, photoSlot: dto.photoSlot },
-                select: { id: true, storageKey: true },
-              })
-            : [];
-        await tx.verificationEvidence.deleteMany({
-          where: { id: { in: previous.map((item) => item.id) } },
-        });
+        if (dto.document) {
+          const current = await tx.farmVerification.findUnique({
+            where: { id },
+            select: {
+              locationEvidenceKey: true,
+              productionEvidenceKey: true,
+              farmPlotSketchKey: true,
+              harvestEstimateKey: true,
+            },
+          });
+          if (!current) {
+            throw new NotFoundException('Verification not found');
+          }
+          const previous = storedDocumentKey(current, dto.document);
+          await tx.farmVerification.update({
+            where: { id },
+            data: documentUpdate(dto.document, storageKey),
+          });
+          await refreshFarmEvidenceStatus(tx, farmId);
+          return previous ? [previous] : [];
+        }
+        if (!dto.checkKey) {
+          throw new BadRequestException('Send either a document or a checkKey');
+        }
         await tx.verificationEvidence.create({
           data: {
             verificationId: id,
-            kind: dto.kind,
-            checkKey: dto.checkKey ?? null,
-            photoSlot: dto.photoSlot ?? null,
+            kind: EvidenceKind.CHECK,
+            checkKey: dto.checkKey,
             storageKey,
           },
         });
-        return previous.map((item) => item.storageKey);
+        return [];
       });
     } catch (error) {
       await this.storage.deletePrivate([storageKey]);
@@ -306,6 +325,11 @@ export class VerificationService {
           isClustered: true,
         },
         select: FARM_OWNER_SELECT,
+      });
+      // A suspended account comes back only when a farm is verified again.
+      await tx.farmer.update({
+        where: { id: owner.id },
+        data: { status: FarmerStatus.ACTIVE },
       });
       // Orders that went READY while the farm was out of every cluster.
       await tx.orderHandover.updateMany({

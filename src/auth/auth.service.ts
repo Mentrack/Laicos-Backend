@@ -274,49 +274,11 @@ export class AuthService {
     });
   }
 
-  // async bootstrapAdmin(firebaseUser: DecodedIdToken, dto: BootstrapAdminDto) {
-  //   const adminCount = await this.database.adminProfile.count();
-  //   if (adminCount > 0) {
-  //     throw new ForbiddenException(
-  //       'An admin already exists; use POST /admins instead',
-  //     );
-  //   }
-  //   if (!firebaseUser.email) {
-  //     throw new UnauthorizedException('Firebase token has no email');
-  //   }
-
-  //   return this.createAdmin(
-  //     {
-  //       firebaseUid: firebaseUser.uid,
-  //       email: firebaseUser.email,
-  //       isVerified: firebaseUser.email_verified ?? false,
-  //     },
-  //     dto,
-  //     [],
-  //   );
-  // }
-
-  // async promoteAdmin(dto: PromoteAdminDto) {
-  //   const firebaseRecord = await this.firebase.getUserByEmail(dto.email);
-  //   if (!firebaseRecord) {
-  //     throw new NotFoundException('No Firebase account with that email');
-  //   }
-
-  //   return this.createAdmin(
-  //     {
-  //       firebaseUid: firebaseRecord.uid,
-  //       email: dto.email,
-  //       isVerified: firebaseRecord.emailVerified,
-  //     },
-  //     dto,
-  //     dto.permissions ?? [],
-  //   );
-  // }
-
   /** No `password` leaves an account nobody can sign in to: a new farmer. */
   async createFirebaseUser(
     dto: Pick<RegisterDto, 'email' | 'firstName' | 'lastName'> & {
       password?: string;
+      emailVerified?: boolean;
     },
   ): Promise<UserRecord> {
     try {
@@ -324,6 +286,9 @@ export class AuthService {
         email: dto.email,
         password: dto.password,
         displayName: `${dto.firstName} ${dto.lastName}`.trim(),
+        ...(dto.emailVerified === undefined
+          ? {}
+          : { emailVerified: dto.emailVerified }),
       });
     } catch (error) {
       throw mapFirebaseCreateUserError(error);
@@ -332,7 +297,7 @@ export class AuthService {
 
   /** Takes `client` so a caller can create the user inside its transaction. */
   async createLocalUser(
-    { refreshToken, farmer, agent, buyer, ...input }: CreateLocalUserDto,
+    { refreshToken, farmer, agent, buyer, admin, ...input }: CreateLocalUserDto,
     client: Prisma.TransactionClient = this.database,
   ) {
     try {
@@ -348,6 +313,8 @@ export class AuthService {
               : undefined,
           buyer:
             input.role === Role.BUYER ? { create: buyer ?? {} } : undefined,
+          admin:
+            input.role === Role.ADMIN ? { create: admin ?? {} } : undefined,
           refreshToken: refreshToken
             ? { create: { token: refreshToken } }
             : undefined,

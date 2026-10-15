@@ -26,6 +26,7 @@ import {
 } from '../common/upload-pipes';
 import { AuthService } from './auth.service';
 import { AllowPendingPasswordChange } from './decorators/allow-pending-password-change.decorator';
+import { AllowSuspendedFarmer } from './decorators/allow-suspended-farmer.decorator';
 import { Auth } from './decorators/auth.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import {
@@ -212,10 +213,11 @@ export class AuthController {
   @ApiOperation({
     summary: 'Get the signed-in user',
     description:
-      'Read fresh on every call. Allowed while a password change is pending, so the client can check mustChangePassword.',
+      'Read fresh on every call. Allowed while a password change is pending, and while the farmer is suspended, so the client can check mustChangePassword and who is signed in.',
   })
   @Auth()
   @AllowPendingPasswordChange()
+  @AllowSuspendedFarmer()
   @ApiEnvelope(UserDto)
   async getCurrentUser(@CurrentUser() user: User) {
     const data = await this.auth.getCurrentUser(user);

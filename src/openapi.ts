@@ -23,6 +23,10 @@ export function buildOpenApiDocument(
       'Registration, login (email/password or Google), token refresh, password reset, the signed-in user, and their name, phone and avatar.',
     )
     .addTag(
+      'Admins',
+      'Admin profiles. The first admin is seeded; an existing admin invites the next ones. Name and email stay on the user.',
+    )
+    .addTag(
       'Locations',
       'Nigerian states and LGAs for the location dropdowns. Public; no token needed.',
     )

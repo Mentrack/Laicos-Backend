@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   CheckResult,
   EvidenceKind,
+  EvidenceStatus,
   PhotoSlot,
   VerificationCheckKey,
   VerificationTaskStatus,
@@ -96,6 +97,9 @@ export class VerificationSummaryDto {
   @ApiProperty({ type: FarmSummaryDto })
   farm: FarmSummaryDto;
 
+  @ApiProperty({ enum: EvidenceStatus, enumName: 'EvidenceStatus' })
+  evidenceStatus: EvidenceStatus;
+
   @ApiProperty({ type: Date, nullable: true })
   startedAt: Date | null;
 
@@ -145,10 +149,52 @@ export class VerificationDto extends VerificationSummaryDto {
   @ApiProperty({ type: String, nullable: true })
   rejectionReason: string | null;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Note sent to the assigned agent with the last information request',
+  })
+  informationRequestNote: string | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  informationRequestedAt: Date | null;
+
   @ApiProperty({ type: [VerificationCheckDto] })
   checks: VerificationCheckDto[];
 
-  @ApiProperty({ type: [VerificationEvidenceDto] })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Presigned; expires in 15 min',
+  })
+  locationEvidenceUrl: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Presigned; expires in 15 min',
+  })
+  productionEvidenceUrl: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Presigned; expires in 15 min',
+  })
+  farmPlotSketchUrl: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Presigned; expires in 15 min',
+  })
+  harvestEstimateUrl: string | null;
+
+  @ApiProperty({
+    type: [VerificationEvidenceDto],
+    description: 'Photos attached to a check that was marked ISSUE',
+  })
   evidence: VerificationEvidenceDto[];
 
   @ApiProperty({

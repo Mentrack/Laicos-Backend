@@ -111,6 +111,7 @@ describe('AuthService Google sign-in', () => {
           farmer: undefined,
           agent: undefined,
           buyer: { create: {} },
+          admin: undefined,
           refreshToken: { create: { token: 'firebase-refresh-token' } },
         },
       });

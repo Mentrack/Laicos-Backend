@@ -1,7 +1,9 @@
 import {
+  adminInviteEmail,
   farmRejectedEmail,
   farmerInviteEmail,
   farmerVerifiedGoogleEmail,
+  informationRequestEmail,
   passwordResetEmail,
 } from '../templates';
 
@@ -22,6 +24,23 @@ describe('email templates', () => {
       expect(body).toContain('Tmp-Pass_123');
       expect(body).toContain(loginUrl);
       expect(body).toMatch(/change (it|your password)/i);
+    }
+  });
+
+  it('invites an admin with their temporary password and the login link', () => {
+    const email = adminInviteEmail({
+      firstName: 'Laicos',
+      email: 'admin@laicos.test',
+      temporaryPassword: 'Tmp-Pass_123',
+      loginUrl,
+    });
+    expect(email.subject).toMatch(/admin/i);
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain('Laicos');
+      expect(body).toContain('admin@laicos.test');
+      expect(body).toContain('Tmp-Pass_123');
+      expect(body).toContain(loginUrl);
+      expect(body).toMatch(/change your password/i);
     }
   });
 
@@ -51,6 +70,23 @@ describe('email templates', () => {
       'href="https://app.laicos.ng/reset-password?oobCode=abc"',
     );
     expect(email.text).toContain(resetUrl);
+  });
+
+  it('asks an agent for the documents an admin named', () => {
+    const email = informationRequestEmail({
+      firstName: 'Halima',
+      farmCode: 'LF-000451',
+      documents: ['Location document', 'Signed declaration'],
+      note: 'Upload both before the next review.',
+    });
+    expect(email.subject).toContain('LF-000451');
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain('Halima');
+      expect(body).toContain('LF-000451');
+      expect(body).toContain('Location document');
+      expect(body).toContain('Signed declaration');
+      expect(body).toContain('Upload both before the next review.');
+    }
   });
 
   it('escapes what users typed into the HTML', () => {

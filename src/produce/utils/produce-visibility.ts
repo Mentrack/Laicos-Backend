@@ -7,10 +7,11 @@ import {
 import { farmOwnedBy } from '../../common/ownership';
 
 // A farmer sees all their own produce. Everyone else, guests included, sees
-// only listings that are out of draft on a farm an agent has verified.
+// only listings still on sale (published or sold out) on a verified farm.
+// DISABLED and DRAFT stay off the shop.
 export function visibleTo(user: User | null): Prisma.ProduceWhereInput {
   const shoppable: Prisma.ProduceWhereInput = {
-    status: { not: ProduceStatus.DRAFT },
+    status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
     farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
   };
   return { OR: user ? [shoppable, { farm: farmOwnedBy(user) }] : [shoppable] };

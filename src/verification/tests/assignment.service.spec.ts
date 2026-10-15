@@ -1,4 +1,8 @@
-import { VerificationTaskStatus, type Prisma } from '../../../generated/client';
+import {
+  EvidenceStatus,
+  VerificationTaskStatus,
+  type Prisma,
+} from '../../../generated/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AssignmentService } from '../services/assignment.service';
 
@@ -108,6 +112,12 @@ describe('AssignmentService', () => {
   });
 
   it('resets a round and returns its evidence keys', async () => {
+    farmVerification.findUnique.mockResolvedValue({
+      locationEvidenceKey: 'loc',
+      productionEvidenceKey: null,
+      farmPlotSketchKey: 'plot',
+      harvestEstimateKey: null,
+    });
     verificationEvidence.findMany.mockResolvedValue([
       { storageKey: 'a' },
       { storageKey: 'b' },
@@ -115,6 +125,8 @@ describe('AssignmentService', () => {
     await expect(service.resetRound(client, 'round-1')).resolves.toEqual([
       'a',
       'b',
+      'loc',
+      'plot',
     ]);
     expect(verificationCheck.deleteMany).toHaveBeenCalledWith({
       where: { verificationId: 'round-1' },
@@ -125,6 +137,13 @@ describe('AssignmentService', () => {
         agentId: null,
         status: VerificationTaskStatus.UNASSIGNED,
         locationMatches: null,
+        evidenceStatus: EvidenceStatus.MISSING_DOCS,
+        locationEvidenceKey: null,
+        productionEvidenceKey: null,
+        farmPlotSketchKey: null,
+        harvestEstimateKey: null,
+        informationRequestNote: null,
+        informationRequestedAt: null,
         startedAt: null,
       }),
     });

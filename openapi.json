@@ -409,7 +409,7 @@
     },
     "/auth/me": {
       "get": {
-        "description": "Read fresh on every call. Allowed while a password change is pending, so the client can check mustChangePassword.",
+        "description": "Read fresh on every call. Allowed while a password change is pending, and while the farmer is suspended, so the client can check mustChangePassword and who is signed in.",
         "operationId": "AuthController_getCurrentUser",
         "parameters": [],
         "responses": {
@@ -946,7 +946,7 @@
     },
     "/farmers": {
       "get": {
-        "description": "Newest first. Rows carry no ID number or ID document.",
+        "description": "Newest first. Rows carry no ID number or ID document. Admins only.",
         "operationId": "FarmController_findFarmers",
         "parameters": [
           {
@@ -983,6 +983,11 @@
             }
           }
         },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
         "summary": "List farmers",
         "tags": [
           "Farmers"
@@ -1132,6 +1137,186 @@
           }
         ],
         "summary": "Get a farmer’s public profile",
+        "tags": [
+          "Farmers"
+        ]
+      }
+    },
+    "/admin/farms/summary": {
+      "get": {
+        "description": "The cards above the list. Not affected by the list search or filters. verificationRate is the nearest percent of farms that are VERIFIED, or 0 when there are no farms. REJECTED farms are in the rate and in none of the status cards.",
+        "operationId": "AdminFarmController_summary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFarmSummaryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count the farmers directory",
+        "tags": [
+          "Farms"
+        ]
+      }
+    },
+    "/admin/farms": {
+      "get": {
+        "description": "One row per farm, newest first. Search matches the farmer name, phone, farmer code, farm code or farm name. Filter with stateId and status. Documents are on GET /admin/farms/{id}.",
+        "operationId": "AdminFarmController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive match on the farmer name, phone, farmer code, farm code or farm name",
+            "schema": {
+              "maxLength": 120,
+              "example": "amina",
+              "type": "string"
+            }
+          },
+          {
+            "name": "stateId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/FarmVerificationStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFarmRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List farms",
+        "tags": [
+          "Farms"
+        ]
+      }
+    },
+    "/admin/farms/{id}": {
+      "get": {
+        "description": "{id} is the Farm id. The farmer is the page header. Includes listings, sale totals, the five newest sales, the supply cluster, each round’s expected documents and evidence status, issue photos, every verification round and the cluster agent. Document and evidence links expire in 15 minutes. 404 when the farm does not exist.",
+        "operationId": "AdminFarmController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFarmDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a farm",
+        "tags": [
+          "Farms"
+        ]
+      }
+    },
+    "/admin/farmers/{id}/suspend": {
+      "post": {
+        "description": "{id} is Farmer.id. Sets the farmer to DISABLED and every farm they own to SUSPENDED. 409 when any of those farms has an order in PENDING, CONFIRMED, PREPARING, READY or SHIPPED. Unpaid, cancelled and fulfilled orders do not block it. 404 when the farmer does not exist. A later approved verification sets that farm back to VERIFIED and the farmer back to ACTIVE.",
+        "operationId": "AdminFarmerController_suspend",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuspendedFarmerResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Suspend a farmer",
         "tags": [
           "Farmers"
         ]
@@ -1287,7 +1472,7 @@
         ]
       },
       "patch": {
-        "description": "The identity note, measured size, estimated yield and the general inspection note.",
+        "description": "The identity note, measured size, estimated yield, the general inspection note, and the evidence status.",
         "operationId": "VerificationController_update",
         "parameters": [
           {
@@ -1326,7 +1511,7 @@
             "bearer": []
           }
         ],
-        "summary": "Save notes and measurements",
+        "summary": "Save notes, measurements and evidence status",
         "tags": [
           "Verifications"
         ]
@@ -1509,7 +1694,7 @@
     },
     "/verifications/{id}/evidence": {
       "post": {
-        "description": "Multipart image in `file` (5 MB). CHECK evidence names its checkKey; PHOTO evidence names its photoSlot and replaces that slot’s photo.",
+        "description": "Multipart image in `file` (5 MB). `document` stores location evidence, production evidence, the farm plot sketch or the harvest estimate, replacing that field. `checkKey` stores a photo for a check marked ISSUE. Send one of them.",
         "operationId": "VerificationController_addEvidence",
         "parameters": [
           {
@@ -1564,7 +1749,7 @@
             "bearer": []
           }
         ],
-        "summary": "Upload an evidence photo",
+        "summary": "Upload an expected document or an issue photo",
         "tags": [
           "Verifications"
         ]
@@ -1741,6 +1926,53 @@
           }
         ],
         "summary": "Reject the farm",
+        "tags": [
+          "Verifications"
+        ]
+      }
+    },
+    "/admin/verifications/{id}/information-request": {
+      "post": {
+        "description": "{id} is the verification round. Sets evidenceStatus to AWAITING_DOCS, stores the note, and emails the assigned agent. documents must be missing: FARMER_ID, LOCATION_EVIDENCE (location document), or HARVEST_ESTIMATE (signed declaration of harvest quantity). 409 when the round is approved or rejected, or when no agent is assigned. 404 when the round does not exist. The note is kept if the email fails.",
+        "operationId": "AdminVerificationController_request",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInformationRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InformationRequestResultResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Ask the assigned agent for missing documents",
         "tags": [
           "Verifications"
         ]
@@ -2111,6 +2343,270 @@
           }
         ],
         "summary": "Delete one of my listings",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
+    "/admin/produce/summary": {
+      "get": {
+        "description": "The cards above the table. Not affected by the table search or filters. activeListings is PUBLISHED plus SOLD_OUT. inactiveListings is DRAFT plus DISABLED. availableStockKg sums floatingQuantity where the unit is kg; other units are left out. recentListings were created in the last 7 days.",
+        "operationId": "AdminProduceController_summary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProduceSummaryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count the produce catalogue",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
+    "/admin/produce": {
+      "get": {
+        "description": "Newest first, including drafts and listings on farms that are not verified. Search matches the product name, farm name or farm code. Filter with category and status.",
+        "operationId": "AdminProduceController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive match on the product name, farm name or farm code",
+            "schema": {
+              "maxLength": 120,
+              "example": "sesame",
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceCategory"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProduceRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List every produce listing",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
+    "/admin/produce/{id}/disable": {
+      "post": {
+        "description": "Sets the listing to DISABLED, which takes it off the shop. 409 when it has an order in PENDING, CONFIRMED, PREPARING, READY or SHIPPED. 404 when the listing does not exist. A farmer edit cannot publish it again.",
+        "operationId": "AdminProduceController_disable",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProduceActionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Disable a listing",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
+    "/admin/produce/{id}": {
+      "delete": {
+        "description": "Deletes a DISABLED listing. 409 when it is not disabled, or when it already has orders. 404 when the listing does not exist.",
+        "operationId": "AdminProduceController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProduceActionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove a disabled listing",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
+    "/admin/farms/{farmId}/produce": {
+      "get": {
+        "description": "{farmId} is Farm.id. Same rows as GET /admin/produce, limited to that farm, including drafts. Search, category and status still filter. 404 when the farm does not exist. An empty page when it has no listings.",
+        "operationId": "AdminFarmProduceController_findByFarm",
+        "parameters": [
+          {
+            "name": "farmId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive match on the product name, farm name or farm code",
+            "schema": {
+              "maxLength": 120,
+              "example": "sesame",
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceCategory"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProduceRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List a farm’s produce",
         "tags": [
           "Produce"
         ]
@@ -3585,6 +4081,72 @@
         ]
       }
     },
+    "/admins/me": {
+      "get": {
+        "description": "My public code. Name and email stay on GET /auth/me.",
+        "operationId": "AdminController_findMine",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my admin profile",
+        "tags": [
+          "Admins"
+        ]
+      }
+    },
+    "/admins": {
+      "post": {
+        "description": "Creates their account with a temporary password and emails it. They must change that password before any other route. 409 when the email is registered.",
+        "operationId": "AdminController_invite",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteAdminDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProfileResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Invite an admin",
+        "tags": [
+          "Admins"
+        ]
+      }
+    },
     "/agents/signup": {
       "post": {
         "description": "Public, multipart: my details, state and LGA, and idDocument (my ID; PDF or image, 10 MB). No password: I get access once an admin verifies me. Until then sign-in answers 403 VERIFICATION_PENDING. 409 when the email is registered.",
@@ -4813,6 +5375,10 @@
       "description": "Registration, login (email/password or Google), token refresh, password reset, the signed-in user, and their name, phone and avatar."
     },
     {
+      "name": "Admins",
+      "description": "Admin profiles. The first admin is seeded; an existing admin invites the next ones. Name and email stay on the user."
+    },
+    {
       "name": "Locations",
       "description": "Nigerian states and LGAs for the location dropdowns. Public; no token needed."
     },
@@ -4955,7 +5521,7 @@
             ],
             "type": "string",
             "example": "BUYER",
-            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup instead: they get no password until they are verified."
+            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins."
           }
         },
         "required": [
@@ -5189,7 +5755,7 @@
             ],
             "type": "string",
             "example": "BUYER",
-            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup instead: they get no password until they are verified."
+            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins."
           }
         },
         "required": [
@@ -5449,7 +6015,8 @@
         "enum": [
           "PENDING",
           "VERIFIED",
-          "REJECTED"
+          "REJECTED",
+          "SUSPENDED"
         ]
       },
       "FarmDto": {
@@ -6158,6 +6725,948 @@
           "data"
         ]
       },
+      "AdminFarmSummaryDto": {
+        "type": "object",
+        "properties": {
+          "totalFarmers": {
+            "type": "integer"
+          },
+          "stateCount": {
+            "type": "integer",
+            "description": "Distinct states that have at least one farm"
+          },
+          "verifiedFarms": {
+            "type": "integer"
+          },
+          "verificationRate": {
+            "type": "integer",
+            "description": "Nearest percent of farms that are VERIFIED. 0 when there are no farms"
+          },
+          "awaitingReview": {
+            "type": "integer",
+            "description": "Farms whose verification status is PENDING"
+          },
+          "suspendedFarms": {
+            "type": "integer",
+            "description": "Farms whose verification status is SUSPENDED"
+          },
+          "activeClusters": {
+            "type": "integer",
+            "description": "Clusters that contain at least one farm"
+          },
+          "participatingFarms": {
+            "type": "integer",
+            "description": "Farms assigned to a cluster"
+          },
+          "produceTypes": {
+            "type": "integer",
+            "description": "Distinct farm main produce, compared case-insensitively, ignoring blanks"
+          }
+        },
+        "required": [
+          "totalFarmers",
+          "stateCount",
+          "verifiedFarms",
+          "verificationRate",
+          "awaitingReview",
+          "suspendedFarms",
+          "activeClusters",
+          "participatingFarms",
+          "produceTypes"
+        ]
+      },
+      "AdminFarmSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminFarmSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "FarmerStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "INACTIVE",
+          "DISABLED"
+        ],
+        "description": "Account standing. New farmers are ACTIVE"
+      },
+      "AdminFarmFarmerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id"
+          },
+          "farmerId": {
+            "type": "string",
+            "example": "FRM-000123"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Amina"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Garba"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "+2348012345678"
+          },
+          "status": {
+            "description": "Account standing. New farmers are ACTIVE",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmerStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "farmerId",
+          "firstName",
+          "lastName",
+          "phoneNumber",
+          "status"
+        ]
+      },
+      "AdminFarmRowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farm.id"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123"
+          },
+          "name": {
+            "type": "string",
+            "example": "Green Acres"
+          },
+          "size": {
+            "type": "number",
+            "example": 5,
+            "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "example": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "example": "Maize"
+          },
+          "verificationStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmVerificationStatus"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          },
+          "farmer": {
+            "$ref": "#/components/schemas/AdminFarmFarmerDto"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "name",
+          "size",
+          "unit",
+          "mainProduce",
+          "verificationStatus",
+          "state",
+          "lga",
+          "farmer"
+        ]
+      },
+      "AdminFarmRowListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminFarmRowDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "ProduceStatus": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "PUBLISHED",
+          "SOLD_OUT",
+          "DISABLED"
+        ]
+      },
+      "AdminFarmProductDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "White maize"
+          },
+          "quantity": {
+            "type": "integer",
+            "example": 8000,
+            "description": "Amount first listed, in `unit`"
+          },
+          "unit": {
+            "type": "string",
+            "example": "kg"
+          },
+          "pricePerUnit": {
+            "type": "string",
+            "example": "280.00"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "quantity",
+          "unit",
+          "pricePerUnit",
+          "status"
+        ]
+      },
+      "OrderStatus": {
+        "type": "string",
+        "enum": [
+          "AWAITING_PAYMENT",
+          "PENDING",
+          "CONFIRMED",
+          "PREPARING",
+          "READY",
+          "SHIPPED",
+          "FULFILLED",
+          "CANCELLED"
+        ]
+      },
+      "AdminFarmOrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "produceName": {
+            "type": "string",
+            "example": "White maize"
+          },
+          "quantity": {
+            "type": "integer",
+            "example": 1000
+          },
+          "unit": {
+            "type": "string",
+            "example": "kg"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrderStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "orderNumber",
+          "produceName",
+          "quantity",
+          "unit",
+          "status"
+        ]
+      },
+      "AdminFarmMarketplaceDto": {
+        "type": "object",
+        "properties": {
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminFarmProductDto"
+            }
+          },
+          "activeProducts": {
+            "type": "integer",
+            "description": "Listings whose status is PUBLISHED"
+          },
+          "completedOrders": {
+            "type": "integer",
+            "description": "Orders whose status is FULFILLED"
+          },
+          "totalSold": {
+            "type": "integer",
+            "description": "Sum of quantity on every order except CANCELLED and AWAITING_PAYMENT. Units are not converted."
+          },
+          "recentOrders": {
+            "description": "Five newest sales",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminFarmOrderDto"
+            }
+          }
+        },
+        "required": [
+          "products",
+          "activeProducts",
+          "completedOrders",
+          "totalSold",
+          "recentOrders"
+        ]
+      },
+      "AdminFarmClusterDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Dawakin Kudu Hub",
+            "description": "Set when the agent sets their LGA"
+          },
+          "farmCount": {
+            "type": "integer",
+            "description": "Farms currently in the cluster"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "farmCount"
+        ]
+      },
+      "EvidenceKind": {
+        "type": "string",
+        "enum": [
+          "CHECK",
+          "LOCATION_DISCREPANCY",
+          "PHOTO"
+        ]
+      },
+      "VerificationCheckKey": {
+        "type": "string",
+        "enum": [
+          "FARMER_ID",
+          "FARM_OWNERSHIP",
+          "CHIEF_CONFIRMATION",
+          "FARM_ACTIVE",
+          "ACCESS_ROUTE",
+          "MEASUREMENTS",
+          "DECLARED_PRODUCE",
+          "CROP_HEALTH",
+          "ESTIMATED_YIELD"
+        ]
+      },
+      "PhotoSlot": {
+        "type": "string",
+        "enum": [
+          "ENTRANCE",
+          "FARM_AREA",
+          "PRODUCE",
+          "INFRASTRUCTURE"
+        ]
+      },
+      "AdminFarmEvidenceFileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceKind"
+              }
+            ]
+          },
+          "checkKey": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationCheckKey"
+              }
+            ]
+          },
+          "photoSlot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhotoSlot"
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "verificationId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "checkKey",
+          "photoSlot",
+          "url",
+          "createdAt",
+          "verificationId"
+        ]
+      },
+      "VerificationTaskStatus": {
+        "type": "string",
+        "enum": [
+          "UNASSIGNED",
+          "ASSIGNED",
+          "IN_PROGRESS",
+          "APPROVED",
+          "REJECTED"
+        ]
+      },
+      "EvidenceStatus": {
+        "type": "string",
+        "enum": [
+          "INCOMPLETE",
+          "AWAITING_DOCS",
+          "FOLLOW_UP",
+          "MISSING_DOCS"
+        ]
+      },
+      "AdminFarmDocumentsDto": {
+        "type": "object",
+        "properties": {
+          "locationEvidenceUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "productionEvidenceUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "farmPlotSketchUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "harvestEstimateUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          }
+        },
+        "required": [
+          "locationEvidenceUrl",
+          "productionEvidenceUrl",
+          "farmPlotSketchUrl",
+          "harvestEstimateUrl"
+        ]
+      },
+      "AdminFarmAgentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Agent.id"
+          },
+          "agentId": {
+            "type": "string",
+            "example": "AG-000123"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Halima"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Bello"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "firstName",
+          "lastName"
+        ]
+      },
+      "AdminFarmEvidenceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceKind"
+              }
+            ]
+          },
+          "checkKey": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationCheckKey"
+              }
+            ]
+          },
+          "photoSlot": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhotoSlot"
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "checkKey",
+          "photoSlot",
+          "url",
+          "createdAt"
+        ]
+      },
+      "AdminFarmVerificationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationTaskStatus"
+              }
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decidedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "note": {
+            "type": "string",
+            "nullable": true,
+            "description": "Rejection reason when REJECTED, otherwise the general note"
+          },
+          "evidenceStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceStatus"
+              }
+            ]
+          },
+          "informationRequestNote": {
+            "type": "string",
+            "nullable": true,
+            "description": "Note sent to the assigned agent with the last information request"
+          },
+          "informationRequestedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "documents": {
+            "$ref": "#/components/schemas/AdminFarmDocumentsDto"
+          },
+          "agent": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminFarmAgentDto"
+              }
+            ]
+          },
+          "evidence": {
+            "description": "Photos attached to a check that was marked ISSUE",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminFarmEvidenceDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "createdAt",
+          "decidedAt",
+          "note",
+          "evidenceStatus",
+          "informationRequestNote",
+          "informationRequestedAt",
+          "documents",
+          "agent",
+          "evidence"
+        ]
+      },
+      "AdminFarmAssignedAgentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Agent.id"
+          },
+          "agentId": {
+            "type": "string",
+            "example": "AG-000123"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Halima"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Bello"
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StateDto"
+              }
+            ]
+          },
+          "lga": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LgaDto"
+              }
+            ]
+          },
+          "farmCount": {
+            "type": "integer",
+            "description": "Farms in this agent's cluster"
+          },
+          "visits": {
+            "type": "integer",
+            "description": "Verification rounds on this farm handled by this agent"
+          },
+          "lastVisitAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Latest decided, started, or opened time of those rounds"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "firstName",
+          "lastName",
+          "state",
+          "lga",
+          "farmCount",
+          "visits",
+          "lastVisitAt"
+        ]
+      },
+      "AdminFarmDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000123",
+            "description": "Public farm code"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id of the owner"
+          },
+          "name": {
+            "type": "string",
+            "example": "Green Acres"
+          },
+          "country": {
+            "type": "string",
+            "example": "NG"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StateDto"
+          },
+          "lga": {
+            "$ref": "#/components/schemas/LgaDto"
+          },
+          "location": {
+            "type": "string",
+            "example": "12 Market Road",
+            "description": "Street address"
+          },
+          "size": {
+            "type": "number",
+            "example": 2.5,
+            "description": "Size in hectares"
+          },
+          "unit": {
+            "type": "string",
+            "example": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean"
+          },
+          "referralAgentId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "Referring agent (Agent.id)"
+          },
+          "verificationStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmVerificationStatus"
+              }
+            ]
+          },
+          "rejectionReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Why the latest verification was rejected, while REJECTED"
+          },
+          "isClustered": {
+            "type": "boolean"
+          },
+          "clusterId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "ownershipDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "chiefConfirmationUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "farmer": {
+            "$ref": "#/components/schemas/AdminFarmFarmerDto"
+          },
+          "marketplace": {
+            "$ref": "#/components/schemas/AdminFarmMarketplaceDto"
+          },
+          "cluster": {
+            "nullable": true,
+            "description": "Null when the farm is not in a cluster",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminFarmClusterDto"
+              }
+            ]
+          },
+          "evidence": {
+            "description": "Every evidence file, newest first",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminFarmEvidenceFileDto"
+            }
+          },
+          "verifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminFarmVerificationDto"
+            }
+          },
+          "assignedAgent": {
+            "nullable": true,
+            "description": "Agent whose cluster holds the farm, when it is clustered",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminFarmAssignedAgentDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "ownerId",
+          "name",
+          "country",
+          "state",
+          "lga",
+          "location",
+          "size",
+          "unit",
+          "mainProduce",
+          "isExporting",
+          "referralAgentId",
+          "verificationStatus",
+          "rejectionReason",
+          "isClustered",
+          "clusterId",
+          "ownershipDocumentUrl",
+          "chiefConfirmationUrl",
+          "createdAt",
+          "updatedAt",
+          "farmer",
+          "marketplace",
+          "cluster",
+          "evidence",
+          "verifications",
+          "assignedAgent"
+        ]
+      },
+      "AdminFarmDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminFarmDetailDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "SuspendedFarmerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmerStatus"
+              }
+            ]
+          },
+          "farmsSuspended": {
+            "type": "integer",
+            "description": "Farms set to SUSPENDED"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "farmsSuspended"
+        ]
+      },
+      "SuspendedFarmerResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SuspendedFarmerDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "StateArrayResponseDto": {
         "type": "object",
         "properties": {
@@ -6194,16 +7703,6 @@
         "required": [
           "message",
           "data"
-        ]
-      },
-      "VerificationTaskStatus": {
-        "type": "string",
-        "enum": [
-          "UNASSIGNED",
-          "ASSIGNED",
-          "IN_PROGRESS",
-          "APPROVED",
-          "REJECTED"
         ]
       },
       "FarmSummaryDto": {
@@ -6275,6 +7774,13 @@
           "farm": {
             "$ref": "#/components/schemas/FarmSummaryDto"
           },
+          "evidenceStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceStatus"
+              }
+            ]
+          },
           "startedAt": {
             "format": "date-time",
             "type": "string",
@@ -6294,6 +7800,7 @@
           "id",
           "status",
           "farm",
+          "evidenceStatus",
           "startedAt",
           "decidedAt",
           "createdAt"
@@ -6447,20 +7954,6 @@
           "farmer"
         ]
       },
-      "VerificationCheckKey": {
-        "type": "string",
-        "enum": [
-          "FARMER_ID",
-          "FARM_OWNERSHIP",
-          "CHIEF_CONFIRMATION",
-          "FARM_ACTIVE",
-          "ACCESS_ROUTE",
-          "MEASUREMENTS",
-          "DECLARED_PRODUCE",
-          "CROP_HEALTH",
-          "ESTIMATED_YIELD"
-        ]
-      },
       "CheckResult": {
         "type": "string",
         "enum": [
@@ -6496,23 +7989,6 @@
           "key",
           "result",
           "note"
-        ]
-      },
-      "EvidenceKind": {
-        "type": "string",
-        "enum": [
-          "CHECK",
-          "LOCATION_DISCREPANCY",
-          "PHOTO"
-        ]
-      },
-      "PhotoSlot": {
-        "type": "string",
-        "enum": [
-          "ENTRANCE",
-          "FARM_AREA",
-          "PRODUCE",
-          "INFRASTRUCTURE"
         ]
       },
       "VerificationEvidenceDto": {
@@ -6580,6 +8056,13 @@
           "farm": {
             "$ref": "#/components/schemas/VerificationFarmDto"
           },
+          "evidenceStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceStatus"
+              }
+            ]
+          },
           "startedAt": {
             "format": "date-time",
             "type": "string",
@@ -6640,13 +8123,44 @@
             "type": "string",
             "nullable": true
           },
+          "informationRequestNote": {
+            "type": "string",
+            "nullable": true,
+            "description": "Note sent to the assigned agent with the last information request"
+          },
+          "informationRequestedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
           "checks": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VerificationCheckDto"
             }
           },
+          "locationEvidenceUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "productionEvidenceUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "farmPlotSketchUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
+          "harvestEstimateUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned; expires in 15 min"
+          },
           "evidence": {
+            "description": "Photos attached to a check that was marked ISSUE",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VerificationEvidenceDto"
@@ -6667,6 +8181,7 @@
           "id",
           "status",
           "farm",
+          "evidenceStatus",
           "startedAt",
           "decidedAt",
           "createdAt",
@@ -6680,7 +8195,13 @@
           "estimatedYieldUnit",
           "generalNote",
           "rejectionReason",
+          "informationRequestNote",
+          "informationRequestedAt",
           "checks",
+          "locationEvidenceUrl",
+          "productionEvidenceUrl",
+          "farmPlotSketchUrl",
+          "harvestEstimateUrl",
           "evidence",
           "outstanding"
         ]
@@ -6773,39 +8294,47 @@
           "generalNote": {
             "type": "string",
             "maxLength": 2000
+          },
+          "evidenceStatus": {
+            "description": "AWAITING_DOCS and FOLLOW_UP stay until set again. MISSING_DOCS and INCOMPLETE are also recalculated when a document changes.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceStatus"
+              }
+            ]
           }
         }
+      },
+      "ExpectedDocument": {
+        "type": "string",
+        "enum": [
+          "LOCATION_EVIDENCE",
+          "PRODUCTION_EVIDENCE",
+          "FARM_PLOT_SKETCH",
+          "HARVEST_ESTIMATE"
+        ],
+        "description": "One of the documents the round collects. Replaces that document. Send this or checkKey, not both."
       },
       "AddEvidenceDto": {
         "type": "object",
         "properties": {
-          "kind": {
+          "document": {
+            "description": "One of the documents the round collects. Replaces that document. Send this or checkKey, not both.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/EvidenceKind"
+                "$ref": "#/components/schemas/ExpectedDocument"
               }
             ]
           },
           "checkKey": {
-            "description": "Required for CHECK evidence only",
+            "description": "The check an ISSUE photo belongs to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VerificationCheckKey"
               }
             ]
-          },
-          "photoSlot": {
-            "description": "Required for PHOTO evidence only; replaces that slot’s photo",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PhotoSlot"
-              }
-            ]
           }
-        },
-        "required": [
-          "kind"
-        ]
+        }
       },
       "VerificationReasonDto": {
         "type": "object",
@@ -6820,12 +8349,87 @@
           "reason"
         ]
       },
-      "ProduceStatus": {
+      "InformationRequestDocument": {
         "type": "string",
         "enum": [
-          "DRAFT",
-          "PUBLISHED",
-          "SOLD_OUT"
+          "FARMER_ID",
+          "LOCATION_EVIDENCE",
+          "HARVEST_ESTIMATE"
+        ]
+      },
+      "CreateInformationRequestDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 2000,
+            "example": "Please upload the location document before the next review."
+          },
+          "documents": {
+            "uniqueItems": true,
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InformationRequestDocument"
+            }
+          }
+        },
+        "required": [
+          "note",
+          "documents"
+        ]
+      },
+      "InformationRequestResultDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "evidenceStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceStatus"
+              }
+            ]
+          },
+          "informationRequestNote": {
+            "type": "string"
+          },
+          "informationRequestedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InformationRequestDocument"
+            },
+            "description": "Requestable documents that are still missing"
+          }
+        },
+        "required": [
+          "id",
+          "evidenceStatus",
+          "informationRequestNote",
+          "informationRequestedAt",
+          "missing"
+        ]
+      },
+      "InformationRequestResultResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/InformationRequestResultDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "ProduceType": {
@@ -7289,6 +8893,191 @@
           }
         }
       },
+      "AdminProduceSummaryDto": {
+        "type": "object",
+        "properties": {
+          "totalProducts": {
+            "type": "integer"
+          },
+          "categoryCount": {
+            "type": "integer",
+            "description": "Distinct categories actually used. Listings with no category are left out"
+          },
+          "participatingFarms": {
+            "type": "integer",
+            "description": "Farms with at least one listing"
+          },
+          "activeListings": {
+            "type": "integer",
+            "description": "PUBLISHED and SOLD_OUT listings"
+          },
+          "inactiveListings": {
+            "type": "integer",
+            "description": "DRAFT and DISABLED listings"
+          },
+          "availableStockKg": {
+            "type": "integer",
+            "description": "Sum of floatingQuantity where the unit is kg. Other units are left out"
+          },
+          "activeClusters": {
+            "type": "integer",
+            "description": "Clusters that contain a farm with a listing"
+          },
+          "recentListings": {
+            "type": "integer",
+            "description": "Listings created in the last 7 days"
+          }
+        },
+        "required": [
+          "totalProducts",
+          "categoryCount",
+          "participatingFarms",
+          "activeListings",
+          "inactiveListings",
+          "availableStockKg",
+          "activeClusters",
+          "recentListings"
+        ]
+      },
+      "AdminProduceSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminProduceSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "AdminProduceRowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Premium Sesame Seeds"
+          },
+          "farmId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000018"
+          },
+          "category": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCategory"
+              }
+            ]
+          },
+          "pricePerUnit": {
+            "type": "string",
+            "example": "1250.00"
+          },
+          "unit": {
+            "type": "string",
+            "example": "kg"
+          },
+          "floatingQuantity": {
+            "type": "integer",
+            "description": "Stock buyers can still order, in `unit`"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceStatus"
+              }
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "farmId",
+          "farmCode",
+          "category",
+          "pricePerUnit",
+          "unit",
+          "floatingQuantity",
+          "status",
+          "createdAt"
+        ]
+      },
+      "AdminProduceRowListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminProduceRowDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "AdminProduceActionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
+      },
+      "AdminProduceActionResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminProduceActionDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "CreateOrderDto": {
         "type": "object",
         "properties": {
@@ -7373,19 +9162,6 @@
           "lga",
           "contactName",
           "contactPhone"
-        ]
-      },
-      "OrderStatus": {
-        "type": "string",
-        "enum": [
-          "AWAITING_PAYMENT",
-          "PENDING",
-          "CONFIRMED",
-          "PREPARING",
-          "READY",
-          "SHIPPED",
-          "FULFILLED",
-          "CANCELLED"
         ]
       },
       "OrderDto": {
@@ -9211,6 +10987,82 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "AdminProfileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adminId": {
+            "type": "string",
+            "example": "AD-000123",
+            "description": "Public admin code"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "adminId",
+          "userId",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "AdminProfileResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminProfileDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "InviteAdminDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "ngozi@laicos.ng"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Ngozi"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Adeyemi"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678",
+            "description": "Phone number in E.164 format"
+          }
+        },
+        "required": [
+          "email",
+          "firstName",
+          "lastName"
         ]
       },
       "AgentSignupDto": {
