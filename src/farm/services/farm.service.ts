@@ -411,11 +411,12 @@ function farmerDocumentEvents(
       resourceId: farmer.id,
     });
   }
-  if (documents.ownershipDocument) {
-    events.push(farmDocumentEvent(farmer.id, farmId, 'ownership'));
-  }
-  if (documents.chiefConfirmation) {
-    events.push(farmDocumentEvent(farmer.id, farmId, 'chief confirmation'));
+  const docSummary = farmDocumentsSummary(
+    documents.ownershipDocument,
+    documents.chiefConfirmation,
+  );
+  if (docSummary) {
+    events.push(farmDocumentEvent(farmer.id, farmId, docSummary));
   }
   return events;
 }

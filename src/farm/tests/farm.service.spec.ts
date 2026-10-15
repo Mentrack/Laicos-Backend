@@ -469,6 +469,26 @@ describe('FarmService', () => {
     replace.mockRestore();
   });
 
+  it('passes one combined farm-document row when both farm files are sent', async () => {
+    const replace = jest
+      .spyOn(FarmDocumentsService.prototype, 'replace')
+      .mockResolvedValue(undefined);
+    await service.replaceDocuments(user, farmId, {
+      ownershipDocument: pdf,
+      chiefConfirmation: pdf,
+    });
+    const events = replace.mock.calls[0][3] as unknown[];
+    expect(events).toHaveLength(1);
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        title: 'Farm documents uploaded',
+        summary: 'ownership and chief confirmation',
+        farmId,
+      }),
+    );
+    replace.mockRestore();
+  });
+
   it('passes a farmer ID event when only the ID document is replaced', async () => {
     farmer.findUnique.mockResolvedValue({
       id: 'farmer-1',
