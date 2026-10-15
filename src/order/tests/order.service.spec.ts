@@ -1,5 +1,8 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   FarmVerificationStatus,
   OrderStatus,
   Prisma,
@@ -8,6 +11,7 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { addDays, lagosToday } from '../../common/dates';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
@@ -16,6 +20,7 @@ import { OrderService } from '../order.service';
 
 const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
 const farmer = { id: 'farmer-1', role: Role.FARMER } as User;
+const admin = { id: 'admin-1', role: Role.ADMIN } as User;
 const orderId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 
@@ -74,9 +79,11 @@ describe('OrderService', () => {
       return typeof arg === 'function' ? arg(tx) : Promise.all(arg);
     },
   };
+  const audit = { record: jest.fn() };
   const service = new OrderService(
     database as unknown as PrismaService,
     testCheckoutConfig(),
+    audit as unknown as AuditService,
   );
   const published = {
     id: produceId,
@@ -95,6 +102,8 @@ describe('OrderService', () => {
     id: orderId,
     produceId,
     buyerId: buyer.id,
+    farmId: 'farm-1',
+    orderNumber: 'ORD-000001',
     quantity: 5,
     status: OrderStatus.PENDING,
     checkoutId: null,
@@ -104,6 +113,10 @@ describe('OrderService', () => {
     jest.resetAllMocks();
     buyerModel.findUnique.mockResolvedValue(buyerProfile(buyer.id));
     produce.update.mockResolvedValue(published);
+    farm.findUniqueOrThrow.mockResolvedValue({
+      farmCode: 'LF-000001',
+      ownerId: 'farmer-1',
+    });
   });
 
   describe('create (Buy Now)', () => {
@@ -496,6 +509,8 @@ describe('OrderService', () => {
   describe('markReady', () => {
     beforeEach(() =>
       farm.findUniqueOrThrow.mockResolvedValue({
+        farmCode: 'LF-000001',
+        ownerId: 'farmer-1',
         cluster: { agentId: 'agent-1' },
       }),
     );
@@ -527,11 +542,19 @@ describe('OrderService', () => {
     it('leaves the handover unassigned when the farm is in no cluster', async () => {
       order.findFirst.mockResolvedValue({ ...preparing, farmId: 'farm-1' });
       orderChecklist.findFirst.mockResolvedValue(ticked);
-      farm.findUniqueOrThrow.mockResolvedValue({ cluster: null });
+      farm.findUniqueOrThrow.mockResolvedValue({
+        farmCode: 'LF-000001',
+        ownerId: 'farmer-1',
+        cluster: null,
+      });
       await service.markReady(farmer, orderId);
       expect(farm.findUniqueOrThrow).toHaveBeenCalledWith({
         where: { id: 'farm-1' },
-        select: { cluster: { select: { agentId: true } } },
+        select: {
+          farmCode: true,
+          ownerId: true,
+          cluster: { select: { agentId: true } },
+        },
       });
       expect(order.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -670,6 +693,86 @@ describe('OrderService', () => {
       await expect(
         service.cancel(farmer, orderId, { reason }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('farmer order audit', () => {
+    const checklistDto = { sorted: true };
+    const farmForAudit = {
+      farmCode: 'LF-000001',
+      ownerId: 'farmer-1',
+    };
+    const auditEvent = (title: string, summary: string) => ({
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: pending.farmId,
+      category: AuditCategory.ORDER,
+      title,
+      summary,
+      actionLabel: 'View order',
+      resource: AuditResource.ORDER,
+      resourceId: orderId,
+    });
+
+    beforeEach(() => {
+      farm.findUniqueOrThrow.mockResolvedValue(farmForAudit);
+    });
+
+    it.each([
+      ['confirm', 'Order ORD-000001 confirmed'],
+      ['prepare', 'Order ORD-000001 prepared'],
+      ['markReady', 'Order ORD-000001 marked ready'],
+    ] as const)('%s records the farmer', async (method, title) => {
+      if (method === 'confirm') {
+        order.findFirst.mockResolvedValue(pending);
+        produce.findUniqueOrThrow.mockResolvedValue(published);
+      } else if (method === 'prepare') {
+        order.findFirst.mockResolvedValue({
+          ...pending,
+          status: OrderStatus.CONFIRMED,
+        });
+      } else {
+        order.findFirst.mockResolvedValue(preparing);
+        orderChecklist.findFirst.mockResolvedValue(ticked);
+        farm.findUniqueOrThrow.mockResolvedValue({
+          ...farmForAudit,
+          cluster: { agentId: 'agent-1' },
+        });
+      }
+      await service[method](farmer, orderId);
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        auditEvent(title, 'LF-000001'),
+      );
+    });
+
+    it('updateChecklist records the farmer', async () => {
+      order.findFirst.mockResolvedValue(preparing);
+      await service.updateChecklist(farmer, orderId, checklistDto);
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        auditEvent('Order ORD-000001 checklist updated', 'LF-000001'),
+      );
+    });
+
+    it('cancel records the reason', async () => {
+      order.findFirst.mockResolvedValue(pending);
+      await service.cancel(farmer, orderId, { reason: 'Harvest failed' });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          title: 'Order ORD-000001 cancelled',
+          summary: 'Harvest failed',
+        }),
+      );
+    });
+
+    it('an admin transition writes nothing', async () => {
+      order.findFirst.mockResolvedValue(pending);
+      produce.findUniqueOrThrow.mockResolvedValue(published);
+      await service.confirm(admin, orderId);
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 
