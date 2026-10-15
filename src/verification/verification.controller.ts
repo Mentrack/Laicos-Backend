@@ -123,9 +123,9 @@ export class VerificationController {
 
   @Patch(':id')
   @ApiOperation({
-    summary: 'Save notes and measurements',
+    summary: 'Save notes, measurements and evidence status',
     description:
-      'The identity note, measured size, estimated yield and the general inspection note.',
+      'The identity note, measured size, estimated yield, the general inspection note, and the evidence status.',
   })
   @ApiEnvelope(VerificationDto)
   async update(
@@ -181,9 +181,9 @@ export class VerificationController {
 
   @Post(':id/evidence')
   @ApiOperation({
-    summary: 'Upload an evidence photo',
+    summary: 'Upload an expected document or an issue photo',
     description:
-      'Multipart image in `file` (5 MB). CHECK evidence names its checkKey; PHOTO evidence names its photoSlot and replaces that slot’s photo.',
+      'Multipart image in `file` (5 MB). `document` stores location evidence, production evidence, the farm plot sketch or the harvest estimate, replacing that field. `checkKey` stores a photo for a check marked ISSUE. Send one of them.',
   })
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: IMAGE_MAX_BYTES } }),

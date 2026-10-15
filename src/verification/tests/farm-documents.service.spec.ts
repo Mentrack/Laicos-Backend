@@ -28,9 +28,14 @@ function stored(overrides: Record<string, unknown> = {}) {
 }
 
 describe('FarmDocumentsService', () => {
-  const farm = { findFirst: jest.fn(), update: jest.fn() };
+  const farm = {
+    findFirst: jest.fn(),
+    findUnique: jest.fn(),
+    update: jest.fn(),
+  };
   const farmer = { update: jest.fn() };
-  const tx = { farm, farmer };
+  const farmVerification = { update: jest.fn() };
+  const tx = { farm, farmer, farmVerification };
   const database = {
     ...tx,
     $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>

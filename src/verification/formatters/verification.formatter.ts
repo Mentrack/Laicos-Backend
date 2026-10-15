@@ -44,6 +44,7 @@ export function formatVerificationSummary(
     id: round.id,
     status: round.status,
     farm: formatFarmSummary(round.farm),
+    evidenceStatus: round.evidenceStatus,
     startedAt: round.startedAt,
     decidedAt: round.decidedAt,
     createdAt: round.createdAt,
@@ -56,22 +57,34 @@ export async function formatVerification(
 ): Promise<VerificationDto> {
   const { farm } = round;
   const { owner } = farm;
-  const [ownershipDocumentUrl, chiefConfirmationUrl, identity, evidence] =
-    await Promise.all([
-      storage.presignedUrlOrNull(farm.ownershipDocumentKey),
-      storage.presignedUrlOrNull(farm.chiefConfirmationKey),
-      formatIdentity(storage, owner),
-      Promise.all(
-        round.evidence.map(async (item) => ({
-          id: item.id,
-          kind: item.kind,
-          checkKey: item.checkKey,
-          photoSlot: item.photoSlot,
-          url: await storage.getPresignedUrl(item.storageKey),
-          createdAt: item.createdAt,
-        })),
-      ),
-    ]);
+  const [
+    ownershipDocumentUrl,
+    chiefConfirmationUrl,
+    locationEvidenceUrl,
+    productionEvidenceUrl,
+    farmPlotSketchUrl,
+    harvestEstimateUrl,
+    identity,
+    evidence,
+  ] = await Promise.all([
+    storage.presignedUrlOrNull(farm.ownershipDocumentKey),
+    storage.presignedUrlOrNull(farm.chiefConfirmationKey),
+    storage.presignedUrlOrNull(round.locationEvidenceKey),
+    storage.presignedUrlOrNull(round.productionEvidenceKey),
+    storage.presignedUrlOrNull(round.farmPlotSketchKey),
+    storage.presignedUrlOrNull(round.harvestEstimateKey),
+    formatIdentity(storage, owner),
+    Promise.all(
+      round.evidence.map(async (item) => ({
+        id: item.id,
+        kind: item.kind,
+        checkKey: item.checkKey,
+        photoSlot: item.photoSlot,
+        url: await storage.getPresignedUrl(item.storageKey),
+        createdAt: item.createdAt,
+      })),
+    ),
+  ]);
 
   return {
     ...formatVerificationSummary(round),
@@ -99,11 +112,17 @@ export async function formatVerification(
     estimatedYieldUnit: round.estimatedYieldUnit,
     generalNote: round.generalNote,
     rejectionReason: round.rejectionReason,
+    informationRequestNote: round.informationRequestNote ?? null,
+    informationRequestedAt: round.informationRequestedAt ?? null,
     checks: round.checks.map(({ key, result, note }) => ({
       key,
       result,
       note,
     })),
+    locationEvidenceUrl,
+    productionEvidenceUrl,
+    farmPlotSketchUrl,
+    harvestEstimateUrl,
     evidence,
     outstanding: checklistGaps(round),
   };

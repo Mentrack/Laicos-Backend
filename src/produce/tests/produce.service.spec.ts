@@ -23,11 +23,11 @@ const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
 const farmId = '6f1c1c3e-2b8e-4a55-9d0e-3b6b1f0c9a11';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const ownedByUser = { owner: { userId: user.id } };
-// Other farmers' produce shows only out of draft and on a verified farm.
+// Other farmers' produce shows only while it is on sale, on a verified farm.
 const visible = {
   OR: [
     {
-      status: { not: ProduceStatus.DRAFT },
+      status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
       farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
     },
     { farm: ownedByUser },
@@ -259,7 +259,7 @@ describe('ProduceService', () => {
       expect(findManyArgs().where).toMatchObject({
         OR: [
           {
-            status: { not: ProduceStatus.DRAFT },
+            status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
             farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
           },
         ],
@@ -276,7 +276,7 @@ describe('ProduceService', () => {
         id: produceId,
         OR: [
           {
-            status: { not: ProduceStatus.DRAFT },
+            status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
             farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
           },
         ],
@@ -370,6 +370,21 @@ describe('ProduceService', () => {
       expect(produce.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: ProduceStatus.SOLD_OUT }),
+        }),
+      );
+    });
+
+    it('keeps an admin-disabled listing disabled when the farmer edits it', async () => {
+      produce.findFirst.mockResolvedValue({
+        ...current,
+        status: ProduceStatus.DISABLED,
+      });
+      await service.update(user, produceId, {
+        status: ProduceStatus.PUBLISHED,
+      });
+      expect(produce.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: ProduceStatus.DISABLED }),
         }),
       );
     });

@@ -30,10 +30,10 @@ import { getAuth, type Auth, type UserRecord } from 'firebase-admin/auth';
 import {
   CheckResult,
   EvidenceKind,
+  EvidenceStatus,
   FarmVerificationStatus,
   IdType,
   OrderStatus,
-  PhotoSlot,
   Prisma,
   PrismaClient,
   ProduceCategory,
@@ -46,10 +46,7 @@ import {
 import { clusterName } from '../src/agent/utils/cluster-name';
 import { firebaseErrorCode } from '../src/auth/firebase/firebase.errors';
 import { deriveProduceStatus } from '../src/produce/utils/produce-status';
-import {
-  checklistGaps,
-  REQUIRED_PHOTOS,
-} from '../src/verification/utils/checklist';
+import { checklistGaps } from '../src/verification/utils/checklist';
 
 // ---------------------------------------------------------------------------
 // Seed data
@@ -96,7 +93,13 @@ interface SeedCheck {
 interface SeedEvidence {
   kind: EvidenceKind;
   checkKey?: VerificationCheckKey;
-  photoSlot?: PhotoSlot;
+}
+
+interface SeedDocuments {
+  locationEvidence?: boolean;
+  productionEvidence?: boolean;
+  farmPlotSketch?: boolean;
+  harvestEstimate?: boolean;
 }
 
 interface SeedRound {
@@ -113,6 +116,8 @@ interface SeedRound {
   rejectionReason?: string;
   checks?: SeedCheck[];
   evidence?: SeedEvidence[];
+  documents?: SeedDocuments;
+  evidenceStatus?: EvidenceStatus;
   declines?: { agent: AgentKey; reason: string }[];
 }
 
@@ -254,9 +259,12 @@ function cleanChecks(overrides: SeedCheck[] = []): SeedCheck[] {
   );
 }
 
-const REQUIRED_PHOTO_EVIDENCE: SeedEvidence[] = REQUIRED_PHOTOS.map(
-  (photoSlot) => ({ kind: EvidenceKind.PHOTO, photoSlot }),
-);
+const COMPLETE_DOCUMENTS: SeedDocuments = {
+  locationEvidence: true,
+  productionEvidence: true,
+  farmPlotSketch: true,
+  harvestEstimate: true,
+};
 
 /** A round approved with nothing to flag. */
 function cleanApproval(
@@ -271,7 +279,7 @@ function cleanApproval(
     status: VerificationTaskStatus.APPROVED,
     locationMatches: true,
     checks: cleanChecks(),
-    evidence: REQUIRED_PHOTO_EVIDENCE,
+    documents: COMPLETE_DOCUMENTS,
   };
 }
 
@@ -312,10 +320,7 @@ const FARMERS: SeedFarmer[] = [
           estimatedYield: { value: 18, unit: 't' },
           generalNote: 'Well-kept farm, maize at tasselling stage.',
           checks: cleanChecks(),
-          evidence: [
-            ...REQUIRED_PHOTO_EVIDENCE,
-            { kind: EvidenceKind.PHOTO, photoSlot: PhotoSlot.INFRASTRUCTURE },
-          ],
+          documents: COMPLETE_DOCUMENTS,
         },
       ],
       produce: [
@@ -438,9 +443,8 @@ const FARMERS: SeedFarmer[] = [
               note: 'Last 2 km is a dirt track, impassable after heavy rain.',
             },
           ]),
+          documents: COMPLETE_DOCUMENTS,
           evidence: [
-            ...REQUIRED_PHOTO_EVIDENCE,
-            { kind: EvidenceKind.LOCATION_DISCREPANCY },
             {
               kind: EvidenceKind.CHECK,
               checkKey: VerificationCheckKey.ACCESS_ROUTE,
@@ -552,9 +556,8 @@ const FARMERS: SeedFarmer[] = [
               result: CheckResult.VERIFIED,
             },
           ],
-          evidence: [
-            { kind: EvidenceKind.PHOTO, photoSlot: PhotoSlot.ENTRANCE },
-          ],
+          documents: { locationEvidence: true },
+          evidenceStatus: EvidenceStatus.FOLLOW_UP,
         },
       ],
       // Never approved, so the farmer is pending and can't have listed any.
@@ -586,6 +589,7 @@ const FARMERS: SeedFarmer[] = [
           agent: 'agent-3',
           status: VerificationTaskStatus.ASSIGNED,
           daysAgo: 1,
+          evidenceStatus: EvidenceStatus.AWAITING_DOCS,
           declines: [
             {
               agent: 'agent-2',
@@ -923,6 +927,33 @@ function seedId(key: string): string {
 }
 
 /** A private-bucket key in the same `<prefix>/<uuid>.<ext>` shape as uploads. */
+function documentKey(
+  round: SeedRound,
+  field: keyof SeedDocuments,
+): string | null {
+  return round.documents?.[field]
+    ? seedKey(
+        `verifications/${seedId(round.key)}`,
+        `${round.key}:${field}`,
+        'jpg',
+      )
+    : null;
+}
+
+function seededEvidenceStatus(round: SeedRound): EvidenceStatus {
+  if (round.evidenceStatus) {
+    return round.evidenceStatus;
+  }
+  const docs = round.documents;
+  const complete = Boolean(
+    docs?.locationEvidence &&
+    docs.productionEvidence &&
+    docs.farmPlotSketch &&
+    docs.harvestEstimate,
+  );
+  return complete ? EvidenceStatus.INCOMPLETE : EvidenceStatus.MISSING_DOCS;
+}
+
 function seedKey(prefix: string, key: string, extension: string): string {
   return `${prefix}/${seedId(key)}.${extension}`;
 }
@@ -1126,6 +1157,11 @@ async function seedRound(
     estimatedYieldUnit: round.estimatedYield?.unit ?? null,
     generalNote: round.generalNote ?? null,
     rejectionReason: round.rejectionReason ?? null,
+    evidenceStatus: seededEvidenceStatus(round),
+    locationEvidenceKey: documentKey(round, 'locationEvidence'),
+    productionEvidenceKey: documentKey(round, 'productionEvidence'),
+    farmPlotSketchKey: documentKey(round, 'farmPlotSketch'),
+    harvestEstimateKey: documentKey(round, 'harvestEstimate'),
     startedAt:
       round.status === VerificationTaskStatus.UNASSIGNED ||
       round.status === VerificationTaskStatus.ASSIGNED
@@ -1160,7 +1196,7 @@ async function seedRound(
       verificationId: id,
       kind: item.kind,
       checkKey: item.checkKey ?? null,
-      photoSlot: item.photoSlot ?? null,
+      photoSlot: null,
       storageKey: seedKey(`verifications/${id}`, evidenceId, 'jpg'),
     };
     await prisma.verificationEvidence.upsert({
@@ -1169,6 +1205,17 @@ async function seedRound(
       update: evidenceData,
     });
   }
+
+  await prisma.verificationEvidence.deleteMany({
+    where: {
+      verificationId: id,
+      id: {
+        notIn: (round.evidence ?? []).map((_, index) =>
+          seedId(`${round.key}:evidence:${index}`),
+        ),
+      },
+    },
+  });
 
   for (const decline of round.declines ?? []) {
     const agentId = mustGet(agentIds, decline.agent);
@@ -1207,10 +1254,16 @@ function assertApprovable(round: SeedRound) {
       ...check,
       note: check.note ?? null,
     })),
+    locationEvidenceKey: round.documents?.locationEvidence ? 'seeded' : null,
+    productionEvidenceKey: round.documents?.productionEvidence
+      ? 'seeded'
+      : null,
+    farmPlotSketchKey: round.documents?.farmPlotSketch ? 'seeded' : null,
+    harvestEstimateKey: round.documents?.harvestEstimate ? 'seeded' : null,
     evidence: (round.evidence ?? []).map((item) => ({
       kind: item.kind,
       checkKey: item.checkKey ?? null,
-      photoSlot: item.photoSlot ?? null,
+      photoSlot: null,
     })),
     // Every seeded farmer and farm gets both documents (seedFarmers/seedFarms).
     farm: {
@@ -1433,10 +1486,21 @@ async function main() {
   );
 
   try {
-    // Buyers and the admin use the old password signup; activatedAt doesn't
-    // apply to them.
+    // Buyers and the admin use a password; activatedAt doesn't apply to them.
+    // The seeded admin is not on a temporary password.
     const passwordOnly = { password, activatedAt: null };
-    await upsertUser(prisma, auth, ADMIN, Role.ADMIN, passwordOnly);
+    const adminUser = await upsertUser(
+      prisma,
+      auth,
+      ADMIN,
+      Role.ADMIN,
+      passwordOnly,
+    );
+    await prisma.admin.upsert({
+      where: { userId: adminUser.id },
+      create: { id: seedId(ADMIN.key), userId: adminUser.id },
+      update: {},
+    });
 
     const buyerIds = new Map<BuyerKey, string>();
     for (const buyer of BUYERS) {

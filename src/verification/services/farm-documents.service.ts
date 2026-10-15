@@ -12,6 +12,7 @@ import {
 } from '../../common/upload-pipes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import { refreshFarmEvidenceStatus } from '../utils/evidence-status';
 
 /** The documents an agent checks: the farmer's ID and the farm's papers. */
 export interface FarmDocumentUploads {
@@ -146,6 +147,7 @@ export class FarmDocumentsService {
             data: { idDocumentKey: keys.idDocumentKey },
           });
         }
+        await refreshFarmEvidenceStatus(tx, farmId);
       });
     } catch (error) {
       await this.storage.deletePrivate(uploaded);

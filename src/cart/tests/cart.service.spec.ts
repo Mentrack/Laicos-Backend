@@ -236,7 +236,9 @@ describe('CartService', () => {
             id: { in: [produceId] },
             OR: [
               {
-                status: { not: ProduceStatus.DRAFT },
+                status: {
+                  in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT],
+                },
                 farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
               },
             ],

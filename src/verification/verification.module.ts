@@ -1,6 +1,7 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { MailModule } from '../mail/mail.module';
 import {
   ASSIGNMENT_QUEUE,
   AssignmentProcessor,
@@ -9,15 +10,22 @@ import {
 import { AssignmentService } from './services/assignment.service';
 import { FarmDocumentsService } from './services/farm-documents.service';
 import { VerificationService } from './services/verification.service';
+import { AdminVerificationController } from './admin-verification.controller';
+import { AdminVerificationService } from './services/admin-verification.service';
 import { VerificationController } from './verification.controller';
 
 @Module({
-  imports: [AuthModule, BullModule.registerQueue({ name: ASSIGNMENT_QUEUE })],
-  controllers: [VerificationController],
+  imports: [
+    AuthModule,
+    MailModule,
+    BullModule.registerQueue({ name: ASSIGNMENT_QUEUE }),
+  ],
+  controllers: [VerificationController, AdminVerificationController],
   providers: [
     AssignmentService,
     FarmDocumentsService,
     VerificationService,
+    AdminVerificationService,
     AssignmentProcessor,
     AssignmentScheduler,
   ],

@@ -287,9 +287,10 @@ export class FarmController {
   @Get('farmers')
   @ApiOperation({
     summary: 'List farmers',
-    description: 'Newest first. Rows carry no ID number or ID document.',
+    description:
+      'Newest first. Rows carry no ID number or ID document. Admins only.',
   })
-  // @Auth(Role.ADMIN)
+  @Auth(Role.ADMIN)
   @ApiTags('Farmers')
   @ApiEnvelope(FarmerDto, { paginated: true })
   async findFarmers(@Query() query: PaginationQueryDto) {

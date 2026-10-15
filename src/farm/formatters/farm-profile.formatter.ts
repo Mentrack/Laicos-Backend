@@ -10,7 +10,9 @@ export const FARM_PROFILE_SELECT = {
   state: { select: { id: true, name: true } },
   lga: { select: { id: true, stateId: true, name: true } },
   produce: {
-    where: { status: { not: ProduceStatus.DRAFT } },
+    where: {
+      status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
+    },
     select: { name: true },
     orderBy: { createdAt: 'asc' },
   },

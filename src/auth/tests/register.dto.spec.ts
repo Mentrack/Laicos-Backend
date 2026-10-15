@@ -22,6 +22,12 @@ describe('RegisterDto', () => {
     expect(error?.property).toBe('role');
   });
 
+  it('refuses an admin, who is invited by an existing admin', async () => {
+    const dto = plainToInstance(RegisterDto, { ...body, role: Role.ADMIN });
+    const [error] = await validate(dto);
+    expect(error?.property).toBe('role');
+  });
+
   it('refuses an extension agent, who signs up through /agents/signup', async () => {
     const dto = plainToInstance(RegisterDto, {
       ...body,
