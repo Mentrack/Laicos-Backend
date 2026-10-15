@@ -139,13 +139,13 @@ export class AgentService {
 
   async uploadIdDocument(user: User, file: StorageUploadFile) {
     const agent = await this.requireAgent(user);
-    await this.database.$transaction(async (tx) => {
-      await replaceIdDocument(
-        this.storage,
-        `agents/${agent.id}/id`,
-        file,
-        agent.idDocumentKey,
-        async (idDocumentKey) => {
+    await replaceIdDocument(
+      this.storage,
+      `agents/${agent.id}/id`,
+      file,
+      agent.idDocumentKey,
+      async (idDocumentKey) => {
+        await this.database.$transaction(async (tx) => {
           await tx.agent.update({
             where: { id: agent.id },
             data: { idDocumentKey },
@@ -162,9 +162,9 @@ export class AgentService {
             resource: AuditResource.AGENT,
             resourceId: agent.id,
           });
-        },
-      );
-    });
+        });
+      },
+    );
     return this.findMine(user);
   }
 

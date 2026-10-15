@@ -64,13 +64,13 @@ export class FarmerService {
 
   async uploadIdDocument(user: User, file: StorageUploadFile) {
     const farmer = await requireFarmer(this.database, user);
-    await this.database.$transaction(async (tx) => {
-      await replaceIdDocument(
-        this.storage,
-        `farmers/${farmer.id}/id`,
-        file,
-        farmer.idDocumentKey,
-        async (idDocumentKey) => {
+    await replaceIdDocument(
+      this.storage,
+      `farmers/${farmer.id}/id`,
+      file,
+      farmer.idDocumentKey,
+      async (idDocumentKey) => {
+        await this.database.$transaction(async (tx) => {
           await tx.farmer.update({
             where: { id: farmer.id },
             data: { idDocumentKey },
@@ -87,9 +87,9 @@ export class FarmerService {
             resource: AuditResource.FARMER,
             resourceId: farmer.id,
           });
-        },
-      );
-    });
+        });
+      },
+    );
     await refreshFarmerEvidenceStatus(this.database, farmer.id);
     return this.findMine(user);
   }
