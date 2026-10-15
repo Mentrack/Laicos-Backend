@@ -206,26 +206,30 @@ describe('FarmerRegistrationService', () => {
         resource: AuditResource.FARM,
         resourceId: 'farm-1',
       });
-      expect(audit.record).toHaveBeenCalledWith(
-        tx,
-        expect.objectContaining({
-          category: AuditCategory.DOCUMENTS,
-          title: 'ID document uploaded',
-          summary: 'NIN',
-          farmId: null,
-          resource: AuditResource.FARMER,
-        }),
-      );
-      expect(audit.record).toHaveBeenCalledWith(
-        tx,
-        expect.objectContaining({
-          category: AuditCategory.DOCUMENTS,
-          title: 'Farm documents uploaded',
-          summary: 'ownership',
-          farmId: 'farm-1',
-          resource: AuditResource.FARM,
-        }),
-      );
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId: null,
+        category: AuditCategory.DOCUMENTS,
+        title: 'ID document uploaded',
+        summary: 'NIN',
+        actionLabel: 'View profile',
+        resource: AuditResource.FARMER,
+        resourceId: 'farmer-1',
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId: 'farm-1',
+        category: AuditCategory.DOCUMENTS,
+        title: 'Farm documents uploaded',
+        summary: 'ownership',
+        actionLabel: 'View farm',
+        resource: AuditResource.FARM,
+        resourceId: 'farm-1',
+      });
       expect(audit.record).toHaveBeenCalledTimes(4);
     });
 
@@ -379,26 +383,30 @@ describe('FarmerRegistrationService', () => {
       resource: AuditResource.FARM,
       resourceId: 'farm-1',
     });
-    expect(audit.record).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        category: AuditCategory.DOCUMENTS,
-        title: 'ID document uploaded',
-        summary: 'NIN',
-        farmId: null,
-        resource: AuditResource.FARMER,
-      }),
-    );
-    expect(audit.record).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        category: AuditCategory.DOCUMENTS,
-        title: 'Farm documents uploaded',
-        summary: 'ownership',
-        farmId: 'farm-1',
-        resource: AuditResource.FARM,
-      }),
-    );
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.DOCUMENTS,
+      title: 'ID document uploaded',
+      summary: 'NIN',
+      actionLabel: 'View profile',
+      resource: AuditResource.FARMER,
+      resourceId: 'farmer-1',
+    });
+    expect(audit.record).toHaveBeenCalledWith(tx, {
+      actorType: AuditActorType.FARMER,
+      farmerId: 'farmer-1',
+      agentId: null,
+      farmId: 'farm-1',
+      category: AuditCategory.DOCUMENTS,
+      title: 'Farm documents uploaded',
+      summary: 'ownership',
+      actionLabel: 'View farm',
+      resource: AuditResource.FARM,
+      resourceId: 'farm-1',
+    });
     expect(audit.record).toHaveBeenCalledWith(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
       farmerId: null,

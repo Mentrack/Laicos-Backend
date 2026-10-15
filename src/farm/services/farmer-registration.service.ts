@@ -194,7 +194,7 @@ export class FarmerRegistrationService {
             category: AuditCategory.DOCUMENTS,
             title: 'ID document uploaded',
             summary: input.identity?.idType ?? 'ID document',
-            actionLabel: null,
+            actionLabel: 'View profile',
             resource: AuditResource.FARMER,
             resourceId: farmer.id,
           });
@@ -212,7 +212,7 @@ export class FarmerRegistrationService {
             category: AuditCategory.DOCUMENTS,
             title: 'Farm documents uploaded',
             summary: farmDocSummary,
-            actionLabel: null,
+            actionLabel: 'View farm',
             resource: AuditResource.FARM,
             resourceId: farm.id,
           });
