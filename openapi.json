@@ -21,26 +21,137 @@
         "summary": "Liveness check"
       }
     },
-    "/fx/rate": {
+    "/admin/farmers/{id}/audit": {
       "get": {
-        "description": "Public, so prices can be shown in USD. The margin is already applied. 409 FX_RATE_STALE when no recent rate is available.",
-        "operationId": "FxController_rate",
-        "parameters": [],
+        "description": "{id} is Farmer.id. Newest first. Optional farmId limits to events tied to that farm; the farm must belong to the farmer. 404 when the farmer or farm does not exist.",
+        "operationId": "AdminAuditController_farmerAudit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "farmId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FxRateResponseDto"
+                  "$ref": "#/components/schemas/AuditEventListResponseDto"
                 }
               }
             }
           }
         },
-        "summary": "Get the NGN per USD rate for dollar payments",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List audit events for a farmer",
         "tags": [
-          "FX"
+          "Audit"
+        ]
+      }
+    },
+    "/admin/agents/{id}/audit": {
+      "get": {
+        "description": "{id} is Agent.id. Newest first. Optional farmId limits to events tied to that farm. 404 when the agent or farm does not exist.",
+        "operationId": "AdminAuditController_agentAudit",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "farmId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List audit events for an agent",
+        "tags": [
+          "Audit"
         ]
       }
     },
@@ -515,6 +626,29 @@
         "summary": "Upload or replace my profile photo",
         "tags": [
           "Auth"
+        ]
+      }
+    },
+    "/fx/rate": {
+      "get": {
+        "description": "Public, so prices can be shown in USD. The margin is already applied. 409 FX_RATE_STALE when no recent rate is available.",
+        "operationId": "FxController_rate",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get the NGN per USD rate for dollar payments",
+        "tags": [
+          "FX"
         ]
       }
     },
@@ -5453,25 +5587,132 @@
       }
     },
     "schemas": {
-      "FxRateDto": {
+      "AuditCategory": {
+        "type": "string",
+        "enum": [
+          "APPLICATION",
+          "PROFILE",
+          "DOCUMENTS",
+          "FARM",
+          "LISTING",
+          "ORDER",
+          "PAYOUT",
+          "ONBOARDING",
+          "VERIFICATION",
+          "HANDOVER",
+          "CHAT"
+        ]
+      },
+      "AuditResource": {
+        "type": "string",
+        "enum": [
+          "FARMER",
+          "AGENT",
+          "FARM",
+          "PRODUCE",
+          "ORDER",
+          "PAYOUT",
+          "CONVERSATION"
+        ]
+      },
+      "AuditEventActionDto": {
         "type": "object",
         "properties": {
-          "rate": {
+          "label": {
             "type": "string",
-            "example": "1530.123456",
-            "description": "NGN per USD for dollar payments, margin applied"
+            "example": "View profile"
           },
-          "fetchedAt": {
-            "format": "date-time",
-            "type": "string"
+          "resource": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditResource"
+              }
+            ]
+          },
+          "resourceId": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
-          "rate",
-          "fetchedAt"
+          "label",
+          "resource",
+          "resourceId"
         ]
       },
-      "FxRateResponseDto": {
+      "AuditEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "category": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditCategory"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "example": "Profile updated"
+          },
+          "summary": {
+            "type": "string",
+            "example": "first name"
+          },
+          "action": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditEventActionDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "occurredAt",
+          "category",
+          "title",
+          "summary",
+          "action"
+        ]
+      },
+      "PaginationMetaDto": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "number",
+            "example": 1
+          },
+          "perPage": {
+            "type": "number",
+            "example": 20
+          },
+          "total": {
+            "type": "number",
+            "example": 42
+          },
+          "totalPages": {
+            "type": "number",
+            "example": 3
+          }
+        },
+        "required": [
+          "page",
+          "perPage",
+          "total",
+          "totalPages"
+        ]
+      },
+      "AuditEventListResponseDto": {
         "type": "object",
         "properties": {
           "message": {
@@ -5479,12 +5720,19 @@
             "example": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/FxRateDto"
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEventDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
           }
         },
         "required": [
           "message",
-          "data"
+          "data",
+          "metaData"
         ]
       },
       "RegisterDto": {
@@ -5911,6 +6159,40 @@
           }
         }
       },
+      "FxRateDto": {
+        "type": "object",
+        "properties": {
+          "rate": {
+            "type": "string",
+            "example": "1530.123456",
+            "description": "NGN per USD for dollar payments, margin applied"
+          },
+          "fetchedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "rate",
+          "fetchedAt"
+        ]
+      },
+      "FxRateResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/FxRateDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "CreateFarmDto": {
         "type": "object",
         "properties": {
@@ -6154,33 +6436,6 @@
         "required": [
           "message",
           "data"
-        ]
-      },
-      "PaginationMetaDto": {
-        "type": "object",
-        "properties": {
-          "page": {
-            "type": "number",
-            "example": 1
-          },
-          "perPage": {
-            "type": "number",
-            "example": 20
-          },
-          "total": {
-            "type": "number",
-            "example": 42
-          },
-          "totalPages": {
-            "type": "number",
-            "example": 3
-          }
-        },
-        "required": [
-          "page",
-          "perPage",
-          "total",
-          "totalPages"
         ]
       },
       "FarmListResponseDto": {

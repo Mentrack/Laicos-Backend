@@ -15,6 +15,7 @@ import { FxModule } from './fx/fx.module';
 import { ConversationModule } from './conversation/conversation.module';
 import { HandoverModule } from './handover/handover.module';
 import { OrderModule } from './order/order.module';
+import { AuditModule } from './audit/audit.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProduceModule } from './produce/produce.module';
 import { SourcingRequestModule } from './sourcing-request/sourcing-request.module';
@@ -43,6 +44,7 @@ import { VerificationModule } from './verification/verification.module';
       }),
     }),
     PrismaModule,
+    AuditModule,
     PaystackModule,
     FxModule,
     MailModule,

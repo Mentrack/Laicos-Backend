@@ -113,6 +113,7 @@ model Farmer {
   farms         Farm[]
   bankAccount   FarmerBankAccount?
   payouts       Payout[]
+  auditEvents   AuditEvent[]
   // Account standing. DISABLED locks farmer routes; an approved verification sets it back to ACTIVE.
   status        FarmerStatus       @default(ACTIVE)
   createdAt     DateTime           @default(now())
@@ -157,6 +158,7 @@ model Farm {
   produce              Produce[]
   orders               Order[]
   verifications        FarmVerification[]
+  auditEvents          AuditEvent[]
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
 
@@ -212,10 +214,33 @@ model Agent {
   declines      AssignmentDecline[]
   handovers     OrderHandover[]
   referredFarms Farm[]              @relation("FarmReferral")
+  auditEvents   AuditEvent[]
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
   @@index([lgaId, isVerified])
+}
+
+model AuditEvent {
+  id          String         @id @default(uuid())
+  occurredAt  DateTime       @default(now())
+  actorType   AuditActorType
+  farmerId    String?
+  farmer      Farmer?        @relation(fields: [farmerId], references: [id], onDelete: Cascade)
+  agentId     String?
+  agent       Agent?         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  farmId      String?
+  farm        Farm?          @relation(fields: [farmId], references: [id], onDelete: SetNull)
+  category    AuditCategory
+  title       String
+  summary     String
+  actionLabel String?
+  resource    AuditResource?
+  resourceId  String?
+
+  @@index([farmerId, occurredAt])
+  @@index([agentId, occurredAt])
+  @@index([farmId, occurredAt])
 }
 
 // Exactly one per agent, created with it: the farms that agent manages.
@@ -835,6 +860,35 @@ enum FarmerStatus {
   ACTIVE
   INACTIVE
   DISABLED
+}
+
+enum AuditActorType {
+  FARMER
+  EXTENSION_AGENT
+}
+
+enum AuditCategory {
+  APPLICATION
+  PROFILE
+  DOCUMENTS
+  FARM
+  LISTING
+  ORDER
+  PAYOUT
+  ONBOARDING
+  VERIFICATION
+  HANDOVER
+  CHAT
+}
+
+enum AuditResource {
+  FARMER
+  AGENT
+  FARM
+  PRODUCE
+  ORDER
+  PAYOUT
+  CONVERSATION
 }
 
 enum VerificationTaskStatus {
