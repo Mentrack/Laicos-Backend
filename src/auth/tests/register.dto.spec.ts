@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { Role } from '../../../generated/client';
+import { BuyerType, Role } from '../../../generated/client';
 import { RegisterDto } from '../dto';
 
 const body = {
@@ -12,7 +12,11 @@ const body = {
 
 describe('RegisterDto', () => {
   it('accepts a buyer', async () => {
-    const dto = plainToInstance(RegisterDto, { ...body, role: Role.BUYER });
+    const dto = plainToInstance(RegisterDto, {
+      ...body,
+      role: Role.BUYER,
+      buyerType: BuyerType.PERSON,
+    });
     expect(await validate(dto)).toHaveLength(0);
   });
 

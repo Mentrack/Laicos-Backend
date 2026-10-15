@@ -13,6 +13,10 @@ import {
   type Prisma,
 } from '../../generated/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  sourcingRequestIdForOrder,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
 import {
@@ -218,6 +222,7 @@ export class HandoverService {
     title: string,
   ): Promise<void> {
     const { order } = handover;
+    const sourcingRequestId = await sourcingRequestIdForOrder(tx, order.id);
     await this.audit.record(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
       farmerId: null,
@@ -229,7 +234,11 @@ export class HandoverService {
       actionLabel: 'View order',
       resource: AuditResource.ORDER,
       resourceId: order.id,
+      sourcingRequestId,
     });
+    if (sourcingRequestId) {
+      await syncSourcingRequest(tx, sourcingRequestId);
+    }
   }
 
   /**

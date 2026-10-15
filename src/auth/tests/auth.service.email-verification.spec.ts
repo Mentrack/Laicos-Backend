@@ -4,7 +4,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Role } from '../../../generated/client';
+import { BuyerType, Role } from '../../../generated/client';
 import { AuditService } from '../../audit/audit.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -35,6 +35,7 @@ const registerDto = {
   firstName: 'Ada',
   lastName: 'Okafor',
   role: Role.BUYER,
+  buyerType: BuyerType.PERSON,
 } as const;
 
 describe('AuthService email verification', () => {

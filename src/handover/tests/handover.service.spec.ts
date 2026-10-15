@@ -73,7 +73,7 @@ describe('HandoverService', () => {
     findFirst: jest.fn(),
     delete: jest.fn(),
   };
-  const order = { update: jest.fn() };
+  const order = { update: jest.fn(), findUnique: jest.fn() };
   const tx = { orderHandover, order, handoverProof };
   const database = {
     ...tx,
@@ -105,6 +105,7 @@ describe('HandoverService', () => {
     actionLabel: 'View order',
     resource: AuditResource.ORDER,
     resourceId: orderId,
+    sourcingRequestId: null,
   });
   const image: StorageUploadFile = {
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0]),

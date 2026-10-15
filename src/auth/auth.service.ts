@@ -53,6 +53,7 @@ import {
   type User as UserModel,
 } from '../../generated/client';
 import { isUniqueViolation } from '../common/prisma-errors';
+import { assertBuyerKind, buyerCreateData } from '../buyer/utils/buyer-kind';
 
 @Injectable()
 export class AuthService {
@@ -69,6 +70,7 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto): Promise<void> {
+    assertBuyerKind(dto.role, dto);
     const firebaseRecord = await this.createFirebaseUser(dto);
     let user: UserModel;
     try {
@@ -80,6 +82,7 @@ export class AuthService {
         phoneNumber: dto.phoneNumber,
         role: dto.role,
         isVerified: false,
+        buyer: dto.role === Role.BUYER ? buyerCreateData(dto) : undefined,
       });
     } catch (error) {
       await this.deleteFirebaseUser(firebaseRecord.uid);
@@ -155,6 +158,7 @@ export class AuthService {
   }
 
   async googleRegister(dto: GoogleRegisterDto) {
+    assertBuyerKind(dto.role, dto);
     const google = await this.firebase.signInWithGoogle(dto.idToken);
     try {
       const user = await this.createLocalUser({
@@ -166,6 +170,7 @@ export class AuthService {
         role: dto.role,
         isVerified: google.emailVerified,
         refreshToken: google.refreshToken,
+        buyer: dto.role === Role.BUYER ? buyerCreateData(dto) : undefined,
       });
       return { user, ...toTokenPair(google) };
     } catch (error) {

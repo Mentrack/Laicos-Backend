@@ -4094,7 +4094,7 @@
     },
     "/sourcing-requests": {
       "post": {
-        "description": "Starts UNDER_REVIEW while LAICOS matches it with providers.",
+        "description": "Starts NEW while an admin matches it with farms.",
         "operationId": "SourcingRequestController_create",
         "parameters": [],
         "requestBody": {
@@ -4210,6 +4210,433 @@
           }
         ],
         "summary": "Get one of my sourcing requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/summary": {
+      "get": {
+        "description": "The cards above the list. Not affected by the list search or status filter.",
+        "operationId": "AdminSourcingRequestController_summary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSourcingSummaryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count buyer requests by stage",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests": {
+      "get": {
+        "description": "Newest first. Search matches the request number, the buyer display name, or the produce name.",
+        "operationId": "AdminSourcingRequestController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/SourcingRequestStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSourcingRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List buyer requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/listings": {
+      "get": {
+        "description": "Published listings on verified farms in the assigned agent’s cluster whose name and unit match. 409 before an agent is assigned. 404 when the request is missing.",
+        "operationId": "AdminSourcingRequestController_listings",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAllocationArrayResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List eligible listings for a request",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/audit": {
+      "get": {
+        "description": "{id} is the sourcing request. Newest first. 404 when it is missing.",
+        "operationId": "AdminSourcingRequestController_auditLog",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the audit for a buyer request",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}": {
+      "get": {
+        "description": "The request, the buyer, the assigned agent, the saved group, coverage, the live checkout, its orders, and the newest five audit rows. 404 when it is missing.",
+        "operationId": "AdminSourcingRequestController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a buyer request",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/assignment": {
+      "post": {
+        "description": "The agent must be verified. Refused once a checkout exists, or when the saved listings sit outside the new agent’s cluster.",
+        "operationId": "AdminSourcingRequestController_assign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Assign or reassign the agent",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/allocations": {
+      "put": {
+        "description": "Does not reserve stock. An empty list clears the group. Refused once a checkout is awaiting payment or paid.",
+        "operationId": "AdminSourcingRequestController_save",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveAllocationsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the saved listing group",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/confirm": {
+      "post": {
+        "description": "One order per selected listing, at that listing’s price. The buyer’s cart is left alone. The same Idempotency-Key returns the original checkout.",
+        "operationId": "AdminSourcingRequestController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCheckoutDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResponseDto"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm the group and place one checkout",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/escalate": {
+      "post": {
+        "description": "Sets the time and does not change the status. A second call changes nothing.",
+        "operationId": "AdminSourcingRequestController_escalate",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark a request escalated",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/{id}/close": {
+      "post": {
+        "description": "Releases an unpaid checkout. Refused while a paid order is still open, or when the request is completed or already closed.",
+        "operationId": "AdminSourcingRequestController_close",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseSourcingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Close a request",
         "tags": [
           "Sourcing Requests"
         ]
@@ -5550,7 +5977,7 @@
     },
     {
       "name": "Sourcing Requests",
-      "description": "A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts UNDER_REVIEW."
+      "description": "A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts NEW. Admins match them from /admin/sourcing-requests."
     },
     {
       "name": "Agents",
@@ -5600,7 +6027,10 @@
           "ONBOARDING",
           "VERIFICATION",
           "HANDOVER",
-          "CHAT"
+          "CHAT",
+          "SOURCING",
+          "ASSIGNMENT",
+          "MATCHING"
         ]
       },
       "AuditResource": {
@@ -5612,7 +6042,9 @@
           "PRODUCE",
           "ORDER",
           "PAYOUT",
-          "CONVERSATION"
+          "CONVERSATION",
+          "SOURCING_REQUEST",
+          "CHECKOUT"
         ]
       },
       "AuditEventActionDto": {
@@ -5735,6 +6167,13 @@
           "metaData"
         ]
       },
+      "BuyerType": {
+        "type": "string",
+        "enum": [
+          "PERSON",
+          "COMPANY"
+        ]
+      },
       "RegisterDto": {
         "type": "object",
         "properties": {
@@ -5770,6 +6209,33 @@
             "type": "string",
             "example": "BUYER",
             "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins."
+          },
+          "buyerType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BuyerType"
+              }
+            ]
+          },
+          "legalName": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "department": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 30
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 200
           }
         },
         "required": [
@@ -6004,6 +6470,33 @@
             "type": "string",
             "example": "BUYER",
             "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins."
+          },
+          "buyerType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BuyerType"
+              }
+            ]
+          },
+          "legalName": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "department": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 30
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 200
           }
         },
         "required": [
@@ -11091,7 +11584,14 @@
       "SourcingRequestStatus": {
         "type": "string",
         "enum": [
-          "UNDER_REVIEW"
+          "NEW",
+          "IN_REVIEW",
+          "FINDING_SUPPLY",
+          "AWAITING_BUYER",
+          "CONFIRMED",
+          "FULFILMENT",
+          "COMPLETED",
+          "CLOSED"
         ]
       },
       "SourcingRequestDto": {
@@ -11177,6 +11677,11 @@
               }
             ]
           },
+          "checkoutId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -11201,6 +11706,7 @@
           "additionalSpecs",
           "logisticsNotes",
           "status",
+          "checkoutId",
           "createdAt",
           "updatedAt"
         ]
@@ -11242,6 +11748,280 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "AdminSourcingSummaryDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "new": {
+            "type": "number"
+          },
+          "inReview": {
+            "type": "number"
+          },
+          "findingSupply": {
+            "type": "number"
+          },
+          "awaitingBuyer": {
+            "type": "number"
+          },
+          "confirmed": {
+            "type": "number"
+          },
+          "fulfilment": {
+            "type": "number"
+          },
+          "completed": {
+            "type": "number"
+          },
+          "closed": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "total",
+          "new",
+          "inReview",
+          "findingSupply",
+          "awaitingBuyer",
+          "confirmed",
+          "fulfilment",
+          "completed",
+          "closed"
+        ]
+      },
+      "AdminSourcingSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminSourcingSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "AdminSourcingRowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000015"
+          },
+          "buyerName": {
+            "type": "string"
+          },
+          "produceName": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "deliveryDestination": {
+            "type": "string"
+          },
+          "agentName": {
+            "type": "string",
+            "nullable": true
+          },
+          "agentCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "AG-000018"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingRequestStatus"
+              }
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "escalated": {
+            "type": "boolean"
+          },
+          "shipment": {
+            "nullable": true,
+            "enum": [
+              "IN_TRANSIT",
+              "PENDING_PICKUP"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "requestNumber",
+          "buyerName",
+          "produceName",
+          "quantity",
+          "unit",
+          "deliveryDestination",
+          "agentName",
+          "agentCode",
+          "status",
+          "createdAt",
+          "escalated",
+          "shipment"
+        ]
+      },
+      "AdminSourcingRowListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSourcingRowDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "AdminAllocationDto": {
+        "type": "object",
+        "properties": {
+          "produceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "pricePerUnit": {
+            "type": "string"
+          },
+          "farmCode": {
+            "type": "string"
+          },
+          "farmName": {
+            "type": "string"
+          },
+          "farmerName": {
+            "type": "string"
+          },
+          "floatingQuantity": {
+            "type": "number"
+          },
+          "selectedQuantity": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "produceId",
+          "name",
+          "unit",
+          "pricePerUnit",
+          "farmCode",
+          "farmName",
+          "farmerName",
+          "floatingQuantity"
+        ]
+      },
+      "AdminAllocationArrayResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminAllocationDto"
+            }
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "AssignAgentDto": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "agentId"
+        ]
+      },
+      "AllocationItemDto": {
+        "type": "object",
+        "properties": {
+          "produceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "produceId",
+          "quantity"
+        ]
+      },
+      "SaveAllocationsDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllocationItemDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CloseSourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "AdminProfileDto": {
@@ -11981,6 +12761,33 @@
             "type": "string",
             "format": "uuid"
           },
+          "buyerType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BuyerType"
+              }
+            ]
+          },
+          "legalName": {
+            "type": "string",
+            "nullable": true
+          },
+          "department": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "paymentTerms": {
+            "type": "string",
+            "nullable": true
+          },
           "state": {
             "nullable": true,
             "type": "object",
@@ -12012,6 +12819,12 @@
           "id",
           "buyerId",
           "userId",
+          "buyerType",
+          "legalName",
+          "department",
+          "contactName",
+          "contactPhone",
+          "paymentTerms",
           "state",
           "lga",
           "createdAt",
@@ -12045,6 +12858,33 @@
             "type": "string",
             "format": "uuid",
             "description": "Send with stateId; either alone is 400"
+          },
+          "buyerType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BuyerType"
+              }
+            ]
+          },
+          "legalName": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "department": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "contactName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "contactPhone": {
+            "type": "string",
+            "maxLength": 30
+          },
+          "paymentTerms": {
+            "type": "string",
+            "maxLength": 200
           }
         }
       },

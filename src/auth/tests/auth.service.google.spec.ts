@@ -1,6 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Prisma, Role } from '../../../generated/client';
+import { Prisma, BuyerType, Role } from '../../../generated/client';
 import { AuditService } from '../../audit/audit.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -101,7 +101,11 @@ describe('AuthService Google sign-in', () => {
       user.create.mockResolvedValue({ id: 'user-1' });
 
       await expect(
-        service.googleRegister({ idToken: 'google-token', role: Role.BUYER }),
+        service.googleRegister({
+          idToken: 'google-token',
+          role: Role.BUYER,
+          buyerType: BuyerType.PERSON,
+        }),
       ).resolves.toEqual({ user: { id: 'user-1' }, ...tokens });
       expect(user.create).toHaveBeenCalledWith({
         data: {
@@ -114,7 +118,7 @@ describe('AuthService Google sign-in', () => {
           isVerified: true,
           farmer: undefined,
           agent: undefined,
-          buyer: { create: {} },
+          buyer: { create: { buyerType: BuyerType.PERSON } },
           admin: undefined,
           refreshToken: { create: { token: 'firebase-refresh-token' } },
         },
@@ -150,7 +154,11 @@ describe('AuthService Google sign-in', () => {
       );
 
       await expect(
-        service.googleRegister({ idToken: 'google-token', role: Role.BUYER }),
+        service.googleRegister({
+          idToken: 'google-token',
+          role: Role.BUYER,
+          buyerType: BuyerType.PERSON,
+        }),
       ).rejects.toThrow(ConflictException);
       expect(firebase.auth.deleteUser).not.toHaveBeenCalled();
     });
@@ -160,7 +168,11 @@ describe('AuthService Google sign-in', () => {
       user.create.mockRejectedValue(new Error('db down'));
 
       await expect(
-        service.googleRegister({ idToken: 'google-token', role: Role.BUYER }),
+        service.googleRegister({
+          idToken: 'google-token',
+          role: Role.BUYER,
+          buyerType: BuyerType.PERSON,
+        }),
       ).rejects.toThrow('db down');
       expect(firebase.auth.deleteUser).toHaveBeenCalledWith('firebase-uid');
     });

@@ -31,6 +31,10 @@ import {
   busyAsConflict,
 } from '../payment/utils/checkout-transaction';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  sourcingRequestIdForOrder,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
 import { orderLine, releaseStock, reserveProduce } from './utils/reservation';
 import {
@@ -225,6 +229,9 @@ export class OrderService {
           user,
           order,
           `Order ${order.orderNumber} confirmed`,
+          undefined,
+          undefined,
+          true,
         );
         return confirmed;
       });
@@ -251,6 +258,9 @@ export class OrderService {
           user,
           order,
           `Order ${order.orderNumber} prepared`,
+          undefined,
+          undefined,
+          true,
         );
         return preparing;
       });
@@ -345,6 +355,7 @@ export class OrderService {
           `Order ${order.orderNumber} marked ready`,
           undefined,
           farm,
+          true,
         );
         return ready;
       });
@@ -382,6 +393,8 @@ export class OrderService {
           order,
           `Order ${order.orderNumber} cancelled`,
           dto.reason,
+          undefined,
+          true,
         );
         return cancelled;
       });
@@ -397,28 +410,55 @@ export class OrderService {
     title: string,
     summary?: string,
     farm?: { farmCode: string; ownerId: string },
+    linkSourcing = false,
   ): Promise<void> {
-    if (user.role !== Role.FARMER) {
-      return;
+    const sourcingRequestId = linkSourcing
+      ? await sourcingRequestIdForOrder(tx, order.id)
+      : null;
+    if (user.role === Role.FARMER) {
+      const resolved =
+        farm ??
+        (await tx.farm.findUniqueOrThrow({
+          where: { id: order.farmId },
+          select: { farmCode: true, ownerId: true },
+        }));
+      await this.audit.record(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: resolved.ownerId,
+        agentId: null,
+        farmId: order.farmId,
+        category: AuditCategory.ORDER,
+        title,
+        summary: summary ?? resolved.farmCode,
+        actionLabel: 'View order',
+        resource: AuditResource.ORDER,
+        resourceId: order.id,
+        sourcingRequestId,
+      });
+    } else if (
+      sourcingRequestId &&
+      (user.role === Role.ADMIN || user.role === Role.BUYER)
+    ) {
+      await this.audit.record(tx, {
+        actorType:
+          user.role === Role.ADMIN
+            ? AuditActorType.ADMIN
+            : AuditActorType.BUYER,
+        farmerId: null,
+        agentId: null,
+        farmId: order.farmId,
+        category: AuditCategory.ORDER,
+        title,
+        summary: summary ?? order.orderNumber,
+        actionLabel: 'View order',
+        resource: AuditResource.ORDER,
+        resourceId: order.id,
+        sourcingRequestId,
+      });
     }
-    const resolved =
-      farm ??
-      (await tx.farm.findUniqueOrThrow({
-        where: { id: order.farmId },
-        select: { farmCode: true, ownerId: true },
-      }));
-    await this.audit.record(tx, {
-      actorType: AuditActorType.FARMER,
-      farmerId: resolved.ownerId,
-      agentId: null,
-      farmId: order.farmId,
-      category: AuditCategory.ORDER,
-      title,
-      summary: summary ?? resolved.farmCode,
-      actionLabel: 'View order',
-      resource: AuditResource.ORDER,
-      resourceId: order.id,
-    });
+    if (sourcingRequestId) {
+      await syncSourcingRequest(tx, sourcingRequestId);
+    }
   }
 
   async remove(user: User, id: string) {

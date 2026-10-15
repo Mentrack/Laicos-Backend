@@ -92,6 +92,7 @@ describe('ConversationService', () => {
     conversation: { update: jest.fn() },
     agent: { findUnique: jest.fn() },
     order: { findUnique: jest.fn() },
+    sourcingRequest: { findUnique: jest.fn(), update: jest.fn() },
   };
   const buyerModel = { findUnique: jest.fn() };
   const database = {
@@ -554,6 +555,7 @@ describe('ConversationService', () => {
         actionLabel: 'View chat',
         resource: AuditResource.CONVERSATION,
         resourceId: conversation.id,
+        sourcingRequestId: null,
       });
     });
 
@@ -563,6 +565,26 @@ describe('ConversationService', () => {
         clientMessageId: 'msg-2',
       });
       expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('records a buyer message when the order came from a sourcing request', async () => {
+      tx.order.findUnique
+        .mockResolvedValueOnce({
+          checkout: { sourcingRequestId: 'req-1' },
+        })
+        .mockResolvedValueOnce({ orderNumber: 'ORD-000001' });
+      await service.send(buyer, conversation.id, {
+        body: 'hello',
+        clientMessageId: 'msg-3',
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          actorType: AuditActorType.BUYER,
+          title: 'Message sent to agent',
+          sourcingRequestId: 'req-1',
+        }),
+      );
     });
 
     it('a replayed agent message writes nothing', async () => {

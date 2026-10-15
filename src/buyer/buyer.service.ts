@@ -3,7 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Prisma, User } from '../../generated/client';
+import {
+  BuyerType,
+  Role,
+  type Buyer,
+  type Prisma,
+  type User,
+} from '../../generated/client';
+import {
+  COMPANY_FIELDS,
+  assertBuyerKind,
+  type CompanyField,
+} from './utils/buyer-kind';
 import { LocationService } from '../location/location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { BuyerDto, BuyerProfileDto, UpdateBuyerDto } from './dto';
@@ -45,9 +56,14 @@ export class BuyerService {
         lga: { connect: { id: lgaId } },
       };
     }
+    const kind =
+      dto.buyerType !== undefined ||
+      COMPANY_FIELDS.some((field) => dto[field] !== undefined)
+        ? nextBuyerKind(buyer, dto)
+        : {};
     await this.database.buyer.update({
       where: { id: buyer.id },
-      data: location,
+      data: { ...location, ...kind },
     });
     return this.findMine(user);
   }
@@ -59,4 +75,34 @@ export class BuyerService {
     }
     return toBuyerDto(buyer);
   }
+}
+
+function nextBuyerKind(
+  buyer: Pick<Buyer, 'buyerType' | CompanyField>,
+  dto: UpdateBuyerDto,
+): Prisma.BuyerUpdateInput {
+  const buyerType = dto.buyerType ?? buyer.buyerType;
+  if (buyerType === BuyerType.PERSON) {
+    assertBuyerKind(Role.BUYER, { buyerType, ...dto });
+    return {
+      buyerType,
+      legalName: null,
+      department: null,
+      contactName: null,
+      contactPhone: null,
+      paymentTerms: null,
+    };
+  }
+  const fields = Object.fromEntries(
+    COMPANY_FIELDS.map((field) => [field, dto[field] ?? buyer[field] ?? '']),
+  ) as Record<CompanyField, string>;
+  assertBuyerKind(Role.BUYER, { buyerType, ...fields });
+  return {
+    buyerType,
+    legalName: fields.legalName.trim(),
+    department: fields.department.trim(),
+    contactName: fields.contactName.trim(),
+    contactPhone: fields.contactPhone.trim(),
+    paymentTerms: fields.paymentTerms.trim(),
+  };
 }

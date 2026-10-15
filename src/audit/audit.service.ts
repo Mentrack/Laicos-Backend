@@ -22,6 +22,7 @@ export interface AuditWrite {
   actionLabel: string | null;
   resource: AuditResource | null;
   resourceId: string | null;
+  sourcingRequestId?: string | null;
 }
 
 @Injectable()
@@ -29,7 +30,9 @@ export class AuditService {
   constructor(private readonly database: PrismaService) {}
 
   async record(tx: Prisma.TransactionClient, event: AuditWrite): Promise<void> {
-    await tx.auditEvent.create({ data: event });
+    await tx.auditEvent.create({
+      data: { ...event, sourcingRequestId: event.sourcingRequestId ?? null },
+    });
   }
 
   async findForFarmer(farmerId: string, query: AuditQueryDto) {
@@ -78,6 +81,17 @@ export class AuditService {
     }
 
     return this.list(where, query);
+  }
+
+  async findForRequest(sourcingRequestId: string, query: AuditQueryDto) {
+    const request = await this.database.sourcingRequest.findUnique({
+      where: { id: sourcingRequestId },
+      select: { id: true },
+    });
+    if (!request) {
+      throw new NotFoundException('Sourcing request not found');
+    }
+    return this.list({ sourcingRequestId }, query);
   }
 
   private async list(

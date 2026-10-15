@@ -3,7 +3,14 @@ import {
   ConflictException,
   Injectable,
 } from '@nestjs/common';
-import { CheckoutStatus, Role, type User } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  CheckoutStatus,
+  Role,
+  type User,
+} from '../../generated/client';
 import { requireBuyer } from '../buyer/utils/require-buyer';
 import {
   orderLine,
@@ -19,6 +26,10 @@ import {
 } from '../payment/utils/checkout-transaction';
 import { releaseCheckout } from '../payment/utils/release-checkout';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  recordLinkedAudit,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { CreateCheckoutDto } from './dto';
 import { CART_ITEM_INCLUDE } from './formatters/cart.formatter';
 import {
@@ -167,6 +178,22 @@ export class CheckoutService {
         CheckoutStatus.CANCELLED,
         'Cancelled by buyer',
       );
+      if (checkout.sourcingRequestId) {
+        await syncSourcingRequest(tx, checkout.sourcingRequestId);
+        await recordLinkedAudit(tx, {
+          actorType: AuditActorType.BUYER,
+          farmerId: null,
+          agentId: null,
+          farmId: null,
+          category: AuditCategory.ORDER,
+          title: 'Checkout cancelled',
+          summary: 'Cancelled by buyer',
+          actionLabel: 'View request',
+          resource: AuditResource.SOURCING_REQUEST,
+          resourceId: checkout.sourcingRequestId,
+          sourcingRequestId: checkout.sourcingRequestId,
+        });
+      }
       return formatCheckout(released);
     }, CHECKOUT_TRANSACTION);
   }

@@ -412,8 +412,8 @@ function farmerDocumentEvents(
     });
   }
   const docSummary = farmDocumentsSummary(
-    documents.ownershipDocument,
-    documents.chiefConfirmation,
+    documents.ownershipDocument ? 'ownership' : null,
+    documents.chiefConfirmation ? 'chief' : null,
   );
   if (docSummary) {
     events.push(farmDocumentEvent(farmer.id, farmId, docSummary));

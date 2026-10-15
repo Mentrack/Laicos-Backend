@@ -241,6 +241,14 @@ export class ProduceService {
     }
     try {
       return await this.database.$transaction(async (tx) => {
+        const selected = await tx.sourcingAllocation.count({
+          where: { produceId: id },
+        });
+        if (selected > 0) {
+          throw new ConflictException(
+            'Produce is part of a sourcing selection and cannot be deleted',
+          );
+        }
         const deleted = await tx.produce.delete({
           where: { id, farm: farmOwnedBy(user) },
         });

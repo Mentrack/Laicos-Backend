@@ -78,7 +78,8 @@ describe('ProduceService', () => {
     update: jest.fn(),
     delete: jest.fn(),
   };
-  const tx = { produce };
+  const sourcingAllocation = { count: jest.fn() };
+  const tx = { produce, sourcingAllocation };
   const database = {
     farm,
     produce,
@@ -499,6 +500,20 @@ describe('ProduceService', () => {
       await expect(service.remove(user, produceId)).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+
+    it('refuses to delete a listing still in a sourcing selection', async () => {
+      produce.findFirst.mockResolvedValue({
+        id: produceId,
+        name: 'Maize',
+        farmId,
+        farm: { farmCode, ownerId: 'farmer-1' },
+      });
+      sourcingAllocation.count.mockResolvedValue(1);
+      await expect(service.remove(user, produceId)).rejects.toThrow(
+        'Produce is part of a sourcing selection and cannot be deleted',
+      );
+      expect(produce.delete).not.toHaveBeenCalled();
     });
   });
 

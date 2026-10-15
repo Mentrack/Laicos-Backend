@@ -26,7 +26,7 @@ export class SourcingRequestController {
   @Post()
   @ApiOperation({
     summary: 'Request produce that is not listed',
-    description: 'Starts UNDER_REVIEW while LAICOS matches it with providers.',
+    description: 'Starts NEW while an admin matches it with farms.',
   })
   @ApiEnvelope(SourcingRequestDto, { status: HttpStatus.CREATED })
   async create(

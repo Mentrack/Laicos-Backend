@@ -3,7 +3,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { User } from '../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  CheckoutStatus,
+  type User,
+} from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { requireBuyer } from '../buyer/utils/require-buyer';
 import { lagosToday, toDateColumn } from '../common/dates';
 import {
@@ -17,19 +24,38 @@ import { formatSourcingRequest } from './formatters/sourcing-request.formatter';
 
 @Injectable()
 export class SourcingRequestService {
-  constructor(private readonly database: PrismaService) {}
+  constructor(
+    private readonly database: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async create(user: User, dto: CreateSourcingRequestDto) {
     if (dto.requiredDate < lagosToday()) {
       throw new BadRequestException('Required date cannot be in the past');
     }
     const buyer = await requireBuyer(this.database, user);
-    const request = await this.database.sourcingRequest.create({
-      data: {
-        ...dto,
-        requiredDate: toDateColumn(dto.requiredDate),
-        buyerId: buyer.id,
-      },
+    const request = await this.database.$transaction(async (tx) => {
+      const created = await tx.sourcingRequest.create({
+        data: {
+          ...dto,
+          requiredDate: toDateColumn(dto.requiredDate),
+          buyerId: buyer.id,
+        },
+      });
+      await this.audit.record(tx, {
+        actorType: AuditActorType.BUYER,
+        farmerId: null,
+        agentId: null,
+        farmId: null,
+        category: AuditCategory.SOURCING,
+        title: 'Request submitted',
+        summary: `${created.requestNumber}: ${created.quantity} ${created.unit} ${created.produceName}`,
+        actionLabel: 'View request',
+        resource: AuditResource.SOURCING_REQUEST,
+        resourceId: created.id,
+        sourcingRequestId: created.id,
+      });
+      return created;
     });
     return formatSourcingRequest(request);
   }
@@ -48,7 +74,7 @@ export class SourcingRequestService {
       this.database.sourcingRequest.count({ where }),
     ]);
     return {
-      data: requests.map(formatSourcingRequest),
+      data: requests.map((request) => formatSourcingRequest(request)),
       metaData: paginationMeta(page, perPage, total),
     };
   }
@@ -57,10 +83,17 @@ export class SourcingRequestService {
     const buyer = await requireBuyer(this.database, user);
     const request = await this.database.sourcingRequest.findFirst({
       where: { id, buyerId: buyer.id },
+      include: {
+        checkouts: {
+          where: { status: CheckoutStatus.AWAITING_PAYMENT },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
     if (!request) {
       throw new NotFoundException('Sourcing request not found');
     }
-    return formatSourcingRequest(request);
+    return formatSourcingRequest(request, request.checkouts[0]?.id ?? null);
   }
 }

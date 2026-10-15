@@ -1,5 +1,8 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   CheckoutStatus,
   Currency,
   OrderStatus,
@@ -24,6 +27,10 @@ import {
   providerUnavailable,
 } from '../paystack/paystack-error';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  recordLinkedAudit,
+  syncSourcingRequest,
+} from '../sourcing-request/utils/sync-sourcing-request';
 import { InitiatePaymentDto, PaymentDto } from './dto';
 import { formatPayment } from './formatters/payment.formatter';
 import { checkoutNotFound, paymentNotFound } from './utils/checkout-errors';
@@ -254,6 +261,22 @@ export class PaymentService {
           },
           data: { status: OrderStatus.PENDING },
         });
+        if (payment.checkout.sourcingRequestId) {
+          await syncSourcingRequest(tx, payment.checkout.sourcingRequestId);
+          await recordLinkedAudit(tx, {
+            actorType: AuditActorType.BUYER,
+            farmerId: null,
+            agentId: null,
+            farmId: null,
+            category: AuditCategory.ORDER,
+            title: 'Payment received',
+            summary: payment.reference,
+            actionLabel: 'View request',
+            resource: AuditResource.SOURCING_REQUEST,
+            resourceId: payment.checkout.sourcingRequestId,
+            sourcingRequestId: payment.checkout.sourcingRequestId,
+          });
+        }
         return { payment: paid, refund: null, mismatch: false };
       },
       CHECKOUT_TRANSACTION,

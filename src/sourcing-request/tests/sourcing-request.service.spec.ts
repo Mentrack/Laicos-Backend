@@ -9,6 +9,7 @@ import {
   SourcingUnit,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { CreateSourcingRequestDto } from '../dto';
@@ -37,7 +38,7 @@ function row() {
     additionalSpecs: null,
     logisticsNotes: null,
     requiredDate: new Date('2026-11-15T00:00:00.000Z'),
-    status: SourcingRequestStatus.UNDER_REVIEW,
+    status: SourcingRequestStatus.NEW,
     createdAt: new Date('2026-10-08T09:00:00.000Z'),
     updatedAt: new Date('2026-10-08T09:00:00.000Z'),
   };
@@ -53,10 +54,16 @@ describe('SourcingRequestService', () => {
       count: jest.fn(),
       findFirst: jest.fn(),
     },
-    $transaction: (queries: Promise<unknown>[]) => Promise.all(queries),
+    $transaction: (
+      arg:
+        | Promise<unknown>[]
+        | ((tx: typeof database) => Promise<unknown>),
+    ) => (typeof arg === 'function' ? arg(database) : Promise.all(arg)),
   };
+  const audit = { record: jest.fn() };
   const service = new SourcingRequestService(
     database as unknown as PrismaService,
+    audit as unknown as AuditService,
   );
 
   beforeEach(() => {
@@ -82,9 +89,17 @@ describe('SourcingRequestService', () => {
           buyerId: buyer.id,
         },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        database,
+        expect.objectContaining({
+          title: 'Request submitted',
+          sourcingRequestId: 'req-1',
+        }),
+      );
       expect(result).toMatchObject({
         requestNumber: 'REQ-000015',
-        status: SourcingRequestStatus.UNDER_REVIEW,
+        status: SourcingRequestStatus.NEW,
+        checkoutId: null,
         requiredDate: '2026-11-15',
       });
     });
@@ -144,14 +159,27 @@ describe('SourcingRequestService', () => {
 
   describe('findOne', () => {
     it("looks the request up within the buyer's own", async () => {
-      database.sourcingRequest.findFirst.mockResolvedValue(row());
+      database.sourcingRequest.findFirst.mockResolvedValue({
+        ...row(),
+        checkouts: [],
+      });
 
       const result = await service.findOne(buyer, 'req-1');
 
       expect(database.sourcingRequest.findFirst).toHaveBeenCalledWith({
         where: { id: 'req-1', buyerId: buyer.id },
+        include: {
+          checkouts: {
+            where: { status: 'AWAITING_PAYMENT' },
+            select: { id: true },
+            take: 1,
+          },
+        },
       });
-      expect(result.requestNumber).toBe('REQ-000015');
+      expect(result).toMatchObject({
+        requestNumber: 'REQ-000015',
+        checkoutId: null,
+      });
     });
 
     it("404s on another buyer's request", async () => {

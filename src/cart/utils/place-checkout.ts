@@ -26,6 +26,7 @@ export type CheckoutDraft = {
   lines: OrderLine[];
   delivery: DeliverySnapshot;
   expectedTotal: number;
+  sourcingRequestId?: string;
 };
 
 export function findReplay(
@@ -111,6 +112,9 @@ export async function createCheckout(
       serviceFee,
       totalPrice,
       expiresAt: new Date(now.getTime() + config.holdMinutes * 60_000),
+      ...(draft.sourcingRequestId
+        ? { sourcingRequestId: draft.sourcingRequestId }
+        : {}),
       ...draft.delivery,
       orders: {
         create: draft.lines.map((line) => ({

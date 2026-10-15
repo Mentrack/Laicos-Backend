@@ -45,6 +45,7 @@ describe('OrderService', () => {
     groupBy: jest.fn(),
     aggregate: jest.fn(),
     findFirst: jest.fn(),
+    findUnique: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
   };
@@ -713,6 +714,7 @@ describe('OrderService', () => {
       actionLabel: 'View order',
       resource: AuditResource.ORDER,
       resourceId: orderId,
+      sourcingRequestId: null,
     });
 
     beforeEach(() => {
