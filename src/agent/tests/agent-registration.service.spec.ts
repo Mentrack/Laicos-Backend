@@ -1,5 +1,11 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { Role } from '../../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  Role,
+} from '../../../generated/client';
+import { PrismaService } from '../../prisma/prisma.service';
 import { AuthService } from '../../auth/auth.service';
 import { FirebaseService } from '../../auth/firebase/firebase.service';
 import { DOCUMENT_SIGNATURES } from '../../common/upload-pipes';
@@ -31,6 +37,12 @@ const signup = {
 const profile = { id: 'agent-1', agentId: 'AG-000001' };
 
 describe('AgentRegistrationService', () => {
+  const agent = { findUniqueOrThrow: jest.fn() };
+  const tx = { agent };
+  const database = {
+    $transaction: (callback: (client: typeof tx) => Promise<unknown>) =>
+      callback(tx),
+  };
   const storage = { uploadPrivateFile: jest.fn(), deletePrivate: jest.fn() };
   const auth = {
     createFirebaseUser: jest.fn(),
@@ -40,12 +52,15 @@ describe('AgentRegistrationService', () => {
   const firebase = { signInWithGoogle: jest.fn() };
   const locations = { requireLga: jest.fn() };
   const agents = { findMine: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new AgentRegistrationService(
     storage as unknown as StorageService,
     auth as unknown as AuthService,
     firebase as unknown as FirebaseService,
     locations as unknown as LocationService,
     agents as unknown as AgentService,
+    database as unknown as PrismaService,
+    audit as unknown as import('../../audit/audit.service').AuditService,
   );
   const user = { id: 'user-1', role: Role.EXTENSION_AGENT };
 
@@ -56,6 +71,7 @@ describe('AgentRegistrationService', () => {
     locations.requireLga.mockResolvedValue({ id: 'lga-1', name: 'Gwagwalada' });
     storage.uploadPrivateFile.mockResolvedValue('agents/a/id/x.pdf');
     agents.findMine.mockResolvedValue(profile);
+    agent.findUniqueOrThrow.mockResolvedValue(profile);
   });
 
   describe('signUp', () => {
@@ -74,24 +90,39 @@ describe('AgentRegistrationService', () => {
       expect(signatures).toBe(DOCUMENT_SIGNATURES);
       const agentId = /^agents\/(.+)\/id$/.exec(prefix)?.[1];
       expect(agentId).toBeDefined();
-      expect(auth.createLocalUser).toHaveBeenCalledWith({
-        firebaseUid: 'uid-1',
-        email: 'ada@example.com',
-        firstName: 'Ada',
-        lastName: 'Okafor',
-        phoneNumber: '+2348012345678',
-        agreedToTerms: true,
-        isVerified: false,
-        role: Role.EXTENSION_AGENT,
-        agent: {
-          id: agentId,
-          state: { connect: { id: 'state-1' } },
-          lga: { connect: { id: 'lga-1' } },
-          idType: 'NIN',
-          idNumber: '12345678901',
-          idDocumentKey: 'agents/a/id/x.pdf',
-          cluster: { create: { name: 'Gwagwalada Hub' } },
+      expect(auth.createLocalUser).toHaveBeenCalledWith(
+        {
+          firebaseUid: 'uid-1',
+          email: 'ada@example.com',
+          firstName: 'Ada',
+          lastName: 'Okafor',
+          phoneNumber: '+2348012345678',
+          agreedToTerms: true,
+          isVerified: false,
+          role: Role.EXTENSION_AGENT,
+          agent: {
+            id: agentId,
+            state: { connect: { id: 'state-1' } },
+            lga: { connect: { id: 'lga-1' } },
+            idType: 'NIN',
+            idNumber: '12345678901',
+            idDocumentKey: 'agents/a/id/x.pdf',
+            cluster: { create: { name: 'Gwagwalada Hub' } },
+          },
         },
+        tx,
+      );
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.EXTENSION_AGENT,
+        farmerId: null,
+        agentId: 'agent-1',
+        farmId: null,
+        category: AuditCategory.APPLICATION,
+        title: 'Account created',
+        summary: 'Ada Okafor (AG-000001)',
+        actionLabel: 'View profile',
+        resource: AuditResource.AGENT,
+        resourceId: 'agent-1',
       });
       expect(agents.findMine).toHaveBeenCalledWith(user);
       expect(result).toEqual({ user, agent: profile });
@@ -142,6 +173,7 @@ describe('AgentRegistrationService', () => {
           isVerified: true,
           role: Role.EXTENSION_AGENT,
         }),
+        tx,
       );
     });
 
