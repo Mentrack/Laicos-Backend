@@ -4,6 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   CheckResult,
   EvidenceKind,
   EvidenceStatus,
@@ -14,6 +17,7 @@ import {
   VerificationTaskStatus,
   type Agent,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import { ExpectedDocument } from '../utils/expected-document';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { FarmerActivationService } from '../../auth/farmer-activation.service';
@@ -112,7 +116,11 @@ describe('VerificationService', () => {
   };
   const assignmentDecline = { create: jest.fn() };
   const cluster = { findUniqueOrThrow: jest.fn() };
-  const farm = { update: jest.fn(), findUnique: jest.fn() };
+  const farm = {
+    update: jest.fn(),
+    findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
+  };
   const farmer = { update: jest.fn() };
   const orderHandover = { updateMany: jest.fn() };
   const tx = {
@@ -144,12 +152,14 @@ describe('VerificationService', () => {
   const assignment = { resetRound: jest.fn(), assign: jest.fn() };
   const activation = { activate: jest.fn(), notifyRejection: jest.fn() };
   const documents = { replace: jest.fn() };
+  const audit = { record: jest.fn() };
   const service = new VerificationService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
     assignment as unknown as AssignmentService,
     activation as unknown as FarmerActivationService,
     documents as unknown as FarmDocumentsService,
+    audit as unknown as AuditService,
   );
 
   // The service reads the round in three shapes: the open-check select, the
@@ -564,6 +574,7 @@ describe('VerificationService', () => {
     };
 
     it('replaces documents on the farm of the agent’s open round', async () => {
+      farm.findUniqueOrThrow.mockResolvedValue({ farmCode: 'LF-000001' });
       await service.uploadDocuments(agent, roundId, { idDocument: file });
       expect(documents.replace).toHaveBeenCalledWith(
         'farm-1',
@@ -582,6 +593,20 @@ describe('VerificationService', () => {
           },
         },
         { idDocument: file },
+        [
+          expect.objectContaining({
+            actorType: AuditActorType.EXTENSION_AGENT,
+            agentId: agent.id,
+            farmerId: null,
+            farmId: 'farm-1',
+            category: AuditCategory.VERIFICATION,
+            title: 'Verification documents saved',
+            summary: 'LF-000001: ID',
+            actionLabel: 'View farm',
+            resource: AuditResource.FARM,
+            resourceId: 'farm-1',
+          }),
+        ],
       );
     });
 

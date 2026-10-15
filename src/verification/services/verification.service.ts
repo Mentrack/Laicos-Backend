@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   EvidenceKind,
   FarmerStatus,
   FarmVerificationStatus,
@@ -13,6 +16,8 @@ import {
   type Agent,
   type VerificationCheckKey,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
+import { verificationDocumentsSummary } from '../../farm/utils/farm-document-summary';
 import { paginationMeta, resolvePagination } from '../../common/pagination';
 import {
   IMAGE_SIGNATURES,
@@ -74,6 +79,7 @@ export class VerificationService {
     private readonly assignment: AssignmentService,
     private readonly activation: FarmerActivationService,
     private readonly documents: FarmDocumentsService,
+    private readonly audit: AuditService,
   ) {}
 
   async findAll(agent: Agent, query: VerificationQueryDto) {
@@ -237,6 +243,10 @@ export class VerificationService {
     uploads: FarmDocumentUploads,
   ) {
     const { farmId } = await this.requireOpen(this.database, agent, id);
+    const farm = await this.database.farm.findUniqueOrThrow({
+      where: { id: farmId },
+      select: { farmCode: true },
+    });
     await this.documents.replace(
       farmId,
       {
@@ -249,6 +259,20 @@ export class VerificationService {
         },
       },
       uploads,
+      [
+        {
+          actorType: AuditActorType.EXTENSION_AGENT,
+          farmerId: null,
+          agentId: agent.id,
+          farmId,
+          category: AuditCategory.VERIFICATION,
+          title: 'Verification documents saved',
+          summary: verificationDocumentsSummary(farm.farmCode, uploads),
+          actionLabel: 'View farm',
+          resource: AuditResource.FARM,
+          resourceId: farmId,
+        },
+      ],
     );
     return this.findOne(agent, id);
   }

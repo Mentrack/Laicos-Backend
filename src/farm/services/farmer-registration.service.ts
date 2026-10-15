@@ -27,6 +27,7 @@ import type {
 } from '../dto';
 import { formatFarm } from '../formatters/farm.formatter';
 import { toFarmerDto } from '../formatters/farmer.formatter';
+import { farmDocumentsSummary } from '../utils/farm-document-summary';
 import { FarmService, mapFarmSaveError } from './farm.service';
 
 export interface FarmerRegistration {
@@ -247,24 +248,6 @@ export class FarmerRegistrationService {
       throw mapFarmSaveError(error);
     }
   }
-}
-
-function farmDocumentsSummary(
-  ownershipKey: string | null | undefined,
-  chiefKey: string | null | undefined,
-): string | null {
-  const hasOwnership = Boolean(ownershipKey);
-  const hasChief = Boolean(chiefKey);
-  if (!hasOwnership && !hasChief) {
-    return null;
-  }
-  if (hasOwnership && hasChief) {
-    return 'ownership and chief confirmation';
-  }
-  if (hasOwnership) {
-    return 'ownership';
-  }
-  return 'chief confirmation';
 }
 
 function farmFields(dto: CreateFarmDto): FarmerRegistration['farm'] {

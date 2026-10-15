@@ -4,11 +4,16 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   FarmVerificationStatus,
+  IdType,
   Prisma,
   Role,
   type User,
 } from '../../../generated/client';
+import { AuditService } from '../../audit/audit.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -103,6 +108,7 @@ describe('FarmService', () => {
     assign: jest.fn(),
     resetRound: jest.fn(),
   };
+  const audit = { record: jest.fn() };
   const service = new FarmService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
@@ -111,7 +117,9 @@ describe('FarmService', () => {
     new FarmDocumentsService(
       database as unknown as PrismaService,
       storage as unknown as StorageService,
+      audit as unknown as AuditService,
     ),
+    audit as unknown as AuditService,
   );
 
   beforeEach(() => {
@@ -152,6 +160,51 @@ describe('FarmService', () => {
         chiefConfirmationUrl: null,
       });
       expect(result).not.toHaveProperty('ownershipDocumentKey');
+    });
+
+    it('records the farm and an ownership document on create', async () => {
+      await service.create(user, dto, { ownershipDocument: pdf });
+      expect(audit.record).toHaveBeenCalledTimes(2);
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId,
+        category: AuditCategory.FARM,
+        title: 'Farm LF-000001 created',
+        summary: 'Green Acres, Maize',
+        actionLabel: 'View farm',
+        resource: AuditResource.FARM,
+        resourceId: farmId,
+      });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId,
+        category: AuditCategory.DOCUMENTS,
+        title: 'Farm documents uploaded',
+        summary: 'ownership',
+        actionLabel: 'View farm',
+        resource: AuditResource.FARM,
+        resourceId: farmId,
+      });
+    });
+
+    it('records only the farm when create sends no documents', async () => {
+      farm.findUniqueOrThrow.mockResolvedValue({
+        ...row,
+        ownershipDocumentKey: null,
+      });
+      await service.create(user, dto, {});
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          title: 'Farm LF-000001 created',
+          summary: 'Green Acres, Maize',
+        }),
+      );
     });
 
     it('creates a farm without any documents', async () => {
@@ -278,8 +331,28 @@ describe('FarmService', () => {
         lgaId: 'lga-1',
         location: '12 Market Road',
         verificationStatus: status,
+        farmCode: 'LF-000001',
+        name: 'Green Acres',
+        ownerId: 'farmer-1',
       });
     }
+
+    it('records a farm update in the transaction', async () => {
+      current(FarmVerificationStatus.PENDING);
+      await service.update(user, farmId, { name: 'New name' });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        actorType: AuditActorType.FARMER,
+        farmerId: 'farmer-1',
+        agentId: null,
+        farmId,
+        category: AuditCategory.FARM,
+        title: 'Farm LF-000001 updated',
+        summary: 'New name',
+        actionLabel: 'View farm',
+        resource: AuditResource.FARM,
+        resourceId: farmId,
+      });
+    });
 
     it('resubmits a rejected farm to the agent who rejected it', async () => {
       current(FarmVerificationStatus.REJECTED);
@@ -379,9 +452,40 @@ describe('FarmService', () => {
       .spyOn(FarmDocumentsService.prototype, 'replace')
       .mockResolvedValue(undefined);
     await service.replaceDocuments(user, farmId, { ownershipDocument: pdf });
-    expect(replace).toHaveBeenCalledWith(farmId, owned, {
-      ownershipDocument: pdf,
+    expect(replace).toHaveBeenCalledWith(
+      farmId,
+      owned,
+      { ownershipDocument: pdf },
+      [
+        expect.objectContaining({
+          actorType: AuditActorType.FARMER,
+          farmerId: 'farmer-1',
+          farmId,
+          title: 'Farm documents uploaded',
+          summary: 'ownership',
+        }),
+      ],
+    );
+    replace.mockRestore();
+  });
+
+  it('passes a farmer ID event when only the ID document is replaced', async () => {
+    farmer.findUnique.mockResolvedValue({
+      id: 'farmer-1',
+      idType: IdType.NIN,
+      idDocumentKey: 'farmers/farmer-1/id/a.pdf',
     });
+    const replace = jest
+      .spyOn(FarmDocumentsService.prototype, 'replace')
+      .mockResolvedValue(undefined);
+    await service.replaceDocuments(user, farmId, { idDocument: pdf });
+    expect(replace).toHaveBeenCalledWith(farmId, owned, { idDocument: pdf }, [
+      expect.objectContaining({
+        farmId: null,
+        title: 'ID document uploaded',
+        summary: 'NIN',
+      }),
+    ]);
     replace.mockRestore();
   });
 
