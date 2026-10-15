@@ -4,11 +4,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   HandoverStatus,
   OrderStatus,
   type Agent,
   type Prisma,
 } from '../../generated/client';
+import { AuditService } from '../audit/audit.service';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { isRecordNotFound } from '../common/prisma-errors';
 import {
@@ -37,6 +41,7 @@ export class HandoverService {
   constructor(
     private readonly database: PrismaService,
     private readonly storage: StorageService,
+    private readonly audit: AuditService,
   ) {}
 
   async findAll(agent: Agent, query: HandoverQueryDto) {
@@ -75,20 +80,33 @@ export class HandoverService {
   }
 
   async verify(agent: Agent, orderId: string, dto: VerifyHandoverDto) {
-    const handover = await this.guarded(
-      agent,
-      orderId,
-      'Only a pending handover can be verified',
-      this.database.orderHandover.update({
-        where: { orderId, agentId: agent.id, status: HandoverStatus.PENDING },
-        data: {
-          status: HandoverStatus.VERIFIED,
-          verificationNote: dto.note ?? null,
-          verifiedAt: new Date(),
-        },
-        include: HANDOVER_INCLUDE,
-      }),
-    );
+    const handover = await this.database.$transaction(async (tx) => {
+      const updated = await this.guarded(
+        agent,
+        orderId,
+        'Only a pending handover can be verified',
+        tx.orderHandover.update({
+          where: {
+            orderId,
+            agentId: agent.id,
+            status: HandoverStatus.PENDING,
+          },
+          data: {
+            status: HandoverStatus.VERIFIED,
+            verificationNote: dto.note ?? null,
+            verifiedAt: new Date(),
+          },
+          include: HANDOVER_INCLUDE,
+        }),
+      );
+      await this.recordHandoverAudit(
+        tx,
+        agent.id,
+        updated,
+        'Handover verified',
+      );
+      return updated;
+    });
     return formatHandover(this.storage, handover);
   }
 
@@ -122,6 +140,12 @@ export class HandoverService {
           where: { id: orderId, status: OrderStatus.READY },
           data: { status: OrderStatus.SHIPPED },
         });
+        await this.recordHandoverAudit(
+          tx,
+          agent.id,
+          handedOver,
+          'Handover completed',
+        );
         return handedOver;
       });
       return formatHandover(this.storage, handover);
@@ -145,8 +169,20 @@ export class HandoverService {
       IMAGE_SIGNATURES,
     );
     try {
-      await this.database.handoverProof.create({
-        data: { orderId, storageKey },
+      await this.database.$transaction(async (tx) => {
+        await tx.handoverProof.create({
+          data: { orderId, storageKey },
+        });
+        const handover = await tx.orderHandover.findFirstOrThrow({
+          where: { orderId, agentId: agent.id },
+          include: HANDOVER_INCLUDE,
+        });
+        await this.recordHandoverAudit(
+          tx,
+          agent.id,
+          handover,
+          'Handover proof added',
+        );
       });
     } catch (error) {
       await this.storage.deletePrivate([storageKey]);
@@ -171,6 +207,29 @@ export class HandoverService {
     await this.database.handoverProof.delete({ where: { id: proofId } });
     await this.storage.deletePrivate([proof.storageKey]);
     return this.findOne(agent, orderId);
+  }
+
+  private async recordHandoverAudit(
+    tx: Prisma.TransactionClient,
+    agentId: string,
+    handover: Prisma.OrderHandoverGetPayload<{
+      include: typeof HANDOVER_INCLUDE;
+    }>,
+    title: string,
+  ): Promise<void> {
+    const { order } = handover;
+    await this.audit.record(tx, {
+      actorType: AuditActorType.EXTENSION_AGENT,
+      farmerId: null,
+      agentId,
+      farmId: order.farm.id,
+      category: AuditCategory.HANDOVER,
+      title,
+      summary: `${order.orderNumber} at ${order.farm.farmCode}`,
+      actionLabel: 'View order',
+      resource: AuditResource.ORDER,
+      resourceId: order.id,
+    });
   }
 
   /**
