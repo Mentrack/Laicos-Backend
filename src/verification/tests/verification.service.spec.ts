@@ -165,6 +165,19 @@ describe('VerificationService', () => {
   // The service reads the round in three shapes: the open-check select, the
   // approval checklist, and the full detail it returns.
   let current: ReturnType<typeof detail> | null;
+  const viewFarmAudit = (title: string, summary: string) => ({
+    actorType: AuditActorType.EXTENSION_AGENT,
+    agentId: agent.id,
+    farmerId: null,
+    farmId: 'farm-1',
+    category: AuditCategory.VERIFICATION,
+    title,
+    summary,
+    actionLabel: 'View farm',
+    resource: AuditResource.FARM,
+    resourceId: 'farm-1',
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     current = detail();
@@ -173,6 +186,10 @@ describe('VerificationService', () => {
     );
     farmVerification.updateMany.mockResolvedValue({ count: 1 });
     cluster.findUniqueOrThrow.mockResolvedValue({ id: 'cluster-1' });
+    farm.findUniqueOrThrow.mockResolvedValue({
+      farmCode: 'LF-000001',
+      name: 'Green Acres',
+    });
     farm.update.mockResolvedValue({
       name: 'Green Acres',
       owner: { id: 'farmer-1', userId: 'farmer-user-1' },
@@ -296,6 +313,32 @@ describe('VerificationService', () => {
         new BadRequestException('CROP_HEALTH does not accept UNABLE'),
       );
       expect(verificationCheck.upsert).not.toHaveBeenCalled();
+    });
+
+    it('audits a location save inside the transaction', async () => {
+      await service.saveLocation(agent, roundId, { matches: true });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        viewFarmAudit('Verification location saved', 'LF-000001'),
+      );
+    });
+
+    it('audits a check save inside the transaction', async () => {
+      await service.saveCheck(agent, roundId, VerificationCheckKey.FARMER_ID, {
+        result: CheckResult.UNABLE,
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        viewFarmAudit('Verification check saved', 'FARMER_ID on LF-000001'),
+      );
+    });
+
+    it('does not audit a notes or size update', async () => {
+      await service.update(agent, roundId, {
+        generalNote: 'Updated',
+        measuredSize: 3,
+      });
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 
@@ -443,11 +486,34 @@ describe('VerificationService', () => {
         service.removeEvidence(agent, roundId, 'other'),
       ).rejects.toThrow(new NotFoundException('Evidence not found'));
     });
+
+    it('audits saved evidence inside the transaction', async () => {
+      await service.addEvidence(
+        agent,
+        roundId,
+        { document: ExpectedDocument.LOCATION_EVIDENCE },
+        image,
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        viewFarmAudit('Verification evidence saved', 'LF-000001'),
+      );
+    });
+
+    it('does not audit evidence removal', async () => {
+      verificationEvidence.findFirst.mockResolvedValue({ storageKey: 'photo' });
+      await service.removeEvidence(agent, roundId, 'evidence-1');
+      expect(audit.record).not.toHaveBeenCalled();
+    });
   });
 
   it('declines: records why, wipes the draft and reassigns', async () => {
     assignment.resetRound.mockResolvedValue(['photo-key']);
     await service.decline(agent, roundId, { reason: 'Too far away' });
+    expect(audit.record).toHaveBeenCalledWith(
+      tx,
+      viewFarmAudit('Verification declined', 'Too far away'),
+    );
     expect(farmVerification.updateMany).toHaveBeenCalledWith({
       where: openWhere,
       data: { status: VerificationTaskStatus.UNASSIGNED, agentId: null },
@@ -563,6 +629,10 @@ describe('VerificationService', () => {
         },
         data: { agentId: agent.id },
       });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        viewFarmAudit('Farm LF-000001 verified', 'Green Acres'),
+      );
     });
   });
 
@@ -621,6 +691,10 @@ describe('VerificationService', () => {
 
   it('rejects without a complete checklist and unclusters the farm', async () => {
     await service.reject(agent, roundId, { reason: 'No farm at the address' });
+    expect(audit.record).toHaveBeenCalledWith(
+      tx,
+      viewFarmAudit('Farm LF-000001 rejected', 'No farm at the address'),
+    );
     expect(farmVerification.updateMany).toHaveBeenCalledWith({
       where: openWhere,
       data: {
