@@ -183,6 +183,27 @@ describe('AuditService', () => {
       resourceId: 'farmer-1',
     };
     await service.record(tx as never, event);
+    expect(tx.auditEvent.create).toHaveBeenCalledWith({
+      data: { ...event, sourcingRequestId: null },
+    });
+  });
+
+  it('keeps a sourcing request id when the caller supplies one', async () => {
+    const tx = { auditEvent: { create: jest.fn() } };
+    const event = {
+      actorType: AuditActorType.BUYER,
+      farmerId: null,
+      agentId: null,
+      farmId: null,
+      category: AuditCategory.SOURCING,
+      title: 'Request updated',
+      summary: 'Quantity changed',
+      actionLabel: null,
+      resource: AuditResource.SOURCING_REQUEST,
+      resourceId: 'req-1',
+      sourcingRequestId: 'req-1',
+    };
+    await service.record(tx as never, event);
     expect(tx.auditEvent.create).toHaveBeenCalledWith({ data: event });
   });
 });
