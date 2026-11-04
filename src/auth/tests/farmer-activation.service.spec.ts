@@ -57,6 +57,15 @@ describe('FarmerActivationService', () => {
     expect(invites.sendInvite).toHaveBeenCalledWith(farmer, password);
   });
 
+  it('sets no password when the account already has one', async () => {
+    firebase.auth.getUser.mockResolvedValue({
+      providerData: [{ providerId: 'password' }],
+    });
+    await service.activate('user-1');
+    expect(firebase.auth.updateUser).not.toHaveBeenCalled();
+    expect(invites.sendInvite).toHaveBeenCalledWith(farmer, null);
+  });
+
   it('sets no password for a Google account', async () => {
     firebase.auth.getUser.mockResolvedValue({
       providerData: [{ providerId: 'google.com' }],

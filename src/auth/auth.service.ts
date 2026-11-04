@@ -26,6 +26,7 @@ import { firebaseErrorCode } from './firebase/firebase.errors';
 import { FirebaseService } from './firebase/firebase.service';
 import {
   isPendingActivation,
+  isSelfSignupRole,
   verificationPendingError,
 } from './utils/pending-access';
 import {
@@ -74,15 +75,22 @@ export class AuthService {
     const firebaseRecord = await this.createFirebaseUser(dto);
     let user: UserModel;
     try {
-      user = await this.createLocalUser({
-        firebaseUid: firebaseRecord.uid,
-        email: dto.email,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        phoneNumber: dto.phoneNumber,
-        role: dto.role,
-        isVerified: false,
-        buyer: dto.role === Role.BUYER ? buyerCreateData(dto) : undefined,
+      user = await this.database.$transaction(async (tx) => {
+        const created = await this.createLocalUser(
+          {
+            firebaseUid: firebaseRecord.uid,
+            email: dto.email,
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            phoneNumber: dto.phoneNumber,
+            role: dto.role,
+            isVerified: false,
+            buyer: dto.role === Role.BUYER ? buyerCreateData(dto) : undefined,
+          },
+          tx,
+        );
+        await this.createDraftApplication(tx, created);
+        return created;
       });
     } catch (error) {
       await this.deleteFirebaseUser(firebaseRecord.uid);
@@ -146,13 +154,8 @@ export class AuthService {
       }
       throw new NotFoundException('Account not registered');
     }
-    if (isPendingActivation(user)) {
-      throw verificationPendingError(user.role);
-    }
     const verified = await this.trustGoogleVerification(user, google);
-    if (needsEmailVerification(verified)) {
-      throw emailNotVerifiedError();
-    }
+    await this.assertCanSignIn(verified);
     await this.saveRefreshToken(verified.id, google.refreshToken);
     return { user: verified, ...toTokenPair(google) };
   }
@@ -161,17 +164,35 @@ export class AuthService {
     assertBuyerKind(dto.role, dto);
     const google = await this.firebase.signInWithGoogle(dto.idToken);
     try {
-      const user = await this.createLocalUser({
-        firebaseUid: google.localId,
-        email: google.email,
-        firstName: google.firstName,
-        lastName: google.lastName,
-        phoneNumber: dto.phoneNumber,
-        role: dto.role,
-        isVerified: google.emailVerified,
-        refreshToken: google.refreshToken,
-        buyer: dto.role === Role.BUYER ? buyerCreateData(dto) : undefined,
+      const user = await this.database.$transaction(async (tx) => {
+        const created = await this.createLocalUser(
+          {
+            firebaseUid: google.localId,
+            email: google.email,
+            firstName: google.firstName,
+            lastName: google.lastName,
+            phoneNumber: dto.phoneNumber,
+            role: dto.role,
+            isVerified: google.emailVerified,
+            refreshToken: google.refreshToken,
+            buyer: dto.role === Role.BUYER ? buyerCreateData(dto) : undefined,
+          },
+          tx,
+        );
+        await this.createDraftApplication(tx, created);
+        return created;
       });
+      // A farmer or agent whose Google address is not verified gets the same
+      // code as email signup, and no session until they enter it.
+      if (isSelfSignupRole(user.role) && !user.isVerified) {
+        await this.otp.issue(user).catch((error) => {
+          this.logger.error(
+            `Verification code not sent to user ${user.id}`,
+            error,
+          );
+        });
+        return { user };
+      }
       return { user, ...toTokenPair(google) };
     } catch (error) {
       if (google.isNewUser) {
@@ -191,16 +212,17 @@ export class AuthService {
   async logout(user: UserModel): Promise<void> {
     await this.firebase.auth.revokeRefreshTokens(user.firebaseUid);
     await this.deleteRefreshToken(user.id);
+    await this.database.pushDevice.deleteMany({ where: { userId: user.id } });
   }
 
   async forgotPassword(email: string): Promise<void> {
     const user = await this.database.user.findUnique({
       where: { email },
-      select: { firstName: true, role: true, activatedAt: true },
+      select: { id: true, firstName: true, role: true, activatedAt: true },
     });
-    // A farmer or agent awaiting verification has no password yet; setting
-    // one here would let them in before verification does.
-    if (!user || isPendingActivation(user)) {
+    // An onboarded farmer has no password until their invite. An applicant
+    // chose theirs, so they can reset it before anyone approves them.
+    if (!user || (await this.blocksPasswordReset(user))) {
       return;
     }
 
@@ -258,10 +280,13 @@ export class AuthService {
     await this.deleteRefreshToken(user.id);
   }
 
-  getCurrentUser(user: UserModel) {
-    return this.database.user.findUniqueOrThrow({
+  async getCurrentUser(user: UserModel) {
+    const row = await this.database.user.findUniqueOrThrow({
       where: { id: user.id },
+      include: { application: { select: { status: true } } },
     });
+    const { application, ...rest } = row;
+    return { ...rest, applicationStatus: application?.status ?? null };
   }
 
   updateProfile(user: UserModel, dto: UpdateProfileDto) {
@@ -361,11 +386,14 @@ export class AuthService {
       return await client.user.create({
         data: {
           ...input,
+          // Signup omits these. Agent onboarding passes `farmer`; an agent
+          // row is only written when the caller passes one.
           farmer:
-            input.role === Role.FARMER ? { create: farmer ?? {} } : undefined,
-          // Every agent owns exactly one cluster, so it is born with them.
+            input.role === Role.FARMER && farmer
+              ? { create: farmer }
+              : undefined,
           agent:
-            input.role === Role.EXTENSION_AGENT
+            input.role === Role.EXTENSION_AGENT && agent
               ? { create: { cluster: { create: {} }, ...agent } }
               : undefined,
           buyer:
@@ -414,13 +442,56 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('User not found');
     }
+    await this.assertCanSignIn(user);
+    return user;
+  }
+
+  /**
+   * Buyers and riders must verify their email. A self-signup farmer or agent
+   * must too, and can then sign in before approval. An onboarded farmer has
+   * no application and stays on VERIFICATION_PENDING until the invite.
+   */
+  private async assertCanSignIn(user: UserModel): Promise<void> {
     if (isPendingActivation(user)) {
-      throw verificationPendingError(user.role);
+      const application = await this.database.application.findUnique({
+        where: { userId: user.id },
+        select: { id: true },
+      });
+      if (!application) {
+        throw verificationPendingError(user.role);
+      }
+      if (!user.isVerified) {
+        throw emailNotVerifiedError();
+      }
     }
     if (needsEmailVerification(user)) {
       throw emailNotVerifiedError();
     }
-    return user;
+  }
+
+  /** Onboarded farmers stay silent. Applicants, buyers and riders get a link. */
+  private async blocksPasswordReset(
+    user: Pick<UserModel, 'id' | 'role' | 'activatedAt'>,
+  ): Promise<boolean> {
+    if (!isPendingActivation(user)) {
+      return false;
+    }
+    const application = await this.database.application.findUnique({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    return !application;
+  }
+
+  /** Farmers and agents file this after signup. Other roles have none. */
+  private async createDraftApplication(
+    tx: Prisma.TransactionClient,
+    user: UserModel,
+  ): Promise<void> {
+    if (!isSelfSignupRole(user.role)) {
+      return;
+    }
+    await tx.application.create({ data: { userId: user.id } });
   }
 
   private async saveRefreshToken(userId: string, token: string): Promise<void> {

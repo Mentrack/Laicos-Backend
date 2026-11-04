@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { Role } from '../../../generated/client';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApplicationStatus, Role } from '../../../generated/client';
 
 export class UserDto {
   @ApiProperty({ format: 'uuid' })
@@ -40,9 +40,18 @@ export class UserDto {
     type: Date,
     nullable: true,
     description:
-      'Farmers only: when their first farm was verified. Until then every authenticated route and sign-in answers 403 VERIFICATION_PENDING. Null for other roles.',
+      'When a farmer’s first farm was verified, or an agent was verified. Null until then. A self-signup user can still sign in and open their application.',
   })
   activatedAt: Date | null;
+
+  @ApiPropertyOptional({
+    enum: ApplicationStatus,
+    enumName: 'ApplicationStatus',
+    nullable: true,
+    description:
+      'Self-signup farmers and agents. Null for everyone else, including a farmer an agent onboarded.',
+  })
+  applicationStatus?: ApplicationStatus | null;
 
   @ApiProperty({
     description:

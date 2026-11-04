@@ -30,7 +30,15 @@ const tokens = {
 describe('AuthService Google sign-in', () => {
   const user = { findUnique: jest.fn(), create: jest.fn() };
   const refreshToken = { upsert: jest.fn() };
-  const database = { user, refreshToken };
+  const store = {
+    user,
+    refreshToken,
+    application: { create: jest.fn() },
+  };
+  const database = {
+    ...store,
+    $transaction: (fn: (tx: typeof store) => Promise<unknown>) => fn(store),
+  };
   const firebase = {
     signInWithGoogle: jest.fn(),
     auth: { deleteUser: jest.fn() },

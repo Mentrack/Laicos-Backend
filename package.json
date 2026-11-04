@@ -27,6 +27,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1136.0",
     "@aws-sdk/s3-request-presigner": "^3.1136.0",
+    "@googleapis/gmail": "^22.0.2",
     "@nestjs/bullmq": "^11.0.5",
     "@nestjs/common": "^11.2.5",
     "@nestjs/config": "^4.0.4",
@@ -42,6 +43,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "dotenv": "^18.0.1",
+    "expo-server-sdk": "^5.0.0",
     "firebase-admin": "^14.4.0",
     "ioredis": "^5.11.1",
     "jose": "^6.2.12",
@@ -52,6 +54,7 @@
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.4",
     "twilio": "^6.1.1",
+    "undici": "^7.30.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {

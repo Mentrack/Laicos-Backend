@@ -21,7 +21,8 @@ import { FarmerService } from './services/farmer.service';
     FarmerService,
     FarmerRegistrationService,
   ],
-  // Agent onboarding registers farmers the same way self-signup does.
-  exports: [FarmerRegistrationService],
+  // Agent onboarding still registers farmers here. Applications complete
+  // a farm through FarmService.
+  exports: [FarmerRegistrationService, FarmService],
 })
 export class FarmModule {}

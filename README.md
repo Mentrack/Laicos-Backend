@@ -70,6 +70,21 @@ $ mau deploy
 
 With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
 
+## Email (Gmail API)
+
+Deployed envs send with `MAIL_TRANSPORT=gmail` because Railway blocks outbound SMTP. Locally use `MAIL_TRANSPORT=smtp` (MailHog).
+
+1. In Google Cloud, create an OAuth client (Web application) and enable the Gmail API.
+2. Set the consent screen to **External** and **publish it to Production**. In Testing, the refresh token expires after 7 days.
+3. In the [OAuth Playground](https://developers.google.com/oauthplayground), tick "use your own OAuth credentials", enter the client ID and secret, authorise scope `https://www.googleapis.com/auth/gmail.send` and exchange the code for a refresh token.
+4. Set `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` and `GMAIL_REFRESH_TOKEN`, and set `MAIL_FROM` to the Gmail account's own address.
+
+Expect a one-time "unverified app" warning when authorising. Gmail caps sending at roughly 500 recipients per day. A revoked refresh token logs "refresh token likely revoked" and fails every send until a new one is minted.
+
+## Ops
+
+Railway Redis must use `maxmemory-policy noeviction`, or queued jobs can be evicted.
+
 ## Observability
 
 In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.

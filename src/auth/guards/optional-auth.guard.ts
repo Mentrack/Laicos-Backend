@@ -30,7 +30,7 @@ export class OptionalAuthGuard implements CanActivate {
     this.chain = [
       new FirebaseAuthGuard(firebase),
       new RequireLocalUserGuard(database),
-      new ActivationGuard(),
+      new ActivationGuard(database, reflector),
       new FarmerStandingGuard(database, reflector),
       new PasswordChangeGuard(reflector),
     ];

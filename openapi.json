@@ -157,7 +157,7 @@
     },
     "/auth/register": {
       "post": {
-        "description": "Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Buyers and riders only; farmers and agents have their own signup.",
+        "description": "Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Farmers and extension agents also get an empty application to finish once they are signed in.",
         "operationId": "AuthController_register",
         "parameters": [],
         "requestBody": {
@@ -256,7 +256,7 @@
     },
     "/auth/login": {
       "post": {
-        "description": "403 EMAIL_NOT_VERIFIED for a buyer or rider who has not verified: open the code screen and call POST /auth/verify-email/resend.",
+        "description": "403 EMAIL_NOT_VERIFIED until the email code is entered. A farmer or agent who signed up can sign in before approval; other routes then answer 403 APPLICATION_PENDING. A farmer an agent onboarded answers 403 VERIFICATION_PENDING until their invite.",
         "operationId": "AuthController_login",
         "parameters": [],
         "requestBody": {
@@ -289,7 +289,7 @@
     },
     "/auth/google/register": {
       "post": {
-        "description": "Same result as email registration, using the Google account for name and email.",
+        "description": "Same result as email registration, using the Google account for name and email. A farmer or agent whose Google address is not verified gets the code and no session.",
         "operationId": "AuthController_googleRegister",
         "parameters": [],
         "requestBody": {
@@ -652,6 +652,472 @@
         ]
       }
     },
+    "/notifications": {
+      "get": {
+        "description": "Newest first. unread=true limits the list to unread ones.",
+        "operationId": "NotificationController_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "unread",
+            "required": false,
+            "in": "query",
+            "description": "Only unread notifications when true.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my notifications",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/unread-count": {
+      "get": {
+        "operationId": "NotificationController_unreadCount",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count my unread notifications",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/read-all": {
+      "patch": {
+        "operationId": "NotificationController_markAllRead",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark all my notifications read",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/devices": {
+      "post": {
+        "description": "Idempotent on the token: a token already registered to another account moves to the caller.",
+        "operationId": "NotificationController_registerDevice",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDeviceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register a push device",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/devices/{token}": {
+      "delete": {
+        "description": "Succeeds even when the token is not registered to the caller.",
+        "operationId": "NotificationController_unregisterDevice",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unregister a push device",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/notifications/{id}/read": {
+      "patch": {
+        "description": "404 when it does not exist or belongs to someone else.",
+        "operationId": "NotificationController_markRead",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark a notification read",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/admin/notifications/deliveries": {
+      "get": {
+        "description": "Dead-letter view: defaults to status=FAILED. Most recently updated first.",
+        "operationId": "AdminNotificationController_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List notification deliveries",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/admin/notifications/deliveries/{id}/retry": {
+      "post": {
+        "description": "Resets a FAILED delivery to PENDING and re-queues it. 404 when it does not exist; 409 when it is not FAILED.",
+        "operationId": "AdminNotificationController_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Retry a failed delivery",
+        "tags": [
+          "Notifications"
+        ]
+      }
+    },
+    "/applications/me": {
+      "get": {
+        "description": "The form filed after signup. Available before verification. 404 when this account has no application.",
+        "operationId": "ApplicationController_findMine",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Read my application",
+        "tags": [
+          "Application"
+        ]
+      },
+      "patch": {
+        "description": "Multipart. Send only the fields that changed. Files are idDocument, ownershipDocument and chiefConfirmation (PDF or image, 10 MB). 409 once the application is completed.",
+        "operationId": "ApplicationController_save",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SaveApplicationDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "idDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "ownershipDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "chiefConfirmation": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Save my application",
+        "tags": [
+          "Application"
+        ]
+      }
+    },
+    "/applications/me/complete": {
+      "post": {
+        "description": "Same body as the save. 400 with every gap in error.details while required data is missing, and the application stays a draft. Completing it creates the farmer and farm, or the agent and cluster, and emails that the form is pending review.",
+        "operationId": "ApplicationController_complete",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SaveApplicationDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [],
+                    "properties": {
+                      "idDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "ownershipDocument": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "chiefConfirmation": {
+                        "type": "string",
+                        "format": "binary"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplicationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Submit my application for review",
+        "tags": [
+          "Application"
+        ]
+      }
+    },
     "/farms": {
       "post": {
         "description": "Multipart: the farm fields, an optional ownershipDocument and an optional chiefConfirmation (PDF or image, 10 MB each). 400 until the farmer has uploaded their ID. The farm starts PENDING and is assigned to an agent in its LGA for verification.",
@@ -965,116 +1431,6 @@
         "summary": "Upload or replace one of my farm’s documents",
         "tags": [
           "Farms"
-        ]
-      }
-    },
-    "/farmers/signup": {
-      "post": {
-        "description": "Public, multipart: my details, the farm, and the documents idDocument (my ID), ownershipDocument and chiefConfirmation (PDF or image, 10 MB each). No password: I get access, and a temporary password by email, once an agent verifies the farm. Until then sign-in answers 403 VERIFICATION_PENDING. The agent can collect missing documents on site, but approval needs my ID and the ownership document. 409 when the email is registered.",
-        "operationId": "FarmController_signUp",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/FarmerSignupDto"
-                  },
-                  {
-                    "type": "object",
-                    "required": [],
-                    "properties": {
-                      "idDocument": {
-                        "type": "string",
-                        "format": "binary"
-                      },
-                      "ownershipDocument": {
-                        "type": "string",
-                        "format": "binary"
-                      },
-                      "chiefConfirmation": {
-                        "type": "string",
-                        "format": "binary"
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegisteredFarmerResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Sign up as a farmer with my first farm",
-        "tags": [
-          "Farmers"
-        ]
-      }
-    },
-    "/farmers/google-signup": {
-      "post": {
-        "description": "As POST /farmers/signup, with a Google ID token in place of name and email. Google sign-in works once the farm is verified; no password is issued.",
-        "operationId": "FarmController_signUpWithGoogle",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/GoogleFarmerSignupDto"
-                  },
-                  {
-                    "type": "object",
-                    "required": [],
-                    "properties": {
-                      "idDocument": {
-                        "type": "string",
-                        "format": "binary"
-                      },
-                      "ownershipDocument": {
-                        "type": "string",
-                        "format": "binary"
-                      },
-                      "chiefConfirmation": {
-                        "type": "string",
-                        "format": "binary"
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegisteredFarmerResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Sign up as a farmer with Google",
-        "tags": [
-          "Farmers"
         ]
       }
     },
@@ -4708,104 +5064,6 @@
         ]
       }
     },
-    "/agents/signup": {
-      "post": {
-        "description": "Public, multipart: my details, state and LGA, and idDocument (my ID; PDF or image, 10 MB). No password: I get access once an admin verifies me. Until then sign-in answers 403 VERIFICATION_PENDING. 409 when the email is registered.",
-        "operationId": "AgentSignupController_signUp",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/AgentSignupDto"
-                  },
-                  {
-                    "type": "object",
-                    "required": [
-                      "idDocument"
-                    ],
-                    "properties": {
-                      "idDocument": {
-                        "type": "string",
-                        "format": "binary"
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegisteredAgentResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Sign up as an extension agent",
-        "tags": [
-          "Agents"
-        ]
-      }
-    },
-    "/agents/google-signup": {
-      "post": {
-        "description": "As POST /agents/signup, with a Google ID token in place of name and email. Google sign-in works once an admin verifies me; no password is issued.",
-        "operationId": "AgentSignupController_signUpWithGoogle",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/GoogleAgentSignupDto"
-                  },
-                  {
-                    "type": "object",
-                    "required": [
-                      "idDocument"
-                    ],
-                    "properties": {
-                      "idDocument": {
-                        "type": "string",
-                        "format": "binary"
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RegisteredAgentResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "summary": "Sign up as an extension agent with Google",
-        "tags": [
-          "Agents"
-        ]
-      }
-    },
     "/agents/me": {
       "get": {
         "description": "Includes verification status and my cluster’s name and farm count.",
@@ -6204,11 +6462,13 @@
           "role": {
             "enum": [
               "BUYER",
-              "RIDER"
+              "RIDER",
+              "FARMER",
+              "EXTENSION_AGENT"
             ],
             "type": "string",
             "example": "BUYER",
-            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins."
+            "description": "Account role. Farmers and extension agents get an empty application and finish it after verifying their email. Admins are invited through POST /admins."
           },
           "buyerType": {
             "allOf": [
@@ -6291,6 +6551,14 @@
           "ADMIN"
         ]
       },
+      "ApplicationStatus": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "COMPLETED"
+        ],
+        "description": "Self-signup farmers and agents. Null for everyone else, including a farmer an agent onboarded."
+      },
       "UserDto": {
         "type": "object",
         "properties": {
@@ -6342,7 +6610,16 @@
             "format": "date-time",
             "type": "string",
             "nullable": true,
-            "description": "Farmers only: when their first farm was verified. Until then every authenticated route and sign-in answers 403 VERIFICATION_PENDING. Null for other roles."
+            "description": "When a farmer’s first farm was verified, or an agent was verified. Null until then. A self-signup user can still sign in and open their application."
+          },
+          "applicationStatus": {
+            "nullable": true,
+            "description": "Self-signup farmers and agents. Null for everyone else, including a farmer an agent onboarded.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ApplicationStatus"
+              }
+            ]
           },
           "mustChangePassword": {
             "type": "boolean",
@@ -6465,11 +6742,13 @@
           "role": {
             "enum": [
               "BUYER",
-              "RIDER"
+              "RIDER",
+              "FARMER",
+              "EXTENSION_AGENT"
             ],
             "type": "string",
             "example": "BUYER",
-            "description": "Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins."
+            "description": "Account role. Farmers and extension agents get an empty application and finish it after verifying their email. Admins are invited through POST /admins."
           },
           "buyerType": {
             "allOf": [
@@ -6685,6 +6964,502 @@
           "message",
           "data"
         ]
+      },
+      "NotificationType": {
+        "type": "string",
+        "enum": [
+          "ORDER_RECEIVED"
+        ]
+      },
+      "NotificationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NotificationType"
+              }
+            ]
+          },
+          "title": {
+            "type": "string",
+            "example": "New order"
+          },
+          "body": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true,
+            "nullable": true,
+            "description": "Deep-link target, e.g. { resource, resourceId }."
+          },
+          "readAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "title",
+          "body",
+          "data",
+          "readAt",
+          "createdAt"
+        ]
+      },
+      "NotificationListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "UnreadCountDto": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "example": 3
+          }
+        },
+        "required": [
+          "count"
+        ]
+      },
+      "UnreadCountResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/UnreadCountDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "PushPlatform": {
+        "type": "string",
+        "enum": [
+          "IOS",
+          "ANDROID"
+        ]
+      },
+      "RegisterDeviceDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^Expo(nent)?PushToken\\[[^\\]]+\\]$",
+            "example": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+          },
+          "platform": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PushPlatform"
+              }
+            ]
+          }
+        },
+        "required": [
+          "token",
+          "platform"
+        ]
+      },
+      "NotificationResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/NotificationDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "DeliveryStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "SENT",
+          "SKIPPED",
+          "FAILED"
+        ]
+      },
+      "NotificationChannel": {
+        "type": "string",
+        "enum": [
+          "PUSH",
+          "EMAIL"
+        ]
+      },
+      "DeliveryUserDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string"
+          },
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "role": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "firstName",
+          "lastName",
+          "role"
+        ]
+      },
+      "DeliveryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channel": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NotificationChannel"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DeliveryStatus"
+              }
+            ]
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NotificationType"
+              }
+            ]
+          },
+          "attempts": {
+            "type": "number"
+          },
+          "lastError": {
+            "type": "string",
+            "nullable": true
+          },
+          "sentAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user": {
+            "$ref": "#/components/schemas/DeliveryUserDto"
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "status",
+          "type",
+          "attempts",
+          "lastError",
+          "sentAt",
+          "createdAt",
+          "updatedAt",
+          "user"
+        ]
+      },
+      "DeliveryListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "DeliveryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DeliveryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "IdType": {
+        "type": "string",
+        "enum": [
+          "NIN",
+          "VOTERS_CARD"
+        ]
+      },
+      "ApplicationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ApplicationStatus"
+              }
+            ]
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "agreedToTerms": {
+            "type": "boolean"
+          },
+          "idType": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "idDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the ID document; expires in 15 min"
+          },
+          "farmName": {
+            "type": "string",
+            "nullable": true
+          },
+          "stateId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "lgaId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "location": {
+            "type": "string",
+            "nullable": true
+          },
+          "size": {
+            "type": "number",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "mainProduce": {
+            "type": "string",
+            "nullable": true
+          },
+          "isExporting": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "referralAgentId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "ownershipDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the ownership document; expires in 15 min"
+          },
+          "chiefConfirmationUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the chief’s confirmation; expires in 15 min"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "phoneNumber",
+          "agreedToTerms",
+          "idType",
+          "idNumber",
+          "idDocumentUrl",
+          "farmName",
+          "stateId",
+          "lgaId",
+          "location",
+          "size",
+          "mainProduce",
+          "isExporting",
+          "referralAgentId",
+          "ownershipDocumentUrl",
+          "chiefConfirmationUrl"
+        ]
+      },
+      "ApplicationResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ApplicationDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "SaveApplicationDto": {
+        "type": "object",
+        "properties": {
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678"
+          },
+          "agreedToTerms": {
+            "type": "boolean",
+            "example": true
+          },
+          "idType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "maxLength": 32,
+            "example": "12345678901"
+          },
+          "farmName": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Green Acres"
+          },
+          "stateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "lgaId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 255,
+            "example": "12 Market Road"
+          },
+          "size": {
+            "type": "number",
+            "minimum": 1,
+            "example": 2.5
+          },
+          "unit": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "ha"
+          },
+          "mainProduce": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Maize"
+          },
+          "isExporting": {
+            "type": "boolean"
+          },
+          "referralAgentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       },
       "CreateFarmDto": {
         "type": "object",
@@ -7074,115 +7849,6 @@
           }
         }
       },
-      "IdType": {
-        "type": "string",
-        "enum": [
-          "NIN",
-          "VOTERS_CARD"
-        ]
-      },
-      "FarmerSignupDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "Green Acres"
-          },
-          "stateId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states"
-          },
-          "lgaId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states/{stateId}/lgas; decides which agents verify the farm"
-          },
-          "location": {
-            "type": "string",
-            "maxLength": 255,
-            "example": "12 Market Road",
-            "description": "Street address"
-          },
-          "size": {
-            "type": "number",
-            "minimum": 1,
-            "example": 2.5,
-            "description": "Size in hectares"
-          },
-          "unit": {
-            "type": "string",
-            "maxLength": 20,
-            "example": "ha",
-            "default": "ha"
-          },
-          "mainProduce": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "Maize"
-          },
-          "isExporting": {
-            "type": "boolean",
-            "default": false
-          },
-          "referralAgentId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Referring Agent.id"
-          },
-          "idType": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdType"
-              }
-            ]
-          },
-          "idNumber": {
-            "type": "string",
-            "maxLength": 32,
-            "example": "12345678901"
-          },
-          "phoneNumber": {
-            "type": "string",
-            "example": "+2348012345678",
-            "description": "Phone number in E.164 format"
-          },
-          "agreedToTerms": {
-            "type": "boolean",
-            "example": true,
-            "description": "Must be true"
-          },
-          "email": {
-            "type": "string",
-            "format": "email",
-            "example": "ada@example.com"
-          },
-          "firstName": {
-            "type": "string",
-            "example": "Ada",
-            "description": "User first name"
-          },
-          "lastName": {
-            "type": "string",
-            "example": "Okafor",
-            "description": "User last name"
-          }
-        },
-        "required": [
-          "name",
-          "stateId",
-          "lgaId",
-          "location",
-          "size",
-          "mainProduce",
-          "phoneNumber",
-          "agreedToTerms",
-          "email",
-          "firstName",
-          "lastName"
-        ]
-      },
       "FarmerDto": {
         "type": "object",
         "properties": {
@@ -7214,137 +7880,6 @@
           "userId",
           "createdAt",
           "updatedAt"
-        ]
-      },
-      "RegisteredFarmerDto": {
-        "type": "object",
-        "properties": {
-          "user": {
-            "$ref": "#/components/schemas/UserDto"
-          },
-          "farmer": {
-            "$ref": "#/components/schemas/FarmerDto"
-          },
-          "farm": {
-            "$ref": "#/components/schemas/FarmDto"
-          },
-          "verificationId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Open verification round; agents upload documents to it"
-          }
-        },
-        "required": [
-          "user",
-          "farmer",
-          "farm",
-          "verificationId"
-        ]
-      },
-      "RegisteredFarmerResponseDto": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "example": "OK"
-          },
-          "data": {
-            "$ref": "#/components/schemas/RegisteredFarmerDto"
-          }
-        },
-        "required": [
-          "message",
-          "data"
-        ]
-      },
-      "GoogleFarmerSignupDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "Green Acres"
-          },
-          "stateId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states"
-          },
-          "lgaId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states/{stateId}/lgas; decides which agents verify the farm"
-          },
-          "location": {
-            "type": "string",
-            "maxLength": 255,
-            "example": "12 Market Road",
-            "description": "Street address"
-          },
-          "size": {
-            "type": "number",
-            "minimum": 1,
-            "example": 2.5,
-            "description": "Size in hectares"
-          },
-          "unit": {
-            "type": "string",
-            "maxLength": 20,
-            "example": "ha",
-            "default": "ha"
-          },
-          "mainProduce": {
-            "type": "string",
-            "maxLength": 120,
-            "example": "Maize"
-          },
-          "isExporting": {
-            "type": "boolean",
-            "default": false
-          },
-          "referralAgentId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Referring Agent.id"
-          },
-          "idType": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdType"
-              }
-            ]
-          },
-          "idNumber": {
-            "type": "string",
-            "maxLength": 32,
-            "example": "12345678901"
-          },
-          "phoneNumber": {
-            "type": "string",
-            "example": "+2348012345678",
-            "description": "Phone number in E.164 format"
-          },
-          "agreedToTerms": {
-            "type": "boolean",
-            "example": true,
-            "description": "Must be true"
-          },
-          "idToken": {
-            "type": "string",
-            "example": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
-            "description": "Google ID token from Google Identity Services"
-          }
-        },
-        "required": [
-          "name",
-          "stateId",
-          "lgaId",
-          "location",
-          "size",
-          "mainProduce",
-          "phoneNumber",
-          "agreedToTerms",
-          "idToken"
         ]
       },
       "FarmerListResponseDto": {
@@ -12100,67 +12635,6 @@
           "lastName"
         ]
       },
-      "AgentSignupDto": {
-        "type": "object",
-        "properties": {
-          "phoneNumber": {
-            "type": "string",
-            "example": "+2348012345678",
-            "description": "Phone number in E.164 format"
-          },
-          "agreedToTerms": {
-            "type": "boolean",
-            "example": true,
-            "description": "Must be true"
-          },
-          "idType": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdType"
-              }
-            ]
-          },
-          "idNumber": {
-            "type": "string",
-            "maxLength": 32,
-            "example": "12345678901"
-          },
-          "stateId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states"
-          },
-          "lgaId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states/{stateId}/lgas; the farms I verify and manage are here"
-          },
-          "email": {
-            "type": "string",
-            "format": "email",
-            "example": "ada@example.com"
-          },
-          "firstName": {
-            "type": "string",
-            "example": "Ada",
-            "description": "User first name"
-          },
-          "lastName": {
-            "type": "string",
-            "example": "Okafor",
-            "description": "User last name"
-          }
-        },
-        "required": [
-          "phoneNumber",
-          "agreedToTerms",
-          "stateId",
-          "lgaId",
-          "email",
-          "firstName",
-          "lastName"
-        ]
-      },
       "ClusterSummaryDto": {
         "type": "object",
         "properties": {
@@ -12261,86 +12735,6 @@
           "isVerified",
           "verifiedAt",
           "cluster"
-        ]
-      },
-      "RegisteredAgentDto": {
-        "type": "object",
-        "properties": {
-          "user": {
-            "$ref": "#/components/schemas/UserDto"
-          },
-          "agent": {
-            "$ref": "#/components/schemas/AgentProfileDto"
-          }
-        },
-        "required": [
-          "user",
-          "agent"
-        ]
-      },
-      "RegisteredAgentResponseDto": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "example": "OK"
-          },
-          "data": {
-            "$ref": "#/components/schemas/RegisteredAgentDto"
-          }
-        },
-        "required": [
-          "message",
-          "data"
-        ]
-      },
-      "GoogleAgentSignupDto": {
-        "type": "object",
-        "properties": {
-          "phoneNumber": {
-            "type": "string",
-            "example": "+2348012345678",
-            "description": "Phone number in E.164 format"
-          },
-          "agreedToTerms": {
-            "type": "boolean",
-            "example": true,
-            "description": "Must be true"
-          },
-          "idType": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IdType"
-              }
-            ]
-          },
-          "idNumber": {
-            "type": "string",
-            "maxLength": 32,
-            "example": "12345678901"
-          },
-          "stateId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states"
-          },
-          "lgaId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "From GET /locations/states/{stateId}/lgas; the farms I verify and manage are here"
-          },
-          "idToken": {
-            "type": "string",
-            "example": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
-            "description": "Google ID token from Google Identity Services"
-          }
-        },
-        "required": [
-          "phoneNumber",
-          "agreedToTerms",
-          "stateId",
-          "lgaId",
-          "idToken"
         ]
       },
       "AgentProfileResponseDto": {
@@ -12535,6 +12929,47 @@
           "lastName",
           "phoneNumber",
           "farm"
+        ]
+      },
+      "RegisteredFarmerDto": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserDto"
+          },
+          "farmer": {
+            "$ref": "#/components/schemas/FarmerDto"
+          },
+          "farm": {
+            "$ref": "#/components/schemas/FarmDto"
+          },
+          "verificationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Open verification round; agents upload documents to it"
+          }
+        },
+        "required": [
+          "user",
+          "farmer",
+          "farm",
+          "verificationId"
+        ]
+      },
+      "RegisteredFarmerResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RegisteredFarmerDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "AgentTaskType": {

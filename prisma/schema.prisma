@@ -42,6 +42,10 @@ model User {
   payoutsApproved       Payout[]               @relation("PayoutApprovedBy")
   refreshToken          RefreshToken?
   emailVerificationCode EmailVerificationCode?
+  // Self-signup farmers and agents. Absent for a farmer an agent onboarded.
+  application           Application?
+  notifications         Notification[]
+  pushDevices           PushDevice[]
 }
 
 model RefreshToken {
@@ -1043,4 +1047,105 @@ enum Role {
   EXTENSION_AGENT
   RIDER
   ADMIN
+}
+
+enum ApplicationStatus {
+  DRAFT
+  COMPLETED
+}
+model Application {
+  id                   String            @id @default(uuid())
+  userId               String            @unique
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status               ApplicationStatus @default(DRAFT)
+  phoneNumber          String?
+  agreedToTerms        Boolean           @default(false)
+  idType               IdType?
+  idNumber             String?
+  idDocumentKey        String?
+  farmName             String?
+  stateId              String?
+  lgaId                String?
+  location             String?
+  size                 Float?
+  unit                 String?
+  mainProduce          String?
+  isExporting          Boolean?
+  referralAgentId      String?
+  ownershipDocumentKey String?
+  chiefConfirmationKey String?
+  completedAt          DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+}
+
+enum NotificationType {
+  ORDER_RECEIVED
+}
+
+enum NotificationChannel {
+  PUSH
+  EMAIL
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  SKIPPED
+  FAILED
+}
+
+enum PushPlatform {
+  IOS
+  ANDROID
+}
+
+// The partial index on (userId) WHERE readAt IS NULL and the
+// Notification_title_body_check CHECK are hand-written in the notifications
+// migration; Prisma can't express them.
+model Notification {
+  id         String                 @id @default(uuid())
+  userId     String
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       NotificationType
+  title      String
+  body       String
+  data       Json?
+  readAt     DateTime?
+  createdAt  DateTime               @default(now())
+  deliveries NotificationDelivery[]
+
+  @@index([userId, createdAt])
+}
+
+model NotificationDelivery {
+  id             String              @id @default(uuid())
+  notificationId String
+  notification   Notification        @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  attempts       Int                 @default(0)
+  lastError      String?
+  sentAt         DateTime?
+  // A CHECK in the notifications migration requires all three exactly when channel = 'EMAIL'.
+  emailSubject   String?
+  emailHtml      String?
+  emailText      String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@unique([notificationId, channel])
+  @@index([status, createdAt])
+}
+
+model PushDevice {
+  id         String       @id @default(uuid())
+  userId     String
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String       @unique
+  platform   PushPlatform
+  createdAt  DateTime     @default(now())
+  lastSeenAt DateTime     @default(now())
+
+  @@index([userId])
 }

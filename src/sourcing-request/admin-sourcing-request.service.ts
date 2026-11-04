@@ -65,7 +65,9 @@ const LISTING_INCLUDE = {
   farm: {
     include: {
       cluster: { select: { id: true } },
-      owner: { include: { user: { select: { firstName: true, lastName: true } } } },
+      owner: {
+        include: { user: { select: { firstName: true, lastName: true } } },
+      },
     },
   },
 } satisfies Prisma.ProduceInclude;
@@ -126,9 +128,7 @@ export class AdminSourcingRequestService {
         quantity: row.quantity,
         unit: row.unit,
         deliveryDestination: row.deliveryDestination,
-        agentName: row.assignedAgent
-          ? fullName(row.assignedAgent.user)
-          : null,
+        agentName: row.assignedAgent ? fullName(row.assignedAgent.user) : null,
         agentCode: row.assignedAgent?.agentId ?? null,
         status: row.status,
         createdAt: row.createdAt,
@@ -158,7 +158,8 @@ export class AdminSourcingRequestService {
     });
     const audit = await this.audit.findForRequest(id, { page: 1, perPage: 5 });
     const selected = request.allocations.reduce(
-      (sum, row) => sum + comparableQuantity(request.unit, row.produce.unit, row.quantity),
+      (sum, row) =>
+        sum + comparableQuantity(request.unit, row.produce.unit, row.quantity),
       0,
     );
     const live =
@@ -213,7 +214,10 @@ export class AdminSourcingRequestService {
       allocations: request.allocations.map((row) =>
         allocationRow(row.produce, row.quantity),
       ),
-      coverage: coverage(requestedAmount(request.quantity, request.unit), selected),
+      coverage: coverage(
+        requestedAmount(request.quantity, request.unit),
+        selected,
+      ),
       checkout: live
         ? {
             id: live.id,
@@ -297,7 +301,9 @@ export class AdminSourcingRequestService {
         }
         const allocations = await tx.sourcingAllocation.findMany({
           where: { sourcingRequestId: id },
-          include: { produce: { select: { farm: { select: { clusterId: true } } } } },
+          include: {
+            produce: { select: { farm: { select: { clusterId: true } } } },
+          },
         });
         if (
           allocations.some(
@@ -321,7 +327,9 @@ export class AdminSourcingRequestService {
             agentId: agent.id,
             farmId: null,
             category: AuditCategory.ASSIGNMENT,
-            title: request.assignedAgentId ? 'Agent reassigned' : 'Agent assigned',
+            title: request.assignedAgentId
+              ? 'Agent reassigned'
+              : 'Agent assigned',
             summary: `${fullName(agent.user)} (${agent.agentId})`,
             actionLabel: 'View agent',
             resource: AuditResource.AGENT,
@@ -340,7 +348,9 @@ export class AdminSourcingRequestService {
         await advisoryLock(tx, `sourcing:${id}`);
         const request = await this.requireRequest(id, tx);
         if (!request.assignedAgentId) {
-          throw new ConflictException('Assign an agent before matching listings');
+          throw new ConflictException(
+            'Assign an agent before matching listings',
+          );
         }
         if (!OPEN_FOR_MATCH.includes(request.status)) {
           throw new ConflictException(
@@ -354,7 +364,12 @@ export class AdminSourcingRequestService {
         const current = await tx.sourcingAllocation.findMany({
           where: { sourcingRequestId: id },
         });
-        const next = await this.checkedItems(tx, request, agent.cluster?.id, dto);
+        const next = await this.checkedItems(
+          tx,
+          request,
+          agent.cluster?.id,
+          dto,
+        );
         await tx.sourcingAllocation.deleteMany({
           where: { sourcingRequestId: id },
         });
@@ -375,7 +390,10 @@ export class AdminSourcingRequestService {
             agentId: request.assignedAgentId,
             farmId: null,
             category: AuditCategory.MATCHING,
-            title: next.length === 0 ? 'Selection cleared' : 'Supply selection updated',
+            title:
+              next.length === 0
+                ? 'Selection cleared'
+                : 'Supply selection updated',
             summary:
               next.length === 0
                 ? 'No listings selected'
@@ -401,7 +419,10 @@ export class AdminSourcingRequestService {
           where: { id },
           include: {
             allocations: { include: { produce: { include: LISTING_INCLUDE } } },
-            checkouts: { where: { status: { in: LIVE } }, select: { id: true, status: true } },
+            checkouts: {
+              where: { status: { in: LIVE } },
+              select: { id: true, status: true },
+            },
           },
         });
         if (!request) {
@@ -424,11 +445,14 @@ export class AdminSourcingRequestService {
         }
         const selected = request.allocations.reduce(
           (sum, row) =>
-            sum + comparableQuantity(request.unit, row.produce.unit, row.quantity),
+            sum +
+            comparableQuantity(request.unit, row.produce.unit, row.quantity),
           0,
         );
         if (selected < requestedAmount(request.quantity, request.unit)) {
-          throw new ConflictException('The selection does not cover the request');
+          throw new ConflictException(
+            'The selection does not cover the request',
+          );
         }
         const clusterId = request.allocations[0]?.produce.farm.clusterId;
         for (const row of request.allocations) {
@@ -470,7 +494,9 @@ export class AdminSourcingRequestService {
             row.quantity,
           );
           if (!reserved || !produce) {
-            throw new ConflictException('A selected listing is no longer eligible');
+            throw new ConflictException(
+              'A selected listing is no longer eligible',
+            );
           }
           lines.push(orderLine(produce, row.quantity));
         }
@@ -716,7 +742,11 @@ function fullName(user: { firstName: string; lastName: string }): string {
 }
 
 function paidOrders(
-  checkouts: { orders: { status: Prisma.OrderGetPayload<{ select: { status: true } }>['status'] }[] }[],
+  checkouts: {
+    orders: {
+      status: Prisma.OrderGetPayload<{ select: { status: true } }>['status'];
+    }[];
+  }[],
 ) {
   return checkouts.flatMap((checkout) => checkout.orders);
 }
@@ -755,16 +785,22 @@ function searchWhere(search?: string): Prisma.SourcingRequestWhereInput {
         { requestNumber: { contains: token, mode: 'insensitive' as const } },
         { produceName: { contains: token, mode: 'insensitive' as const } },
         {
-          buyer: { legalName: { contains: token, mode: 'insensitive' as const } },
-        },
-        {
           buyer: {
-            user: { firstName: { contains: token, mode: 'insensitive' as const } },
+            legalName: { contains: token, mode: 'insensitive' as const },
           },
         },
         {
           buyer: {
-            user: { lastName: { contains: token, mode: 'insensitive' as const } },
+            user: {
+              firstName: { contains: token, mode: 'insensitive' as const },
+            },
+          },
+        },
+        {
+          buyer: {
+            user: {
+              lastName: { contains: token, mode: 'insensitive' as const },
+            },
           },
         },
       ],

@@ -1,9 +1,4 @@
-import {
-  ApiProperty,
-  ApiPropertyOptional,
-  IntersectionType,
-  PickType,
-} from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
@@ -13,8 +8,8 @@ import {
   IsUUID,
   ValidateNested,
 } from 'class-validator';
-import { GoogleLoginDto, RegisterDto, UserDto } from '../../auth/dto';
-import { CreateFarmDto, SignupContactDto } from '../../farm/dto';
+import { RegisterDto } from '../../auth/dto';
+import { CreateFarmDto } from '../../farm/dto';
 import { IdentityDto, UpdateIdentityDto } from '../../common/dto/identity.dto';
 import { PaginationQueryDto } from '../../common/pagination';
 import { HandoverDto } from '../../handover/dto';
@@ -163,42 +158,4 @@ export class ClusterFarmerDto {
 
   @ApiProperty()
   createdAt: Date;
-}
-
-// Multipart: the ID document travels as a file beside these fields. Country
-// isn't asked: only Nigerian states and LGAs exist, so it stays NG.
-class AgentSignupFieldsDto extends IntersectionType(
-  SignupContactDto,
-  UpdateIdentityDto,
-) {
-  @ApiProperty({ format: 'uuid', description: 'From GET /locations/states' })
-  @IsUUID()
-  stateId: string;
-
-  @ApiProperty({
-    format: 'uuid',
-    description:
-      'From GET /locations/states/{stateId}/lgas; the farms I verify and manage are here',
-  })
-  @IsUUID()
-  lgaId: string;
-}
-
-export class AgentSignupDto extends IntersectionType(
-  AgentSignupFieldsDto,
-  PickType(RegisterDto, ['email', 'firstName', 'lastName'] as const),
-) {}
-
-/** Google supplies the name and email. */
-export class GoogleAgentSignupDto extends IntersectionType(
-  AgentSignupFieldsDto,
-  GoogleLoginDto,
-) {}
-
-export class RegisteredAgentDto {
-  @ApiProperty({ type: UserDto })
-  user: UserDto;
-
-  @ApiProperty({ type: AgentProfileDto })
-  agent: AgentProfileDto;
 }

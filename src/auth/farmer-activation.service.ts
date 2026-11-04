@@ -29,14 +29,15 @@ export class FarmerActivationService {
       return;
     }
     try {
-      // A Google account signs in with Google; anything else has no
-      // password until this one.
+      // Google and anyone who chose a password at signup keep it. An
+      // onboarded farmer has neither provider, so they get a temporary one.
       const account = await this.firebase.auth.getUser(user.firebaseUid);
-      const password = account.providerData.some(
-        (provider) => provider.providerId === 'google.com',
-      )
-        ? null
-        : temporaryPassword();
+      const hasSignIn = account.providerData.some(
+        (provider) =>
+          provider.providerId === 'google.com' ||
+          provider.providerId === 'password',
+      );
+      const password = hasSignIn ? null : temporaryPassword();
       // Claimed before touching Firebase, so two farms approved at once
       // can't each set (and send) a different password.
       const { count } = await this.database.user.updateMany({

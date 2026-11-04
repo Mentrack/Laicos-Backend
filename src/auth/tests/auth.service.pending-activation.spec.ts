@@ -25,8 +25,9 @@ describe.each([Role.FARMER, Role.EXTENSION_AGENT])(
       firstName: 'Ada',
     };
     const user = { findUnique: jest.fn() };
+    const application = { findUnique: jest.fn() };
     const refreshToken = { upsert: jest.fn() };
-    const database = { user, refreshToken };
+    const database = { user, application, refreshToken };
     const firebase = {
       signInWithPassword: jest.fn(),
       signInWithGoogle: jest.fn(),
@@ -47,6 +48,7 @@ describe.each([Role.FARMER, Role.EXTENSION_AGENT])(
     beforeEach(() => {
       jest.clearAllMocks();
       user.findUnique.mockResolvedValue(pending);
+      application.findUnique.mockResolvedValue(null);
       firebase.signInWithPassword.mockResolvedValue(tokens);
       firebase.refreshIdToken.mockResolvedValue(tokens);
       firebase.signInWithGoogle.mockResolvedValue({
@@ -78,6 +80,17 @@ describe.each([Role.FARMER, Role.EXTENSION_AGENT])(
     it('sends no reset link, so no password can be set before activation', async () => {
       await service.forgotPassword('ada@example.com');
       expect(firebase.generatePasswordResetLink).not.toHaveBeenCalled();
+    });
+
+    it('signs in an applicant whose email is verified', async () => {
+      user.findUnique.mockResolvedValue({ ...pending, isVerified: true });
+      application.findUnique.mockResolvedValue({ id: 'app-1' });
+      refreshToken.upsert.mockResolvedValue({});
+      const session = await service.login({
+        email: 'ada@example.com',
+        password: 'x',
+      });
+      expect(session.user.id).toBe('user-1');
     });
   },
 );

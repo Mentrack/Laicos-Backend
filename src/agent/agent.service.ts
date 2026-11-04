@@ -51,9 +51,9 @@ const AGENT_INCLUDE = {
   cluster: { include: { _count: { select: { farms: true } } } },
 } satisfies Prisma.AgentInclude;
 
-// Agent rows (and their clusters) are created with their EXTENSION_AGENT user
-// (AgentRegistrationService, through AuthService.createLocalUser) and deleted
-// with it, so there is no create or delete here. isVerified is an admin's to set, never the agent's.
+// Agent rows (and their clusters) are created when an application is completed
+// and deleted with the user, so there is no create or delete here. isVerified
+// is an admin's to set, never the agent's.
 @Injectable()
 export class AgentService {
   constructor(

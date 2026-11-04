@@ -1,18 +1,56 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedRequest } from '../authenticated-request';
-import { assertActivated } from '../utils/session';
+import { AllowPendingApplication } from '../decorators/allow-pending-application.decorator';
+import {
+  applicationPendingError,
+  isPendingActivation,
+  verificationPendingError,
+} from '../utils/pending-access';
+import {
+  emailNotVerifiedError,
+  needsEmailVerification,
+} from '../utils/email-verification';
 
 /**
- * Locks a farmer or agent out until they are verified, and a buyer or rider
- * until their email is. Sign-in refuses them too; this covers an ID token
- * issued before that check existed or by the client SDK directly. Needs `req.user`, so it runs after
- * `RequireLocalUserGuard`.
+ * Buyers and riders must verify their email. An onboarded farmer is locked
+ * out until their invite. A self-signup farmer or agent can sign in first:
+ * until approval, only routes marked `@AllowPendingApplication()` answer.
+ * Needs `req.user`, so it runs after `RequireLocalUserGuard`.
  */
 @Injectable()
 export class ActivationGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(
+    private readonly database: PrismaService,
+    private readonly reflector: Reflector,
+  ) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    assertActivated(user);
-    return true;
+    if (needsEmailVerification(user)) {
+      throw emailNotVerifiedError();
+    }
+    if (!isPendingActivation(user)) {
+      return true;
+    }
+    const application = await this.database.application.findUnique({
+      where: { userId: user.id },
+      select: { id: true },
+    });
+    if (!application) {
+      throw verificationPendingError(user.role);
+    }
+    if (!user.isVerified) {
+      throw emailNotVerifiedError();
+    }
+    const allowed = this.reflector.getAllAndOverride(AllowPendingApplication, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (allowed) {
+      return true;
+    }
+    throw applicationPendingError();
   }
 }

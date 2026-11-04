@@ -3,6 +3,7 @@
  * admin, plus the verification rounds, produce and orders between them.
  * farmer-6..9 are verified with only in-stock, published listings across the
  * categories, so buyers always have a marketplace to browse and order from.
+ * Every active farmer has open orders to work on.
  *
  * Farmers and agents follow the password-less signup flows. A farmer is
  * active (can sign in with the seed password) once a round of their farm was
@@ -79,8 +80,7 @@ interface SeedAgent extends SeedUser, SeedIdentity {
   key: AgentKey;
   state: string;
   lga: string;
-  // Signed up through POST /agents/signup and not yet verified by an admin:
-  // no password, isVerified false, locked out by ActivationGuard.
+  // Not yet verified by an admin: no password, isVerified false, locked out.
   pending?: boolean;
 }
 
@@ -283,9 +283,11 @@ function cleanApproval(
   };
 }
 
-/** A published listing nobody has ordered yet: all of its stock is buyable. */
-function inStock(produce: Omit<SeedProduce, 'status' | 'orders'>): SeedProduce {
-  return { ...produce, status: ProduceStatus.PUBLISHED, orders: [] };
+/** A published listing whose orders, if any, leave stock to buy. */
+function inStock(
+  produce: Omit<SeedProduce, 'status' | 'orders'> & { orders?: SeedOrder[] },
+): SeedProduce {
+  return { orders: [], ...produce, status: ProduceStatus.PUBLISHED };
 }
 
 const FARMERS: SeedFarmer[] = [
@@ -631,7 +633,7 @@ const FARMERS: SeedFarmer[] = [
       produce: [],
     },
   },
-  // farmer-6..9: verified farms whose listings are all in stock, for buyers.
+  // farmer-6..9: verified farms whose listings all stay in stock, for buyers.
   {
     key: 'farmer-6',
     email: 'farmer6@laicos.test',
@@ -672,6 +674,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.VEGETABLES,
           description: 'Firm, ripe Roma tomatoes packed in ventilated crates.',
           specs: 'Grade A — Fresh Harvest',
+          orders: [
+            {
+              key: 'order-8',
+              buyer: 'buyer-1',
+              quantity: 50,
+              status: OrderStatus.PENDING,
+              daysAgo: 1,
+            },
+          ],
         }),
         inStock({
           key: 'produce-6',
@@ -683,6 +694,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.VEGETABLES,
           description: 'Hot red and yellow ata rodo, picked to order.',
           specs: 'Grade A — Mixed colours',
+          orders: [
+            {
+              key: 'order-9',
+              buyer: 'buyer-2',
+              quantity: 20,
+              status: OrderStatus.PREPARING,
+              daysAgo: 2,
+            },
+          ],
         }),
         inStock({
           key: 'produce-7',
@@ -738,6 +758,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.GRAINS,
           description: 'Threshed and winnowed red sorghum in 100 kg bags.',
           specs: 'Grade A — Moisture below 12%',
+          orders: [
+            {
+              key: 'order-10',
+              buyer: 'buyer-2',
+              quantity: 500,
+              status: OrderStatus.CONFIRMED,
+              daysAgo: 2,
+            },
+          ],
         }),
         inStock({
           key: 'produce-9',
@@ -760,6 +789,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.LEGUMES,
           description: 'Sweet brown beans, weevil-free and hand-sorted.',
           specs: 'Grade A — Hand sorted',
+          orders: [
+            {
+              key: 'order-11',
+              buyer: 'buyer-1',
+              quantity: 100,
+              status: OrderStatus.PENDING,
+              daysAgo: 0,
+            },
+          ],
         }),
       ],
     },
@@ -804,6 +842,16 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.SPICES,
           description: 'Sun-dried split ginger, sorted and bagged for export.',
           specs: 'Grade A — Moisture below 10%',
+          orders: [
+            {
+              key: 'order-12',
+              buyer: 'buyer-1',
+              quantity: 300,
+              status: OrderStatus.PREPARING,
+              daysAgo: 4,
+              checklist: { ...COMPLETE_CHECKLIST, readyForPickup: false },
+            },
+          ],
         }),
         inStock({
           key: 'produce-12',
@@ -815,6 +863,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.NUTS,
           description: 'In-shell raw cashew nuts from this season.',
           specs: 'KOR 47 lbs — Nut count 190/kg',
+          orders: [
+            {
+              key: 'order-13',
+              buyer: 'buyer-2',
+              quantity: 250,
+              status: OrderStatus.PENDING,
+              daysAgo: 1,
+            },
+          ],
         }),
         inStock({
           key: 'produce-13',
@@ -870,6 +927,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.TUBERS,
           description: 'Large white puna yam tubers, 3–5 kg each.',
           specs: 'Grade A — Barn stored',
+          orders: [
+            {
+              key: 'order-14',
+              buyer: 'buyer-2',
+              quantity: 40,
+              status: OrderStatus.CONFIRMED,
+              daysAgo: 3,
+            },
+          ],
         }),
         inStock({
           key: 'produce-15',
@@ -892,6 +958,15 @@ const FARMERS: SeedFarmer[] = [
           category: ProduceCategory.FRUITS,
           description: 'Sweet, half-coloured pineapples, 1.5–2 kg each.',
           specs: 'Grade A — Fresh Harvest',
+          orders: [
+            {
+              key: 'order-15',
+              buyer: 'buyer-1',
+              quantity: 30,
+              status: OrderStatus.PENDING,
+              daysAgo: 0,
+            },
+          ],
         }),
       ],
     },

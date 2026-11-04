@@ -55,14 +55,12 @@ describe('SourcingRequestService', () => {
       findFirst: jest.fn(),
     },
     $transaction: (
-      arg:
-        | Promise<unknown>[]
-        | ((tx: typeof database) => Promise<unknown>),
+      arg: Promise<unknown>[] | ((tx: typeof database) => Promise<unknown>),
     ) => (typeof arg === 'function' ? arg(database) : Promise.all(arg)),
   };
   const audit = { record: jest.fn() };
   const service = new SourcingRequestService(
-    database as unknown as PrismaService,
+    database,
     audit as unknown as AuditService,
   );
 
