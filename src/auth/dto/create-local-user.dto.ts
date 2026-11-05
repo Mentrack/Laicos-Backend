@@ -11,18 +11,13 @@ export class CreateLocalUserDto extends OmitType(RegisterDto, [
   'password',
   'role',
 ] as const) {
-  // RegisterDto refuses these, but their own signups create them here.
-  role:
-    | RegisterDto['role']
-    | typeof Role.FARMER
-    | typeof Role.EXTENSION_AGENT
-    | typeof Role.ADMIN;
+  role: RegisterDto['role'] | typeof Role.ADMIN;
   firebaseUid: string;
   isVerified: boolean;
   agreedToTerms?: boolean;
-  /** The FARMER user's profile, created in the same write. */
+  /** Passed by agent onboarding. Signup leaves this out; the application creates it. */
   farmer?: Prisma.FarmerCreateWithoutUserInput;
-  /** The EXTENSION_AGENT user's profile; gets an empty cluster if none given. */
+  /** Passed only when the agent row is created in the same write. */
   agent?: Prisma.AgentCreateWithoutUserInput;
   /** The BUYER user's profile, created in the same write. */
   buyer?: Prisma.BuyerCreateWithoutUserInput;

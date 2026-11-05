@@ -46,9 +46,14 @@ describe('AuthService email verification', () => {
     deleteMany: jest.fn(),
   };
   const refreshToken = { upsert: jest.fn() };
-  const database = {
+  const store = {
     user,
     refreshToken,
+    application: { create: jest.fn() },
+  };
+  const database = {
+    ...store,
+    $transaction: (fn: (tx: typeof store) => Promise<unknown>) => fn(store),
   };
   const firebase = {
     signInWithPassword: jest.fn(),

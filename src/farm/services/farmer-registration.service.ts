@@ -10,7 +10,6 @@ import {
 import { AuditService } from '../../audit/audit.service';
 import { AuthService } from '../../auth/auth.service';
 import type { CreateLocalUserDto } from '../../auth/dto';
-import { FirebaseService } from '../../auth/firebase/firebase.service';
 import type { UpdateIdentityDto } from '../../common/dto/identity.dto';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -19,12 +18,7 @@ import {
   FarmDocumentsService,
   type FarmDocumentUploads,
 } from '../../verification/services/farm-documents.service';
-import type {
-  CreateFarmDto,
-  FarmerSignupDto,
-  GoogleFarmerSignupDto,
-  RegisteredFarmerDto,
-} from '../dto';
+import type { CreateFarmDto, RegisteredFarmerDto } from '../dto';
 import { formatFarm } from '../formatters/farm.formatter';
 import { toFarmerDto } from '../formatters/farmer.formatter';
 import { farmDocumentsSummary } from '../utils/farm-document-summary';
@@ -55,9 +49,8 @@ export interface FarmerRegistration {
 }
 
 /**
- * Creates a farmer with their first farm: self-signup (email or Google) and
- * agent onboarding. No password is set; the farmer gets one in the invite
- * sent when the farm is verified (FarmerActivationService).
+ * Creates a farmer and their first farm for an agent onboarding them in the
+ * field. No password is set; the invite sends one when the farm is verified.
  */
 @Injectable()
 export class FarmerRegistrationService {
@@ -65,55 +58,11 @@ export class FarmerRegistrationService {
     private readonly database: PrismaService,
     private readonly storage: StorageService,
     private readonly auth: AuthService,
-    private readonly firebase: FirebaseService,
     private readonly farms: FarmService,
     private readonly documents: FarmDocumentsService,
     private readonly locations: LocationService,
     private readonly audit: AuditService,
   ) {}
-
-  async signUp(dto: FarmerSignupDto, documents: FarmDocumentUploads) {
-    const account = await this.auth.createFirebaseUser({
-      email: dto.email,
-      firstName: dto.firstName,
-      lastName: dto.lastName,
-    });
-    return this.register({
-      account: { uid: account.uid, isNew: true },
-      user: {
-        email: dto.email,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        phoneNumber: dto.phoneNumber,
-        agreedToTerms: dto.agreedToTerms,
-        isVerified: false,
-      },
-      identity: { idType: dto.idType, idNumber: dto.idNumber },
-      farm: farmFields(dto),
-      documents,
-    });
-  }
-
-  async signUpWithGoogle(
-    dto: GoogleFarmerSignupDto,
-    documents: FarmDocumentUploads,
-  ) {
-    const google = await this.firebase.signInWithGoogle(dto.idToken);
-    return this.register({
-      account: { uid: google.localId, isNew: google.isNewUser },
-      user: {
-        email: google.email,
-        firstName: google.firstName,
-        lastName: google.lastName,
-        phoneNumber: dto.phoneNumber,
-        agreedToTerms: dto.agreedToTerms,
-        isVerified: google.emailVerified,
-      },
-      identity: { idType: dto.idType, idNumber: dto.idNumber },
-      farm: farmFields(dto),
-      documents,
-    });
-  }
 
   /**
    * Everything after the Firebase account exists. Any failure deletes the
@@ -248,18 +197,4 @@ export class FarmerRegistrationService {
       throw mapFarmSaveError(error);
     }
   }
-}
-
-function farmFields(dto: CreateFarmDto): FarmerRegistration['farm'] {
-  return {
-    name: dto.name,
-    stateId: dto.stateId,
-    lgaId: dto.lgaId,
-    location: dto.location,
-    size: dto.size,
-    unit: dto.unit,
-    mainProduce: dto.mainProduce,
-    isExporting: dto.isExporting,
-    referralAgentId: dto.referralAgentId,
-  };
 }

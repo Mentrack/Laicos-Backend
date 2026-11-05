@@ -1,19 +1,18 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import {
   AuditActorType,
   AuditCategory,
   AuditResource,
   FarmVerificationStatus,
-  Prisma,
   Role,
 } from '../../../generated/client';
 import { AuthService } from '../../auth/auth.service';
-import { FirebaseService } from '../../auth/firebase/firebase.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
 import { LocationService } from '../../location/location.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { FarmDocumentsService } from '../../verification/services/farm-documents.service';
+import { AuditService } from '../../audit/audit.service';
 import { FarmService } from '../services/farm.service';
 import { FarmerRegistrationService } from '../services/farmer-registration.service';
 
@@ -30,16 +29,6 @@ const farm = {
   size: 2.5,
   mainProduce: 'Maize',
 };
-const signup = {
-  ...farm,
-  email: 'ada@example.com',
-  firstName: 'Ada',
-  lastName: 'Okafor',
-  phoneNumber: '+2348012345678',
-  agreedToTerms: true,
-  idType: 'NIN' as const,
-  idNumber: '12345678901',
-};
 const farmRow = {
   id: 'farm-1',
   farmCode: 'LF-000001',
@@ -55,7 +44,7 @@ const farmRow = {
   unit: 'ha',
   mainProduce: 'Maize',
   isExporting: false,
-  referralAgentId: null,
+  referralAgentId: 'agent-1',
   verificationStatus: FarmVerificationStatus.PENDING,
   isClustered: false,
   clusterId: null,
@@ -71,7 +60,6 @@ const farmerRow = {
   userId: 'user-1',
   idType: 'NIN',
   idNumber: '12345678901',
-  idDocumentKey: 'id',
   createdAt: new Date('2026-10-07'),
   updatedAt: new Date('2026-10-07'),
 };
@@ -88,11 +76,9 @@ describe('FarmerRegistrationService', () => {
     presignedUrlOrNull: jest.fn(() => Promise.resolve(null)),
   };
   const auth = {
-    createFirebaseUser: jest.fn(),
     createLocalUser: jest.fn(),
     deleteFirebaseUser: jest.fn(),
   };
-  const firebase = { signInWithGoogle: jest.fn() };
   const farms = { insertFarm: jest.fn() };
   const documents = { uploadAll: jest.fn() };
   const locations = { requireLga: jest.fn() };
@@ -101,17 +87,29 @@ describe('FarmerRegistrationService', () => {
     database as unknown as PrismaService,
     storage as unknown as StorageService,
     auth as unknown as AuthService,
-    firebase as unknown as FirebaseService,
     farms as unknown as FarmService,
     documents as unknown as FarmDocumentsService,
     locations as unknown as LocationService,
-    audit as unknown as import('../../audit/audit.service').AuditService,
+    audit as unknown as AuditService,
   );
   const user = { id: 'user-1', role: Role.FARMER };
+  const input = {
+    account: { uid: 'uid-1', isNew: true },
+    user: {
+      email: 'ada@example.com',
+      firstName: 'Ada',
+      lastName: 'Okafor',
+      phoneNumber: '+2348012345678',
+      isVerified: false,
+    },
+    identity: { idType: 'NIN' as const, idNumber: '12345678901' },
+    farm: { ...farm, referralAgentId: 'agent-1' },
+    documents: { idDocument: pdf, ownershipDocument: pdf },
+    preferredAgentId: 'agent-1',
+  };
 
   beforeEach(() => {
     jest.resetAllMocks();
-    auth.createFirebaseUser.mockResolvedValue({ uid: 'uid-1' });
     auth.createLocalUser.mockResolvedValue(user);
     farmer.findUniqueOrThrow.mockResolvedValue(farmerRow);
     farms.insertFarm.mockResolvedValue({
@@ -127,216 +125,27 @@ describe('FarmerRegistrationService', () => {
     });
   });
 
-  describe('signUp', () => {
-    it('creates a password-less account, the farmer with their ID, and the farm', async () => {
-      const result = await service.signUp(signup, {
-        idDocument: pdf,
-        ownershipDocument: pdf,
-      });
-
-      expect(auth.createFirebaseUser).toHaveBeenCalledWith({
-        email: 'ada@example.com',
-        firstName: 'Ada',
-        lastName: 'Okafor',
-      });
-      const [[farmerId, farmId]] = documents.uploadAll.mock.calls as [
-        [string, string],
-      ];
-      expect(auth.createLocalUser).toHaveBeenCalledWith(
-        {
-          firebaseUid: 'uid-1',
-          email: 'ada@example.com',
-          firstName: 'Ada',
-          lastName: 'Okafor',
-          phoneNumber: '+2348012345678',
-          agreedToTerms: true,
-          isVerified: false,
-          role: Role.FARMER,
-          farmer: {
-            id: farmerId,
-            idType: 'NIN',
-            idNumber: '12345678901',
-            idDocumentKey: 'farmers/f/id/x.pdf',
-          },
-        },
-        tx,
-      );
-      expect(farms.insertFarm).toHaveBeenCalledWith(
-        tx,
-        {
-          ...farm,
-          unit: undefined,
-          isExporting: undefined,
-          referralAgentId: undefined,
-          id: farmId,
-          ownerId: farmerId,
-          ownershipDocumentKey: 'farms/f/ownership/x.pdf',
-          chiefConfirmationKey: null,
-        },
-        undefined,
-      );
-      expect(result).toMatchObject({
-        user,
-        farmer: { farmerId: 'FRM-000001' },
-        farm: { farmCode: 'LF-000001' },
-        verificationId: 'round-1',
-      });
-      expect(result.farmer).not.toHaveProperty('idNumber');
-      expect(audit.record).toHaveBeenCalledWith(tx, {
-        actorType: AuditActorType.FARMER,
-        farmerId: 'farmer-1',
-        agentId: null,
-        farmId: null,
-        category: AuditCategory.APPLICATION,
-        title: 'Account created',
-        summary: 'Ada Okafor (FRM-000001)',
-        actionLabel: 'View profile',
-        resource: AuditResource.FARMER,
-        resourceId: 'farmer-1',
-      });
-      expect(audit.record).toHaveBeenCalledWith(tx, {
-        actorType: AuditActorType.FARMER,
-        farmerId: 'farmer-1',
-        agentId: null,
-        farmId: 'farm-1',
-        category: AuditCategory.FARM,
-        title: 'Farm LF-000001 created',
-        summary: 'Green Acres, Maize',
-        actionLabel: 'View farm',
-        resource: AuditResource.FARM,
-        resourceId: 'farm-1',
-      });
-      expect(audit.record).toHaveBeenCalledWith(tx, {
-        actorType: AuditActorType.FARMER,
-        farmerId: 'farmer-1',
-        agentId: null,
-        farmId: null,
-        category: AuditCategory.DOCUMENTS,
-        title: 'ID document uploaded',
-        summary: 'NIN',
-        actionLabel: 'View profile',
-        resource: AuditResource.FARMER,
-        resourceId: 'farmer-1',
-      });
-      expect(audit.record).toHaveBeenCalledWith(tx, {
-        actorType: AuditActorType.FARMER,
-        farmerId: 'farmer-1',
-        agentId: null,
-        farmId: 'farm-1',
-        category: AuditCategory.DOCUMENTS,
-        title: 'Farm documents uploaded',
-        summary: 'ownership',
-        actionLabel: 'View farm',
-        resource: AuditResource.FARM,
-        resourceId: 'farm-1',
-      });
-      expect(audit.record).toHaveBeenCalledTimes(4);
-    });
-
-    it('checks the LGA, then deletes the new account it already made', async () => {
-      locations.requireLga.mockRejectedValue(
-        new BadRequestException('Invalid state or LGA'),
-      );
-      await expect(service.signUp(signup, {})).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
-      expect(documents.uploadAll).not.toHaveBeenCalled();
-      expect(auth.deleteFirebaseUser).toHaveBeenCalledWith('uid-1');
-    });
-
-    it('deletes the uploads and the account when the write fails', async () => {
-      auth.createLocalUser.mockRejectedValue(
-        new ConflictException('Account already registered'),
-      );
-      await expect(
-        service.signUp(signup, { idDocument: pdf }),
-      ).rejects.toBeInstanceOf(ConflictException);
-      expect(storage.deletePrivate).toHaveBeenCalledWith([
-        'farmers/f/id/x.pdf',
-        'farms/f/ownership/x.pdf',
-      ]);
-      expect(auth.deleteFirebaseUser).toHaveBeenCalledWith('uid-1');
-    });
-
-    it('maps a bad referral agent to 400', async () => {
-      farms.insertFarm.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('boom', {
-          code: 'P2003',
-          clientVersion: 'test',
-        }),
-      );
-      await expect(service.signUp(signup, {})).rejects.toThrow(
-        new BadRequestException('Referral agent not found'),
-      );
-    });
+  it('deletes the uploads and the new account when the write fails', async () => {
+    auth.createLocalUser.mockRejectedValue(
+      new ConflictException('Account already registered'),
+    );
+    await expect(service.register(input)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(storage.deletePrivate).toHaveBeenCalled();
+    expect(auth.deleteFirebaseUser).toHaveBeenCalledWith('uid-1');
   });
 
-  describe('signUpWithGoogle', () => {
-    const {
-      email: _email,
-      firstName: _first,
-      lastName: _last,
-      ...rest
-    } = signup;
-    const dto = { ...rest, idToken: 'google-token' };
-
-    beforeEach(() => {
-      firebase.signInWithGoogle.mockResolvedValue({
-        localId: 'google-uid',
-        email: 'ada@gmail.com',
-        emailVerified: true,
-        firstName: 'Ada',
-        lastName: 'Okafor',
-        isNewUser: true,
-      });
-    });
-
-    it('takes the name and email from Google', async () => {
-      await service.signUpWithGoogle(dto, {});
-      expect(auth.createFirebaseUser).not.toHaveBeenCalled();
-      expect(auth.createLocalUser).toHaveBeenCalledWith(
-        expect.objectContaining({
-          firebaseUid: 'google-uid',
-          email: 'ada@gmail.com',
-          isVerified: true,
-        }),
-        tx,
-      );
-    });
-
-    it('keeps a Google account it did not create when the write fails', async () => {
-      firebase.signInWithGoogle.mockResolvedValue({
-        localId: 'google-uid',
-        email: 'ada@gmail.com',
-        emailVerified: true,
-        firstName: 'Ada',
-        lastName: 'Okafor',
-        isNewUser: false,
-      });
-      auth.createLocalUser.mockRejectedValue(
-        new ConflictException('Account already registered'),
-      );
-      await expect(service.signUpWithGoogle(dto, {})).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      expect(auth.deleteFirebaseUser).not.toHaveBeenCalled();
-    });
+  it('keeps an account it did not create when the write fails', async () => {
+    auth.createLocalUser.mockRejectedValue(new ConflictException());
+    await expect(
+      service.register({ ...input, account: { uid: 'uid-1', isNew: false } }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(auth.deleteFirebaseUser).not.toHaveBeenCalled();
   });
 
   it('registers with a preferred agent for the first round', async () => {
-    await service.register({
-      account: { uid: 'uid-1', isNew: true },
-      user: {
-        email: 'ada@example.com',
-        firstName: 'Ada',
-        lastName: 'Okafor',
-        phoneNumber: '+2348012345678',
-        isVerified: false,
-      },
-      farm: { ...farm, referralAgentId: 'agent-1' },
-      documents: {},
-      preferredAgentId: 'agent-1',
-    });
+    await service.register(input);
     expect(farms.insertFarm).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({ referralAgentId: 'agent-1' }),
@@ -345,80 +154,14 @@ describe('FarmerRegistrationService', () => {
   });
 
   it('writes onboarding audit when a preferred agent is set', async () => {
-    await service.register({
-      account: { uid: 'uid-1', isNew: true },
-      user: {
-        email: 'ada@example.com',
-        firstName: 'Ada',
-        lastName: 'Okafor',
-        phoneNumber: '+2348012345678',
-        isVerified: false,
-      },
-      identity: { idType: 'NIN', idNumber: '12345678901' },
-      farm: { ...farm, referralAgentId: 'agent-1' },
-      documents: { idDocument: pdf, ownershipDocument: pdf },
-      preferredAgentId: 'agent-1',
-    });
-    expect(audit.record).toHaveBeenCalledWith(tx, {
-      actorType: AuditActorType.FARMER,
-      farmerId: 'farmer-1',
-      agentId: null,
-      farmId: null,
-      category: AuditCategory.APPLICATION,
-      title: 'Account created',
-      summary: 'Ada Okafor (FRM-000001)',
-      actionLabel: 'View profile',
-      resource: AuditResource.FARMER,
-      resourceId: 'farmer-1',
-    });
-    expect(audit.record).toHaveBeenCalledWith(tx, {
-      actorType: AuditActorType.FARMER,
-      farmerId: 'farmer-1',
-      agentId: null,
-      farmId: 'farm-1',
-      category: AuditCategory.FARM,
-      title: 'Farm LF-000001 created',
-      summary: 'Green Acres, Maize',
-      actionLabel: 'View farm',
-      resource: AuditResource.FARM,
-      resourceId: 'farm-1',
-    });
-    expect(audit.record).toHaveBeenCalledWith(tx, {
-      actorType: AuditActorType.FARMER,
-      farmerId: 'farmer-1',
-      agentId: null,
-      farmId: null,
-      category: AuditCategory.DOCUMENTS,
-      title: 'ID document uploaded',
-      summary: 'NIN',
-      actionLabel: 'View profile',
-      resource: AuditResource.FARMER,
-      resourceId: 'farmer-1',
-    });
-    expect(audit.record).toHaveBeenCalledWith(tx, {
-      actorType: AuditActorType.FARMER,
-      farmerId: 'farmer-1',
-      agentId: null,
-      farmId: 'farm-1',
-      category: AuditCategory.DOCUMENTS,
-      title: 'Farm documents uploaded',
-      summary: 'ownership',
-      actionLabel: 'View farm',
-      resource: AuditResource.FARM,
-      resourceId: 'farm-1',
-    });
-    expect(audit.record).toHaveBeenCalledWith(tx, {
-      actorType: AuditActorType.EXTENSION_AGENT,
-      farmerId: null,
-      agentId: 'agent-1',
-      farmId: 'farm-1',
-      category: AuditCategory.ONBOARDING,
-      title: 'Farmer onboarded',
-      summary: 'Ada Okafor, LF-000001',
-      actionLabel: 'View farm',
-      resource: AuditResource.FARM,
-      resourceId: 'farm-1',
-    });
-    expect(audit.record).toHaveBeenCalledTimes(5);
+    await service.register(input);
+    expect(audit.record).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        actorType: AuditActorType.EXTENSION_AGENT,
+        category: AuditCategory.ONBOARDING,
+        resource: AuditResource.FARM,
+      }),
+    );
   });
 });

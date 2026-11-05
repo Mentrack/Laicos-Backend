@@ -30,8 +30,8 @@ describe('buyerKindError', () => {
       buyerKindError(Role.BUYER, { ...company, paymentTerms: '  ' }),
     ).toMatch(/company requires/i);
     expect(buyerKindError(Role.RIDER, {})).toBeNull();
-    expect(
-      buyerKindError(Role.RIDER, { buyerType: BuyerType.PERSON }),
-    ).toBe('Only a buyer has a buyer type');
+    expect(buyerKindError(Role.RIDER, { buyerType: BuyerType.PERSON })).toBe(
+      'Only a buyer has a buyer type',
+    );
   });
 });

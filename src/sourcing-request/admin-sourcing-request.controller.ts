@@ -77,7 +77,8 @@ export class AdminSourcingRequestController {
   @Get(':id/audit')
   @ApiOperation({
     summary: 'List the audit for a buyer request',
-    description: '{id} is the sourcing request. Newest first. 404 when it is missing.',
+    description:
+      '{id} is the sourcing request. Newest first. 404 when it is missing.',
   })
   @ApiEnvelope(AuditEventDto, { paginated: true })
   async auditLog(
@@ -147,7 +148,8 @@ export class AdminSourcingRequestController {
   @Post(':id/escalate')
   @ApiOperation({
     summary: 'Mark a request escalated',
-    description: 'Sets the time and does not change the status. A second call changes nothing.',
+    description:
+      'Sets the time and does not change the status. A second call changes nothing.',
   })
   async escalate(@Param('id', ParseUUIDPipe) id: string) {
     const data = await this.requests.escalate(id);

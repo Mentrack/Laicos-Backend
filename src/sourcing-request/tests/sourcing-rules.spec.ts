@@ -78,9 +78,9 @@ describe('sourcing rules', () => {
 
   it('walks the status ladder and ignores an empty paid list', () => {
     expect(deriveSourcingStatus(open)).toBe('NEW');
-    expect(
-      deriveSourcingStatus({ ...open, assignedAgentId: 'agent-1' }),
-    ).toBe('IN_REVIEW');
+    expect(deriveSourcingStatus({ ...open, assignedAgentId: 'agent-1' })).toBe(
+      'IN_REVIEW',
+    );
     expect(
       deriveSourcingStatus({
         ...open,

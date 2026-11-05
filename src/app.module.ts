@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AddressModule } from './address/address.module';
+import { ApplicationModule } from './application/application.module';
 import { AuthModule } from './auth/auth.module';
 import { CartModule } from './cart/cart.module';
 import { PaymentModule } from './payment/payment.module';
@@ -25,6 +26,7 @@ import { AgentModule } from './agent/agent.module';
 import { BuyerModule } from './buyer/buyer.module';
 import { LocationModule } from './location/location.module';
 import { MailModule } from './mail/mail.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { VerificationModule } from './verification/verification.module';
 
 @Module({
@@ -48,7 +50,9 @@ import { VerificationModule } from './verification/verification.module';
     PaystackModule,
     FxModule,
     MailModule,
+    NotificationsModule,
     AuthModule,
+    ApplicationModule,
     FarmModule,
     ProduceModule,
     OrderModule,

@@ -1,10 +1,12 @@
 import {
   adminInviteEmail,
   farmRejectedEmail,
+  accountVerifiedEmail,
+  applicationPendingEmail,
   farmerInviteEmail,
-  farmerVerifiedGoogleEmail,
   informationRequestEmail,
   passwordResetEmail,
+  orderReceivedEmail,
 } from '../templates';
 
 const loginUrl = 'https://app.laicos.ng/login';
@@ -44,11 +46,17 @@ describe('email templates', () => {
     }
   });
 
-  it('tells a Google farmer to sign in with Google, with no password', () => {
-    const email = farmerVerifiedGoogleEmail({ firstName: 'Ada', loginUrl });
-    expect(email.text).toContain('Google');
+  it('tells someone who already has a password that they have full access', () => {
+    const email = accountVerifiedEmail({ firstName: 'Ada', loginUrl });
+    expect(email.text).toContain('You have been verified and have full access');
     expect(email.text).not.toMatch(/temporary password/i);
     expect(email.html).toContain(loginUrl);
+  });
+
+  it('says a completed form is pending review', () => {
+    const email = applicationPendingEmail({ firstName: 'Ada' });
+    expect(email.subject).toBe('Your form is pending review');
+    expect(email.text).toContain('Your form is pending review');
   });
 
   it('gives the rejection reason', () => {
@@ -99,5 +107,15 @@ describe('email templates', () => {
     expect(email.html).toContain('&lt;script&gt;');
     expect(email.html).toContain('&lt;b&gt;Ada&lt;/b&gt;');
     expect(email.html).toContain('A &amp; B');
+  });
+
+  it('escapes the produce name in the order email', () => {
+    const email = orderReceivedEmail({
+      firstName: 'Ada',
+      produceName: '<b>Maize</b>',
+      forAgent: false,
+    });
+    expect(email.html).not.toContain('<b>Maize');
+    expect(email.html).toContain('&lt;b&gt;Maize&lt;/b&gt;');
   });
 });

@@ -20,23 +20,21 @@ describe('RegisterDto', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
-  it('refuses a farmer, who signs up through /farmers/signup', async () => {
+  it('accepts a farmer', async () => {
     const dto = plainToInstance(RegisterDto, { ...body, role: Role.FARMER });
-    const [error] = await validate(dto);
-    expect(error?.property).toBe('role');
+    expect(await validate(dto)).toHaveLength(0);
   });
 
-  it('refuses an admin, who is invited by an existing admin', async () => {
-    const dto = plainToInstance(RegisterDto, { ...body, role: Role.ADMIN });
-    const [error] = await validate(dto);
-    expect(error?.property).toBe('role');
-  });
-
-  it('refuses an extension agent, who signs up through /agents/signup', async () => {
+  it('accepts an extension agent', async () => {
     const dto = plainToInstance(RegisterDto, {
       ...body,
       role: Role.EXTENSION_AGENT,
     });
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  it('refuses an admin, who is invited by an existing admin', async () => {
+    const dto = plainToInstance(RegisterDto, { ...body, role: Role.ADMIN });
     const [error] = await validate(dto);
     expect(error?.property).toBe('role');
   });

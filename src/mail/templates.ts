@@ -127,30 +127,47 @@ export function farmerInviteEmail(input: {
   };
 }
 
-export function farmerVerifiedGoogleEmail(input: {
+export function accountVerifiedEmail(input: {
   firstName: string;
   loginUrl: string;
 }): RenderedEmail {
-  const title = 'Your farm is verified';
+  const title = 'You have been verified';
   return {
-    subject: 'Your farm is verified – welcome to LAICOS',
+    subject: 'You have been verified',
     html: layout(
       title,
       [
         paragraph(`Hi ${escapeHtml(input.firstName)},`),
-        paragraph(
-          'An agent has verified your farm, so your LAICOS account is ready. Sign in with the Google account you signed up with.',
-        ),
-        button('Sign in with Google', input.loginUrl),
+        paragraph('You have been verified and have full access.'),
+        button('Log in', input.loginUrl),
       ].join('\n'),
     ),
     text: [
       `Hi ${input.firstName},`,
       '',
-      'An agent has verified your farm, so your LAICOS account is ready. Sign in with the Google account you signed up with.',
+      'You have been verified and have full access.',
       '',
-      `Sign in: ${input.loginUrl}`,
+      `Log in: ${input.loginUrl}`,
     ].join('\n'),
+  };
+}
+
+export function applicationPendingEmail(input: {
+  firstName: string;
+}): RenderedEmail {
+  const title = 'Your form is pending review';
+  return {
+    subject: 'Your form is pending review',
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph('Your form is pending review.'),
+      ].join('\n'),
+    ),
+    text: [`Hi ${input.firstName},`, '', 'Your form is pending review.'].join(
+      '\n',
+    ),
   };
 }
 
@@ -276,5 +293,33 @@ export function emailVerificationCodeEmail(input: {
       '',
       ignore,
     ].join('\n'),
+  };
+}
+
+export function orderReceivedLine(
+  produceName: string,
+  forAgent: boolean,
+): string {
+  return `A buyer ordered ${produceName} from ${forAgent ? 'a farm you manage' : 'your farm'}.`;
+}
+
+export function orderReceivedEmail(input: {
+  firstName: string;
+  produceName: string;
+  forAgent: boolean;
+}): RenderedEmail {
+  const subject = `New order: ${input.produceName}`;
+  const line = orderReceivedLine(input.produceName, input.forAgent);
+  return {
+    subject,
+    html: layout(
+      'New order',
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(escapeHtml(line)),
+        paragraph('Open LAICOS to see the details.'),
+      ].join('\n'),
+    ),
+    text: `Hi ${input.firstName},\n\n${line}\n\nOpen LAICOS to see the details.`,
   };
 }

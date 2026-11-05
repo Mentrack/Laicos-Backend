@@ -25,6 +25,7 @@ import {
   type StorageUploadFile,
 } from '../common/upload-pipes';
 import { AuthService } from './auth.service';
+import { AllowPendingApplication } from './decorators/allow-pending-application.decorator';
 import { AllowPendingPasswordChange } from './decorators/allow-pending-password-change.decorator';
 import { AllowSuspendedFarmer } from './decorators/allow-suspended-farmer.decorator';
 import { Auth } from './decorators/auth.decorator';
@@ -55,7 +56,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register with email and password',
     description:
-      'Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Buyers and riders only; farmers and agents have their own signup.',
+      'Creates the account and emails a 4-digit code. No session until POST /auth/verify-email. Farmers and extension agents also get an empty application to finish once they are signed in.',
   })
   @ApiCreatedResponse({ type: MessageResponseDto })
   async register(@Body() dto: RegisterDto) {
@@ -96,7 +97,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Log in with email and password',
     description:
-      '403 EMAIL_NOT_VERIFIED for a buyer or rider who has not verified: open the code screen and call POST /auth/verify-email/resend.',
+      '403 EMAIL_NOT_VERIFIED until the email code is entered. A farmer or agent who signed up can sign in before approval; other routes then answer 403 APPLICATION_PENDING. A farmer an agent onboarded answers 403 VERIFICATION_PENDING until their invite.',
   })
   @HttpCode(HttpStatus.OK)
   @ApiEnvelope(AuthSessionDto)
@@ -109,11 +110,14 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register with a Google ID token',
     description:
-      'Same result as email registration, using the Google account for name and email.',
+      'Same result as email registration, using the Google account for name and email. A farmer or agent whose Google address is not verified gets the code and no session.',
   })
   @ApiEnvelope(AuthSessionDto, { status: HttpStatus.CREATED })
   async googleRegister(@Body() dto: GoogleRegisterDto) {
     const data = await this.auth.googleRegister(dto);
+    if (!('accessToken' in data)) {
+      return { data: null, message: 'Verification code sent' };
+    }
     return { data, message: 'User registered' };
   }
 
@@ -203,6 +207,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Auth()
   @AllowPendingPasswordChange()
+  @AllowPendingApplication()
   @ApiOkResponse({ type: MessageResponseDto })
   async logout(@CurrentUser() user: User) {
     await this.auth.logout(user);
@@ -217,6 +222,7 @@ export class AuthController {
   })
   @Auth()
   @AllowPendingPasswordChange()
+  @AllowPendingApplication()
   @AllowSuspendedFarmer()
   @ApiEnvelope(UserDto)
   async getCurrentUser(@CurrentUser() user: User) {

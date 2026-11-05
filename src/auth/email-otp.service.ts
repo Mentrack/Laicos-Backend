@@ -7,6 +7,7 @@ import { MailService } from '../mail/mail.service';
 import { emailVerificationCodeEmail } from '../mail/templates';
 import { PrismaService } from '../prisma/prisma.service';
 import type { Prisma, User } from '../../generated/client';
+import { isSelfSignupRole } from './utils/pending-access';
 import {
   OTP_LENGTH,
   OTP_TTL_MINUTES,
@@ -117,9 +118,18 @@ export class EmailOtpService {
   async resend(email: string): Promise<void> {
     const user = await this.database.user.findUnique({
       where: { email },
-      include: { emailVerificationCode: true },
+      include: {
+        emailVerificationCode: true,
+        application: { select: { id: true } },
+      },
     });
-    if (!user || !needsEmailVerification(user)) {
+    if (!user) {
+      return;
+    }
+    // Onboarded farmers never get a code. Applicants do, until they enter it.
+    const applicantNeedsCode =
+      isSelfSignupRole(user.role) && !user.isVerified && !!user.application;
+    if (!needsEmailVerification(user) && !applicantNeedsCode) {
       return;
     }
     const sent = user.emailVerificationCode;

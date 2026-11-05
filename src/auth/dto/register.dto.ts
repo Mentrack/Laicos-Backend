@@ -46,15 +46,19 @@ export class RegisterDto {
   phoneNumber?: string;
 
   @ApiProperty({
-    enum: [Role.BUYER, Role.RIDER],
+    enum: [Role.BUYER, Role.RIDER, Role.FARMER, Role.EXTENSION_AGENT],
     example: Role.BUYER,
     description:
-      'Account role. Farmers and extension agents sign up through POST /farmers/signup and POST /agents/signup. Admins are invited through POST /admins.',
+      'Account role. Farmers and extension agents get an empty application and finish it after verifying their email. Admins are invited through POST /admins.',
   })
   @IsNotEmpty()
-  @IsIn([Role.BUYER, Role.RIDER])
+  @IsIn([Role.BUYER, Role.RIDER, Role.FARMER, Role.EXTENSION_AGENT])
   @Validate(BuyerKindConstraint)
-  role: typeof Role.BUYER | typeof Role.RIDER;
+  role:
+    | typeof Role.BUYER
+    | typeof Role.RIDER
+    | typeof Role.FARMER
+    | typeof Role.EXTENSION_AGENT;
 
   @ApiPropertyOptional({ enum: BuyerType, enumName: 'BuyerType' })
   @ValidateIf((dto: RegisterDto) => dto.role === Role.BUYER)

@@ -23,10 +23,7 @@ export function unitsComparable(
 }
 
 /** Whole kilograms for a weight request, otherwise the request's own number. */
-export function requestedAmount(
-  quantity: number,
-  unit: SourcingUnit,
-): number {
+export function requestedAmount(quantity: number, unit: SourcingUnit): number {
   if (unit === SourcingUnit.TONNES) {
     return Math.round(quantity * 1000);
   }
@@ -45,9 +42,7 @@ export function coverage(requested: number, selected: number) {
 }
 
 export function namesMatch(requestName: string, listingName: string): boolean {
-  return (
-    requestName.trim().toLowerCase() === listingName.trim().toLowerCase()
-  );
+  return requestName.trim().toLowerCase() === listingName.trim().toLowerCase();
 }
 
 export type ListingCandidate = {

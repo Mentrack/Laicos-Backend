@@ -11,10 +11,5 @@ export { UpdateFarmDto } from './update-farm.dto';
 export { FarmDto } from './farm.dto';
 export { FarmSummaryDto } from './farm-summary.dto';
 export { FarmerDto, FarmerProfileDto } from './farmer.dto';
-export {
-  FarmerSignupDto,
-  GoogleFarmerSignupDto,
-  RegisteredFarmerDto,
-  SignupContactDto,
-} from './farmer-signup.dto';
+export { RegisteredFarmerDto } from './farmer-signup.dto';
 export { FarmProfileDto } from './farm-profile.dto';

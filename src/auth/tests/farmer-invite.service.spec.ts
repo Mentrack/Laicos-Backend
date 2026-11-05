@@ -33,9 +33,11 @@ describe('FarmerInviteService', () => {
     expect(email.text).toContain('https://app.laicos.ng/login');
   });
 
-  it('tells a Google farmer to sign in with Google', async () => {
+  it('tells someone who already signs in that they have full access', async () => {
     await service.sendInvite(user, null);
-    expect(sent().text).toContain('Google');
+    expect(sent().text).toContain(
+      'You have been verified and have full access',
+    );
     expect(sent().text).not.toMatch(/temporary password/i);
   });
 
