@@ -14,7 +14,6 @@ import {
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { User } from '../../generated/client';
 import { AllowPendingApplication } from '../auth/decorators/allow-pending-application.decorator';
-import { AllowPendingPasswordChange } from '../auth/decorators/allow-pending-password-change.decorator';
 import { AllowSuspendedFarmer } from '../auth/decorators/allow-suspended-farmer.decorator';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -76,7 +75,6 @@ export class NotificationController {
   })
   @HttpCode(HttpStatus.OK)
   @Auth()
-  @AllowPendingPasswordChange()
   @AllowPendingApplication()
   @AllowSuspendedFarmer()
   @ApiOkResponse({ type: MessageResponseDto })
@@ -95,7 +93,6 @@ export class NotificationController {
       'Succeeds even when the token is not registered to the caller.',
   })
   @Auth()
-  @AllowPendingPasswordChange()
   @AllowPendingApplication()
   @AllowSuspendedFarmer()
   @ApiOkResponse({ type: MessageResponseDto })

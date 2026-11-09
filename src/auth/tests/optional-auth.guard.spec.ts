@@ -13,7 +13,6 @@ const buyer = {
   id: 'buyer-1',
   role: Role.BUYER,
   isVerified: true,
-  mustChangePassword: false,
 } as User;
 
 function contextFor(request: Record<string, unknown>): ExecutionContext {
@@ -71,16 +70,6 @@ describe('OptionalAuthGuard', () => {
   it('403s a token with no local user', async () => {
     verifyIdToken.mockResolvedValue({ uid: 'uid-1' });
     findUnique.mockResolvedValue(null);
-    const request = { headers: { authorization: 'Bearer good' } };
-    await expect(guard.canActivate(contextFor(request))).rejects.toBeInstanceOf(
-      ForbiddenException,
-    );
-  });
-
-  it('403s a user who must change their password', async () => {
-    verifyIdToken.mockResolvedValue({ uid: 'uid-1' });
-    findUnique.mockResolvedValue({ ...buyer, mustChangePassword: true });
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
     const request = { headers: { authorization: 'Bearer good' } };
     await expect(guard.canActivate(contextFor(request))).rejects.toBeInstanceOf(
       ForbiddenException,

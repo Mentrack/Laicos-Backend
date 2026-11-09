@@ -108,8 +108,17 @@ export class CartTotalsDto {
 
   @ApiProperty({
     type: String,
-    example: '48500.00',
-    description: 'total + deliveryFee + serviceFee: what checkout will charge',
+    example: '2250.00',
+    description:
+      'AGENT_COMMISSION_PERCENT of each item line, summed; paid on top by the buyer',
+  })
+  agentCommission: string;
+
+  @ApiProperty({
+    type: String,
+    example: '50750.00',
+    description:
+      'total + deliveryFee + serviceFee + agentCommission: what checkout will charge',
   })
   grandTotal: string;
 }

@@ -20,6 +20,7 @@ export function formatCheckout(checkout: CheckoutRow) {
     subtotal: checkout.subtotal.toFixed(2),
     deliveryFee: checkout.deliveryFee.toFixed(2),
     serviceFee: checkout.serviceFee.toFixed(2),
+    agentCommission: checkout.agentCommission.toFixed(2),
     totalPrice: checkout.totalPrice.toFixed(2),
     expiresAt: checkout.expiresAt,
     paidAt: checkout.paidAt,

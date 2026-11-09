@@ -2,6 +2,7 @@ import { Prisma } from '../../../generated/client';
 import { percentOf } from '../../common/money';
 import { linePrice } from '../../order/utils/reservation';
 import type { CheckoutConfig } from '../../payment/checkout-config';
+import { commissionFor } from '../../payment/utils/order-share';
 import type {
   CartDto,
   CartItemDto,
@@ -51,7 +52,10 @@ export function formatCartItem(item: CartItemRow): CartItemDto {
   return { id: item.id, ...formatCartLine(item) };
 }
 
-type CartFees = Pick<CheckoutConfig, 'deliveryFee' | 'serviceFeePercent'>;
+type CartFees = Pick<
+  CheckoutConfig,
+  'deliveryFee' | 'serviceFeePercent' | 'agentCommissionPercent'
+>;
 
 export function formatCart(items: CartItemRow[], fees: CartFees): CartDto {
   return {
@@ -72,8 +76,16 @@ export function formatCartQuote(
 
 function cartTotals(lines: CartLineRow[], fees: CartFees): CartTotalsDto {
   const orderable = lines.filter((line) => cartItemIssue(line) === null);
-  const total = orderable.reduce(
-    (sum, line) => sum.add(linePrice(line.produce.pricePerUnit, line.quantity)),
+  const prices = orderable.map((line) =>
+    linePrice(line.produce.pricePerUnit, line.quantity),
+  );
+  const total = prices.reduce(
+    (sum, price) => sum.add(price),
+    new Prisma.Decimal(0),
+  );
+  // Per line, matching what createCheckout will charge.
+  const agentCommission = prices.reduce(
+    (sum, price) => sum.add(commissionFor(price, fees.agentCommissionPercent)),
     new Prisma.Decimal(0),
   );
   const deliveryFee =
@@ -84,6 +96,11 @@ function cartTotals(lines: CartLineRow[], fees: CartFees): CartTotalsDto {
     total: total.toFixed(2),
     deliveryFee: deliveryFee.toFixed(2),
     serviceFee: serviceFee.toFixed(2),
-    grandTotal: total.add(deliveryFee).add(serviceFee).toFixed(2),
+    agentCommission: agentCommission.toFixed(2),
+    grandTotal: total
+      .add(deliveryFee)
+      .add(serviceFee)
+      .add(agentCommission)
+      .toFixed(2),
   };
 }

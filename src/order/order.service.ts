@@ -30,6 +30,7 @@ import {
   CHECKOUT_TRANSACTION,
   busyAsConflict,
 } from '../payment/utils/checkout-transaction';
+import { totalEarnings } from '../payout/utils/earnings';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   sourcingRequestIdForOrder,
@@ -171,21 +172,15 @@ export class OrderService {
     return { total, byStatus };
   }
 
-  // Until payments land there is no ledger, so earnings are simply what
-  // delivered orders were worth; they only ever go up.
   async summary(user: User) {
     const where = await scopedTo(this.database, user);
-    const [earned, activeOrders] = await this.database.$transaction([
-      this.database.order.aggregate({
-        where: { ...where, status: OrderStatus.FULFILLED },
-        _sum: { totalPrice: true },
-      }),
+    const [earnings, activeOrders] = await Promise.all([
+      totalEarnings(this.database, user.id),
       this.database.order.count({
         where: { ...where, status: { in: ACTIVE } },
       }),
     ]);
-    const totalEarnings = earned._sum.totalPrice ?? new Prisma.Decimal(0);
-    return { totalEarnings: totalEarnings.toFixed(2), activeOrders };
+    return { totalEarnings: earnings, activeOrders };
   }
 
   async findOne(user: User, id: string) {
@@ -358,6 +353,50 @@ export class OrderService {
           true,
         );
         return ready;
+      });
+    } catch (error) {
+      throw mapOrderRaceError(error);
+    }
+  }
+
+  // Placeholder until logistics confirm delivery. An unconfirmed order stays
+  // SHIPPED; confirming starts the dispute window.
+  async confirmReceived(user: User, id: string) {
+    const order = await this.findOne(user, id);
+    if (order.status !== OrderStatus.SHIPPED) {
+      throw new ConflictException({
+        message: `Only a shipped order can be marked received; this one is ${order.status}`,
+        code: 'ORDER_NOT_SHIPPED',
+      });
+    }
+    try {
+      return await this.database.$transaction(async (tx) => {
+        const fulfilled = await tx.order.update({
+          where: {
+            id,
+            buyerId: order.buyerId,
+            status: OrderStatus.SHIPPED,
+          },
+          data: { status: OrderStatus.FULFILLED, fulfilledAt: new Date() },
+        });
+        const sourcingRequestId = await sourcingRequestIdForOrder(tx, id);
+        await this.audit.record(tx, {
+          actorType: AuditActorType.BUYER,
+          farmerId: null,
+          agentId: null,
+          farmId: order.farmId,
+          category: AuditCategory.ORDER,
+          title: `Order ${order.orderNumber} received`,
+          summary: order.orderNumber,
+          actionLabel: 'View order',
+          resource: AuditResource.ORDER,
+          resourceId: id,
+          sourcingRequestId,
+        });
+        if (sourcingRequestId) {
+          await syncSourcingRequest(tx, sourcingRequestId);
+        }
+        return fulfilled;
       });
     } catch (error) {
       throw mapOrderRaceError(error);

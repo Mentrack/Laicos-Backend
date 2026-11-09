@@ -5,6 +5,7 @@ import {
   AuditResource,
   CheckoutStatus,
   Currency,
+  NotificationType,
   OrderStatus,
   PaymentProvider,
   PaymentStatus,
@@ -26,6 +27,7 @@ import {
   PaystackError,
   providerUnavailable,
 } from '../paystack/paystack-error';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   recordLinkedAudit,
@@ -61,6 +63,7 @@ export class PaymentService {
     private readonly paystackConfig: PaystackConfig,
     private readonly fx: FxService,
     private readonly refunds: RefundService,
+    private readonly notification: NotificationService,
   ) {}
 
   private readonly logger = new Logger(PaymentService.name);
@@ -194,6 +197,7 @@ export class PaymentService {
       this.logger.warn(`Paystack charge for unknown ${verified.reference}`);
       return null;
     }
+    let deliveryIds: string[] = [];
     const { payment, refund, mismatch } = await this.database.$transaction(
       async (tx) => {
         await lockCheckout(tx, found.checkoutId);
@@ -277,10 +281,12 @@ export class PaymentService {
             sourcingRequestId: payment.checkout.sourcingRequestId,
           });
         }
+        deliveryIds = await this.notifyOrdersReceived(tx, payment.checkoutId);
         return { payment: paid, refund: null, mismatch: false };
       },
       CHECKOUT_TRANSACTION,
     );
+    void this.notification.dispatch(deliveryIds);
     if (refund) {
       // Logged before Paystack is called, so a crash here still leaves the
       // refund id to settle by hand.
@@ -293,6 +299,43 @@ export class PaymentService {
       await this.refunds.submit(refund, payment.reference);
     }
     return formatPayment(payment);
+  }
+
+  // Written in the payment's transaction so a rollback leaves no orphan
+  // notification; the caller dispatches after commit.
+  private async notifyOrdersReceived(
+    tx: Prisma.TransactionClient,
+    checkoutId: string,
+  ): Promise<string[]> {
+    const orders = await tx.order.findMany({
+      where: { checkoutId },
+      select: {
+        id: true,
+        produceName: true,
+        farm: {
+          select: {
+            owner: { select: { userId: true } },
+            cluster: { select: { agent: { select: { userId: true } } } },
+          },
+        },
+      },
+    });
+    const deliveryIds: string[] = [];
+    for (const { id, produceName, farm } of orders) {
+      const userIds = [farm.owner.userId];
+      if (farm.cluster) userIds.push(farm.cluster.agent.userId);
+      deliveryIds.push(
+        ...(await this.notification.notify(
+          {
+            userIds,
+            type: NotificationType.ORDER_RECEIVED,
+            params: { orderId: id, produceName },
+          },
+          tx,
+        )),
+      );
+    }
+    return deliveryIds;
   }
 }
 

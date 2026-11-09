@@ -34,6 +34,21 @@ export class OrderDto {
   @ApiProperty({ type: String, example: '17525.00' })
   totalPrice: string;
 
+  @ApiProperty({
+    type: String,
+    example: '875.25',
+    description:
+      'Agent commission the buyer paid on top of totalPrice, snapshotted at checkout',
+  })
+  agentCommission: string;
+
+  @ApiProperty({
+    type: Date,
+    nullable: true,
+    description: 'When the buyer confirmed delivery; null until then',
+  })
+  fulfilledAt: Date | null;
+
   @ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus' })
   status: OrderStatus;
 

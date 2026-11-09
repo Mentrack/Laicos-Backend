@@ -196,6 +196,33 @@ describe('createCheckout', () => {
     expect((data.totalPrice as Prisma.Decimal).toFixed(2)).toBe('60200.00');
   });
 
+  it('charges an agent commission per line on top of the price', async () => {
+    await createCheckout(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        buyerId: 'buyer-1',
+        idempotencyKey: key,
+        lines: [line('a', '1000.10'), line('b', '333.33')],
+        delivery,
+        expectedTotal: 4900.11,
+      },
+      testCheckoutConfig({ AGENT_COMMISSION_PERCENT: '5' }),
+      now,
+    );
+    const [{ data }] = tx.checkout.create.mock.calls[0] as [
+      {
+        data: Record<string, unknown> & {
+          orders: { create: { agentCommission: Prisma.Decimal }[] };
+        };
+      },
+    ];
+    expect(
+      data.orders.create.map((order) => order.agentCommission.toFixed(2)),
+    ).toEqual(['50.01', '16.67']);
+    expect((data.agentCommission as Prisma.Decimal).toFixed(2)).toBe('66.68');
+    expect((data.totalPrice as Prisma.Decimal).toFixed(2)).toBe('4900.11');
+  });
+
   it('refuses when the buyer saw a total without the fee', async () => {
     await expect(errorBody(create(54000))).resolves.toEqual({
       message: 'Prices in your cart have changed',

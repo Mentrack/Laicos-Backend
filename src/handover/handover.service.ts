@@ -8,6 +8,7 @@ import {
   AuditCategory,
   AuditResource,
   HandoverStatus,
+  NotificationType,
   OrderStatus,
   type Agent,
   type Prisma,
@@ -23,6 +24,7 @@ import {
   IMAGE_SIGNATURES,
   type StorageUploadFile,
 } from '../common/upload-pipes';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import {
@@ -46,6 +48,7 @@ export class HandoverService {
     private readonly database: PrismaService,
     private readonly storage: StorageService,
     private readonly audit: AuditService,
+    private readonly notification: NotificationService,
   ) {}
 
   async findAll(agent: Agent, query: HandoverQueryDto) {
@@ -117,6 +120,7 @@ export class HandoverService {
   /** Logistics has the goods: the order ships. */
   async complete(agent: Agent, orderId: string, dto: CompleteHandoverDto) {
     try {
+      let deliveryIds: string[] = [];
       const handover = await this.database.$transaction(async (tx) => {
         const handedOver = await this.guarded(
           agent,
@@ -140,9 +144,14 @@ export class HandoverService {
         );
         // Nothing moves a READY order but this, so a miss means data drift;
         // it rolls the handover back rather than ship out of order.
-        await tx.order.update({
+        const shipped = await tx.order.update({
           where: { id: orderId, status: OrderStatus.READY },
           data: { status: OrderStatus.SHIPPED },
+          select: {
+            orderNumber: true,
+            produceName: true,
+            buyer: { select: { userId: true } },
+          },
         });
         await this.recordHandoverAudit(
           tx,
@@ -150,8 +159,21 @@ export class HandoverService {
           handedOver,
           'Handover completed',
         );
+        deliveryIds = await this.notification.notify(
+          {
+            userIds: [shipped.buyer.userId],
+            type: NotificationType.ORDER_SHIPPED,
+            params: {
+              orderId,
+              orderNumber: shipped.orderNumber,
+              produceName: shipped.produceName,
+            },
+          },
+          tx,
+        );
         return handedOver;
       });
+      void this.notification.dispatch(deliveryIds);
       return formatHandover(this.storage, handover);
     } catch (error) {
       if (isRecordNotFound(error)) {

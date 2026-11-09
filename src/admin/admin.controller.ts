@@ -1,12 +1,29 @@
-import { Body, Controller, Get, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AuthSessionDto } from '../auth/dto';
 import { ApiEnvelope } from '../common/dto/envelope';
 import { AdminInviteService } from './admin-invite.service';
 import { AdminService } from './admin.service';
-import { AdminProfileDto, InviteAdminDto } from './dto';
+import {
+  AcceptAdminInviteDto,
+  AdminInviteDto,
+  AdminInviteQueryDto,
+  AdminProfileDto,
+  InviteAdminDto,
+} from './dto';
 
 @Controller('admins')
 @ApiTags('Admins')
@@ -32,12 +49,49 @@ export class AdminController {
   @ApiOperation({
     summary: 'Invite an admin',
     description:
-      'Creates their account with a temporary password and emails it. They must change that password before any other route. 409 when the email is registered.',
+      'Emails a link, valid for 7 days, where they choose their name and password. 409 when the email is registered or already has a pending invite.',
   })
   @Auth(Role.ADMIN)
-  @ApiEnvelope(AdminProfileDto, { status: HttpStatus.CREATED })
-  async invite(@Body() dto: InviteAdminDto) {
-    const data = await this.invites.invite(dto);
+  @ApiEnvelope(AdminInviteDto, { status: HttpStatus.CREATED })
+  async invite(@CurrentUser() user: User, @Body() dto: InviteAdminDto) {
+    const data = await this.invites.invite(user, dto);
     return { data, message: 'Admin invited' };
+  }
+
+  @Get('invites')
+  @ApiOperation({ summary: 'List admin invites' })
+  @Auth(Role.ADMIN)
+  @ApiEnvelope(AdminInviteDto, { paginated: true })
+  async findInvites(@Query() query: AdminInviteQueryDto) {
+    const { data, metaData } = await this.invites.findAll(query);
+    return { data, message: 'Admin invites retrieved', metaData };
+  }
+
+  // Public: the invite token is the credential.
+  @Post('invites/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Accept an admin invite',
+    description:
+      'Creates the admin account for the invited email and signs it in. 400 INVITE_INVALID when the link is unknown or already used, 400 INVITE_EXPIRED when it has expired, 409 when the email already has an account.',
+  })
+  @ApiEnvelope(AuthSessionDto)
+  async accept(@Body() dto: AcceptAdminInviteDto) {
+    const data = await this.invites.accept(dto);
+    return { data, message: 'Admin account created' };
+  }
+
+  @Post('invites/:id/resend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend an admin invite',
+    description:
+      'Issues a new link and invalidates the old one. 409 when the invite was accepted or the email now has an account.',
+  })
+  @Auth(Role.ADMIN)
+  @ApiEnvelope(AdminInviteDto)
+  async resend(@Param('id', ParseUUIDPipe) id: string) {
+    const data = await this.invites.resend(id);
+    return { data, message: 'Admin invite resent' };
   }
 }

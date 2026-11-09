@@ -1,23 +1,30 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import {
+  DisputeStatus,
+  NotificationType,
   OrderStatus,
   PaymentStatus,
-  PayoutStatus,
   Prisma,
   RefundStatus,
   type Checkout,
+  type Dispute,
+  type Order,
   type Payment,
   type Refund,
   type User,
 } from '../../generated/client';
 import { advisoryLock } from '../common/advisory-lock';
 import { proportionalShare, toMinorUnits } from '../common/money';
+import { LIVE_PAYOUT_STATUSES } from '../payout/utils/eligibility';
+import { lockPayees } from '../payout/utils/payee-locks';
 import { PaystackClient } from '../paystack/paystack.client';
 import { isDefiniteRejection, PaystackError } from '../paystack/paystack-error';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRefundDto, RefundDto } from './dto';
 import { formatRefund } from './formatters/refund.formatter';
 import { paymentNotFound } from './utils/checkout-errors';
+import { orderPaidAmount } from './utils/order-share';
 
 export type RefundResult = {
   providerRefundId: string | null;
@@ -27,6 +34,13 @@ export type RefundResult = {
 };
 
 type PaymentWithCheckout = Payment & { checkout: Checkout };
+// Only what pricing a share of the payment needs.
+type PricedPayment = Pick<Payment, 'amount' | 'chargedAmount'> & {
+  checkout: Pick<Checkout, 'subtotal' | 'serviceFee'>;
+};
+type PaymentWithRefunds = PricedPayment &
+  Pick<Payment, 'id'> & { refunds: Pick<Refund, 'amount' | 'status'>[] };
+type DisputedOrder = Pick<Order, 'id' | 'totalPrice' | 'agentCommission'>;
 
 function conflict(message: string, code: string) {
   return new ConflictException({ message, code });
@@ -39,6 +53,7 @@ export class RefundService {
   constructor(
     private readonly database: PrismaService,
     private readonly paystack: PaystackClient,
+    private readonly notification: NotificationService,
   ) {}
 
   /** One cancelled order, or whatever is left of the payment. */
@@ -82,32 +97,17 @@ export class RefundService {
           'ORDERS_PAID_OUT',
         );
       }
-      const live = payment.refunds.filter(
-        (existing) => existing.status !== RefundStatus.FAILED,
-      );
-      const remaining = live.reduce(
-        (left, existing) => left.sub(existing.amount),
-        payment.chargedAmount,
-      );
-      const amount = dto.orderId
+      const live = liveRefunds(payment.refunds);
+      const remaining = remainingBalance(payment);
+      const { amount, disputeId } = dto.orderId
         ? await orderRefundAmount(tx, payment, live, dto.orderId)
-        : remaining;
-      if (remaining.lte(0)) {
-        throw conflict(
-          'Nothing is left to refund on this payment',
-          'NOTHING_TO_REFUND',
-        );
-      }
-      if (amount.gt(remaining)) {
-        throw conflict(
-          `Only ${remaining.toFixed(2)} is left to refund on this payment`,
-          'REFUND_EXCEEDS_BALANCE',
-        );
-      }
+        : { amount: remaining, disputeId: null };
+      assertWithinBalance(remaining, amount);
       return tx.refund.create({
         data: {
           paymentId: payment.id,
           orderId: dto.orderId ?? null,
+          disputeId,
           amount,
           reason: dto.reason,
           initiatedById: admin.id,
@@ -118,6 +118,31 @@ export class RefundService {
     // PENDING row without a providerRefundId gets found and settled by hand.
     this.logger.warn(`Submitting refund ${refund.id} on ${reference}`);
     return formatRefund(await this.submit(refund, reference));
+  }
+
+  /**
+   * The refund a resolved dispute owes, written in the caller's transaction.
+   * `payment` must have been read under its `payment:<id>` lock.
+   */
+  async createForDispute(
+    tx: Prisma.TransactionClient,
+    payment: PaymentWithRefunds,
+    order: DisputedOrder,
+    dispute: Pick<Dispute, 'id' | 'refundPercent' | 'resolutionNote'>,
+    admin: User,
+  ): Promise<Refund> {
+    const amount = disputeRefundAmount(payment, order, dispute);
+    assertWithinBalance(remainingBalance(payment), amount);
+    return tx.refund.create({
+      data: {
+        paymentId: payment.id,
+        orderId: order.id,
+        disputeId: dispute.id,
+        amount,
+        reason: dispute.resolutionNote ?? 'Dispute resolved',
+        initiatedById: admin.id,
+      },
+    });
   }
 
   /** Money that couldn't be applied goes straight back, in full. */
@@ -185,16 +210,40 @@ export class RefundService {
       }
       return;
     }
-    await this.database.refund.updateMany({
-      where: { id: refund.id, status: RefundStatus.PENDING },
-      data: result.processed
-        ? { status: RefundStatus.PROCESSED }
-        : {
-            status: RefundStatus.FAILED,
-            failureReason:
-              result.reason ?? 'Paystack could not process the refund',
+    const deliveryIds = await this.database.$transaction(async (tx) => {
+      const { count } = await tx.refund.updateMany({
+        where: { id: refund.id, status: RefundStatus.PENDING },
+        data: result.processed
+          ? { status: RefundStatus.PROCESSED }
+          : {
+              status: RefundStatus.FAILED,
+              failureReason:
+                result.reason ?? 'Paystack could not process the refund',
+            },
+      });
+      // A concurrent webhook that settled it first already told the buyer.
+      if (!result.processed || count === 0) return [];
+      const { currency, checkout } = await tx.payment.findUniqueOrThrow({
+        where: { id: refund.paymentId },
+        select: {
+          currency: true,
+          checkout: { select: { buyer: { select: { userId: true } } } },
+        },
+      });
+      return this.notification.notify(
+        {
+          userIds: [checkout.buyer.userId],
+          type: NotificationType.REFUND_PROCESSED,
+          params: {
+            refundId: refund.id,
+            amount: refund.amount.toFixed(2),
+            currency,
           },
+        },
+        tx,
+      );
     });
+    void this.notification.dispatch(deliveryIds);
   }
 
   private async findForResult({
@@ -220,25 +269,18 @@ export class RefundService {
   }
 }
 
-// Takes the same per-farmer locks payout approval does (sorted, like approval)
-// before looking, so a full refund and a payout of the same orders can't both
-// commit. Approval never takes payment locks, so there's no deadlock cycle.
+// Takes the payee locks the payout run does before looking, so a full refund
+// and a payout of the same orders can't both commit. The run never takes
+// payment locks, so there's no deadlock cycle.
 async function lockAndCheckPayouts(
   tx: Prisma.TransactionClient,
   checkoutId: string,
 ): Promise<boolean> {
-  const orders = await tx.order.findMany({
-    where: { checkoutId },
-    select: { farm: { select: { ownerId: true } } },
-  });
-  const farmerIds = [...new Set(orders.map(({ farm }) => farm.ownerId))].sort();
-  for (const farmerId of farmerIds) {
-    await advisoryLock(tx, `payout:farmer:${farmerId}`);
-  }
+  await lockPayees(tx, { checkoutId });
   const item = await tx.payoutItem.findFirst({
     where: {
       order: { checkoutId },
-      status: { in: [PayoutStatus.PENDING, PayoutStatus.SUCCEEDED] },
+      status: { in: LIVE_PAYOUT_STATUSES },
     },
     select: { id: true },
   });
@@ -250,13 +292,20 @@ async function orderRefundAmount(
   payment: PaymentWithCheckout,
   live: Refund[],
   orderId: string,
-): Promise<Prisma.Decimal> {
+): Promise<{ amount: Prisma.Decimal; disputeId: string | null }> {
   const order = await tx.order.findFirst({
     where: { id: orderId, checkoutId: payment.checkoutId },
+    include: { dispute: true },
   });
-  if (!order || order.status !== OrderStatus.CANCELLED) {
+  // A dispute refund that failed at Paystack is re-issued through here.
+  const dispute =
+    order?.dispute?.status === DisputeStatus.RESOLVED &&
+    order.dispute.refundPercent?.gt(0)
+      ? order.dispute
+      : null;
+  if (!order || (order.status !== OrderStatus.CANCELLED && !dispute)) {
     throw conflict(
-      'Only a cancelled order on this payment can be refunded',
+      'Only a cancelled order, or one with a refunded dispute, on this payment can be refunded',
       'ORDER_NOT_REFUNDABLE',
     );
   }
@@ -266,11 +315,59 @@ async function orderRefundAmount(
       'ORDER_ALREADY_REFUNDED',
     );
   }
-  const { serviceFee, subtotal } = payment.checkout;
-  // Its share of the service fee goes back with the order; delivery doesn't,
-  // because the rest of the checkout is still delivered.
-  const ngn = order.totalPrice.add(
-    order.totalPrice.mul(serviceFee).div(subtotal),
-  );
+  if (dispute) {
+    return {
+      amount: disputeRefundAmount(payment, order, dispute),
+      disputeId: dispute.id,
+    };
+  }
+  const ngn = orderPaidAmount(order, payment.checkout);
+  return {
+    amount: proportionalShare(ngn, payment.amount, payment.chargedAmount),
+    disputeId: null,
+  };
+}
+
+// Rounded down in naira before converting, so Laicos never refunds more
+// than the percent.
+function disputeRefundAmount(
+  payment: PricedPayment,
+  order: DisputedOrder,
+  dispute: Pick<Dispute, 'refundPercent'>,
+): Prisma.Decimal {
+  const percent = dispute.refundPercent ?? new Prisma.Decimal(0);
+  const ngn = orderPaidAmount(order, payment.checkout)
+    .mul(percent)
+    .div(100)
+    .toDecimalPlaces(2, Prisma.Decimal.ROUND_DOWN);
   return proportionalShare(ngn, payment.amount, payment.chargedAmount);
+}
+
+function liveRefunds<R extends Pick<Refund, 'status'>>(refunds: R[]): R[] {
+  return refunds.filter((existing) => existing.status !== RefundStatus.FAILED);
+}
+
+function remainingBalance(payment: PaymentWithRefunds): Prisma.Decimal {
+  return liveRefunds(payment.refunds).reduce(
+    (left, existing) => left.sub(existing.amount),
+    payment.chargedAmount,
+  );
+}
+
+function assertWithinBalance(
+  remaining: Prisma.Decimal,
+  amount: Prisma.Decimal,
+): void {
+  if (remaining.lte(0)) {
+    throw conflict(
+      'Nothing is left to refund on this payment',
+      'NOTHING_TO_REFUND',
+    );
+  }
+  if (amount.gt(remaining)) {
+    throw conflict(
+      `Only ${remaining.toFixed(2)} is left to refund on this payment`,
+      'REFUND_EXCEEDS_BALANCE',
+    );
+  }
 }

@@ -11,6 +11,7 @@ import {
 } from '../../../generated/client';
 import { AuditService } from '../../audit/audit.service';
 import type { StorageUploadFile } from '../../common/upload-pipes';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { HandoverService } from '../handover.service';
@@ -89,10 +90,12 @@ describe('HandoverService', () => {
     ),
   };
   const audit = { record: jest.fn() };
+  const notification = { notify: jest.fn(), dispatch: jest.fn() };
   const service = new HandoverService(
     database as unknown as PrismaService,
     storage as unknown as StorageService,
     audit as unknown as AuditService,
+    notification as unknown as NotificationService,
   );
   const handoverAudit = (title: string) => ({
     actorType: AuditActorType.EXTENSION_AGENT,
@@ -117,7 +120,12 @@ describe('HandoverService', () => {
     jest.clearAllMocks();
     orderHandover.findFirst.mockResolvedValue(row());
     orderHandover.update.mockResolvedValue(row());
-    order.update.mockResolvedValue(undefined);
+    order.update.mockResolvedValue({
+      orderNumber: 'ORD-000001',
+      produceName: 'Maize',
+      buyer: { userId: 'buyer-user-1' },
+    });
+    notification.notify.mockResolvedValue(['delivery-1']);
   });
 
   it('lists only the agent’s own handovers', async () => {
@@ -226,10 +234,39 @@ describe('HandoverService', () => {
         orderId,
         status: HandoverStatus.HANDED_OVER,
       });
-      expect(order.update).toHaveBeenCalledWith({
-        where: { id: orderId, status: OrderStatus.READY },
-        data: { status: OrderStatus.SHIPPED },
-      });
+      expect(order.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: orderId, status: OrderStatus.READY },
+          data: { status: OrderStatus.SHIPPED },
+        }),
+      );
+    });
+
+    it('tells the buyer in the transaction and dispatches after commit', async () => {
+      orderHandover.update.mockResolvedValue(
+        row({ status: HandoverStatus.HANDED_OVER }),
+      );
+      await service.complete(agent, orderId, dto);
+      expect(notification.notify).toHaveBeenCalledWith(
+        {
+          userIds: ['buyer-user-1'],
+          type: 'ORDER_SHIPPED',
+          params: {
+            orderId,
+            orderNumber: 'ORD-000001',
+            produceName: 'Maize',
+          },
+        },
+        tx,
+      );
+      expect(notification.dispatch).toHaveBeenCalledWith(['delivery-1']);
+    });
+
+    it('does not notify when the handover is refused', async () => {
+      orderHandover.update.mockRejectedValue(notFound());
+      await expect(service.complete(agent, orderId, dto)).rejects.toThrow();
+      expect(notification.notify).not.toHaveBeenCalled();
+      expect(notification.dispatch).not.toHaveBeenCalled();
     });
 
     it('refuses to hand over an unverified order', async () => {

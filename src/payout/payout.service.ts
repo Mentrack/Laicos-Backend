@@ -3,6 +3,8 @@ import {
   AuditActorType,
   AuditCategory,
   AuditResource,
+  PayeeRole,
+  NotificationType,
   PayoutStatus,
   Prisma,
   type User,
@@ -15,19 +17,17 @@ import {
   resolvePagination,
   type PaginationQueryDto,
 } from '../common/pagination';
-import { requireFarmer } from '../farm/utils/require-farmer';
 import { PaystackClient } from '../paystack/paystack.client';
 import { isDefiniteRejection, PaystackError } from '../paystack/paystack-error';
+import { NotificationService } from '../notifications/notification.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { ApprovePayoutsDto, PayoutBatchDto, PayoutQueryDto } from './dto';
+import { PayoutQueryDto } from './dto';
 import {
-  formatEligible,
   formatPayout,
   PAYOUT_INCLUDE,
   type PayoutRow,
 } from './formatters/payout.formatter';
-import { PayoutConfig } from './payout.config';
-import { eligibleOrders } from './utils/eligibility';
+import { totalEarnings } from './utils/earnings';
 
 export type TransferResult = {
   // Payout.id: Paystack needs lowercase transfer references.
@@ -42,8 +42,31 @@ const OUTCOME_STATUS = {
   reversed: PayoutStatus.REVERSED,
 } as const;
 
-// Up to 100 farmers, each locked and summed in turn.
-const PAYOUT_TRANSACTION = { timeout: 30_000, maxWait: 5_000 };
+type Payee = {
+  payeeRole: PayeeRole;
+  payee: { farmer: { id: string } | null; agent: { id: string } | null };
+};
+
+// The audit actor check needs the farmer or agent row, not the User. A
+// payee whose profile is gone is recorded as the system rather than failing
+// the webhook forever on the check.
+function payeeActor({ payeeRole, payee }: Payee) {
+  if (payeeRole === PayeeRole.FARMER && payee.farmer) {
+    return {
+      actorType: AuditActorType.FARMER,
+      farmerId: payee.farmer.id,
+      agentId: null,
+    };
+  }
+  if (payeeRole === PayeeRole.AGENT && payee.agent) {
+    return {
+      actorType: AuditActorType.EXTENSION_AGENT,
+      farmerId: null,
+      agentId: payee.agent.id,
+    };
+  }
+  return { actorType: AuditActorType.SYSTEM, farmerId: null, agentId: null };
+}
 
 @Injectable()
 export class PayoutService {
@@ -52,116 +75,14 @@ export class PayoutService {
   constructor(
     private readonly database: PrismaService,
     private readonly paystack: PaystackClient,
-    private readonly config: PayoutConfig,
     private readonly audit: AuditService,
+    private readonly notification: NotificationService,
   ) {}
 
-  async findEligible(query: PaginationQueryDto) {
-    const { page, perPage, skip, take } = resolvePagination(query);
-    const orders = eligibleOrders(new Date(), this.config.holdHours);
-    const where: Prisma.FarmerWhereInput = {
-      farms: { some: { orders: { some: orders } } },
-    };
-    const [farmers, total] = await this.database.$transaction([
-      this.database.farmer.findMany({
-        where,
-        include: {
-          user: { select: { firstName: true, lastName: true } },
-          bankAccount: true,
-          farms: {
-            select: {
-              orders: {
-                where: orders,
-                select: {
-                  id: true,
-                  orderNumber: true,
-                  totalPrice: true,
-                  fulfilledAt: true,
-                },
-                orderBy: { fulfilledAt: 'asc' },
-              },
-            },
-          },
-        },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        skip,
-        take,
-      }),
-      this.database.farmer.count({ where }),
-    ]);
-    return {
-      data: farmers.flatMap((farmer) =>
-        farmer.bankAccount ? [formatEligible(farmer, farmer.bankAccount)] : [],
-      ),
-      metaData: paginationMeta(page, perPage, total),
-    };
-  }
-
-  async approve(admin: User, dto: ApprovePayoutsDto): Promise<PayoutBatchDto> {
-    const now = new Date();
-    // Sorted so concurrent approvals take the farmer locks in one order.
-    const farmerIds = [...dto.farmerIds].sort();
-    const { created, skippedFarmerIds } = await this.database.$transaction(
-      async (tx) => {
-        const created: PayoutRow[] = [];
-        const skippedFarmerIds: string[] = [];
-        for (const farmerId of farmerIds) {
-          await advisoryLock(tx, `payout:farmer:${farmerId}`);
-          const farmer = await tx.farmer.findUnique({
-            where: { id: farmerId },
-            include: { bankAccount: true },
-          });
-          const account = farmer?.bankAccount;
-          const orders = account
-            ? await tx.order.findMany({
-                where: {
-                  AND: [
-                    eligibleOrders(now, this.config.holdHours),
-                    { farm: { ownerId: farmerId } },
-                  ],
-                },
-                select: { id: true, totalPrice: true },
-              })
-            : [];
-          if (!account || orders.length === 0) {
-            skippedFarmerIds.push(farmerId);
-            continue;
-          }
-          created.push(
-            await tx.payout.create({
-              data: {
-                farmerId,
-                amount: orders.reduce(
-                  (sum, order) => sum.add(order.totalPrice),
-                  new Prisma.Decimal(0),
-                ),
-                bankName: account.bankName,
-                accountNumber: account.accountNumber,
-                accountName: account.accountName,
-                recipientCode: account.recipientCode,
-                approvedById: admin.id,
-                items: {
-                  create: orders.map((order) => ({
-                    orderId: order.id,
-                    amount: order.totalPrice,
-                  })),
-                },
-              },
-              include: PAYOUT_INCLUDE,
-            }),
-          );
-        }
-        return { created, skippedFarmerIds };
-      },
-      PAYOUT_TRANSACTION,
-    );
-    const sent = created.length > 0 ? await this.send(created) : [];
-    return { payouts: sent.map(formatPayout), skippedFarmerIds };
-  }
-
-  // After commit. Each transfer's final state arrives by webhook, including
-  // any Paystack queued without acknowledging here.
-  private async send(payouts: PayoutRow[]): Promise<PayoutRow[]> {
+  // After commit, one Paystack bulk call (at most 100). Each transfer's final
+  // state arrives by webhook, including any Paystack queued without
+  // acknowledging here.
+  async send(payouts: PayoutRow[]): Promise<PayoutRow[]> {
     const ids = payouts.map((payout) => payout.id);
     try {
       const queued = await this.paystack.bulkTransfer(
@@ -216,10 +137,19 @@ export class PayoutService {
 
   async applyTransferResult(result: TransferResult): Promise<void> {
     const status = OUTCOME_STATUS[result.outcome];
+    let deliveryIds: string[] = [];
     await this.database.$transaction(async (tx) => {
       await advisoryLock(tx, `payout:${result.reference}`);
       const payout = await tx.payout.findUnique({
         where: { id: result.reference },
+        include: {
+          payee: {
+            select: {
+              farmer: { select: { id: true } },
+              agent: { select: { id: true } },
+            },
+          },
+        },
       });
       if (!payout) {
         this.logger.warn(
@@ -256,9 +186,7 @@ export class PayoutService {
       });
       if (status === PayoutStatus.SUCCEEDED) {
         await this.audit.record(tx, {
-          actorType: AuditActorType.FARMER,
-          farmerId: payout.farmerId,
-          agentId: null,
+          ...payeeActor(payout),
           farmId: null,
           category: AuditCategory.PAYOUT,
           title: `Payout ${payout.reference} paid`,
@@ -267,11 +195,21 @@ export class PayoutService {
           resource: AuditResource.PAYOUT,
           resourceId: payout.id,
         });
+        deliveryIds = await this.notification.notify(
+          {
+            userIds: [payout.payeeId],
+            type: NotificationType.PAYOUT_PAID,
+            params: {
+              payoutId: payout.id,
+              reference: payout.reference,
+              amount: payout.amount.toFixed(2),
+            },
+          },
+          tx,
+        );
       } else if (status === PayoutStatus.REVERSED) {
         await this.audit.record(tx, {
-          actorType: AuditActorType.FARMER,
-          farmerId: payout.farmerId,
-          agentId: null,
+          ...payeeActor(payout),
           farmId: null,
           category: AuditCategory.PAYOUT,
           title: `Payout ${payout.reference} reversed`,
@@ -284,15 +222,25 @@ export class PayoutService {
         });
       }
     });
+    void this.notification.dispatch(deliveryIds);
   }
 
   async findAll(query: PayoutQueryDto) {
-    return this.list({ status: query.status }, query);
+    return this.list(
+      { status: query.status, payeeRole: query.payeeRole },
+      query,
+    );
   }
 
   async findMine(user: User, query: PaginationQueryDto) {
-    const farmer = await requireFarmer(this.database, user);
-    return this.list({ farmerId: farmer.id }, query);
+    return this.list(
+      { payeeId: user.id, status: PayoutStatus.SUCCEEDED },
+      query,
+    );
+  }
+
+  async summary(user: User) {
+    return { totalEarnings: await totalEarnings(this.database, user.id) };
   }
 
   private async list(

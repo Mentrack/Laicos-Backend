@@ -44,7 +44,7 @@ export class AdminPaymentController {
   @ApiOperation({
     summary: 'Refund a payment',
     description:
-      "The payment must be SUCCEEDED; an ORPHANED payment can only have its balance refunded (to retry a failed automatic refund). With orderId: a CANCELLED order on this payment, refunded its price plus its share of the service fee (delivery is not refunded). Without: the payment's remaining balance, refused while any order on the checkout has a pending or paid payout. Paid back in the payment's currency through Paystack; status becomes PROCESSED when Paystack confirms, or FAILED if Paystack refuses (ask again to retry). An unknown outcome stays PENDING until Paystack reports it. 409 PAYMENT_NOT_REFUNDABLE, ORDER_NOT_REFUNDABLE, ORDER_ALREADY_REFUNDED, NOTHING_TO_REFUND, REFUND_EXCEEDS_BALANCE, ORDERS_PAID_OUT.",
+      "The payment must be SUCCEEDED; an ORPHANED payment can only have its balance refunded (to retry a failed automatic refund). With orderId: a CANCELLED order on this payment, refunded its price, its agent commission and its share of the service fee (delivery is not refunded). Without: the payment's remaining balance, refused while any order on the checkout has a pending or paid payout. Paid back in the payment's currency through Paystack; status becomes PROCESSED when Paystack confirms, or FAILED if Paystack refuses (ask again to retry). An unknown outcome stays PENDING until Paystack reports it. 409 PAYMENT_NOT_REFUNDABLE, ORDER_NOT_REFUNDABLE, ORDER_ALREADY_REFUNDED, NOTHING_TO_REFUND, REFUND_EXCEEDS_BALANCE, ORDERS_PAID_OUT.",
   })
   @Auth(Role.ADMIN)
   @ApiEnvelope(RefundDto, { status: HttpStatus.CREATED })

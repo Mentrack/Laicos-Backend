@@ -25,19 +25,7 @@ const itemId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
 const otherId = '1c3d5e7f-2a4b-4c6d-8e0f-1a2b3c4d5e6f';
 const mergeKey = '5a6b7c8d-9e0f-4a1b-8c2d-3e4f5a6b7c8d';
 // Typed from the row, not inferred, so overrides can set any status.
-type ProduceFixture = Pick<
-  CartItemRow['produce'],
-  | 'id'
-  | 'farmId'
-  | 'name'
-  | 'unit'
-  | 'imageUrl'
-  | 'pricePerUnit'
-  | 'floatingQuantity'
-  | 'status'
-  | 'type'
-  | 'farm'
->;
+type ProduceFixture = CartItemRow['produce'];
 const produce: ProduceFixture = {
   id: produceId,
   farmId: 'farm-1',
@@ -45,9 +33,16 @@ const produce: ProduceFixture = {
   unit: 'Tuber',
   imageUrl: null,
   pricePerUnit: new Prisma.Decimal('4500.00'),
+  quantity: 500,
+  actualQuantity: 500,
   floatingQuantity: 500,
   status: ProduceStatus.PUBLISHED,
   type: ProduceType.LOCAL,
+  category: null,
+  description: null,
+  specs: null,
+  createdAt: new Date('2026-10-08'),
+  updatedAt: new Date('2026-10-08'),
   farm: {
     id: 'farm-1',
     farmCode: 'LF-000123',
@@ -147,6 +142,25 @@ describe('CartService', () => {
         deliveryFee: '3500.00',
         serviceFee: '450.00',
         grandTotal: '12950.00',
+      });
+    });
+
+    it('adds the per-line agent commission to the grand total', async () => {
+      const charging = new CartService(
+        database as unknown as PrismaService,
+        testCheckoutConfig({ AGENT_COMMISSION_PERCENT: '5' }),
+      );
+      const priced = (price: string) => ({
+        pricePerUnit: new Prisma.Decimal(price),
+      });
+      cartItem.findMany.mockResolvedValue([
+        cartRow(1, priced('1000.10')),
+        cartRow(1, priced('333.33')),
+      ]);
+      await expect(charging.find(buyer)).resolves.toMatchObject({
+        total: '1333.43',
+        agentCommission: '66.68',
+        grandTotal: '4900.11',
       });
     });
 

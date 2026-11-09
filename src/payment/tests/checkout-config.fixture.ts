@@ -4,6 +4,7 @@ import { CheckoutConfig } from '../checkout-config';
 export const CHECKOUT_ENV = {
   DELIVERY_FEE: '3500',
   SERVICE_FEE_PERCENT: '0',
+  AGENT_COMMISSION_PERCENT: '0',
   CHECKOUT_HOLD_MINUTES: '30',
   DELIVERY_MIN_DAYS: '1',
   DELIVERY_MAX_DAYS: '30',

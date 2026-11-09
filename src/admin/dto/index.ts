@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { NormalizedEmail } from '../../common/dto/normalized-email';
+import { PaginationQueryDto } from '../../common/pagination';
 
 export class AdminProfileDto {
   @ApiProperty({ format: 'uuid' })
@@ -25,6 +32,18 @@ export class InviteAdminDto {
   @IsEmail()
   @IsNotEmpty()
   email: string;
+}
+
+export class AcceptAdminInviteDto {
+  @ApiProperty({ description: 'The token from the emailed invite link' })
+  @IsString()
+  @IsNotEmpty()
+  token: string;
+
+  @ApiProperty({ example: 'Password1!' })
+  @IsNotEmpty()
+  @IsString()
+  password: string;
 
   @ApiProperty({ example: 'Ngozi' })
   @IsNotEmpty()
@@ -44,4 +63,33 @@ export class InviteAdminDto {
   @IsNotEmpty()
   @IsString()
   phoneNumber?: string;
+}
+
+export class AdminInviteDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty({ example: 'ngozi@laicos.ng' })
+  email: string;
+
+  @ApiProperty()
+  expiresAt: Date;
+
+  @ApiProperty({ type: Date, nullable: true })
+  acceptedAt: Date | null;
+
+  @ApiProperty()
+  createdAt: Date;
+}
+
+export enum AdminInviteStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+}
+
+export class AdminInviteQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: AdminInviteStatus })
+  @IsOptional()
+  @IsEnum(AdminInviteStatus)
+  status?: AdminInviteStatus;
 }

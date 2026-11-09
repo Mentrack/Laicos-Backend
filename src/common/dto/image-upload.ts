@@ -9,7 +9,11 @@ import {
 export interface UploadField {
   name: string;
   required: boolean;
+  /** Set for a field carrying several files (`FilesInterceptor`). */
+  maxCount?: number;
 }
+
+const binary = () => ({ type: 'string', format: 'binary' });
 
 // Inlined in each body rather than $ref'd, and rebuilt per route so two
 // routes never share one object: an uploaded file is a transport detail of
@@ -19,7 +23,12 @@ function fileSchema(fields: UploadField[]) {
     type: 'object',
     required: fields.filter((field) => field.required).map(({ name }) => name),
     properties: Object.fromEntries(
-      fields.map(({ name }) => [name, { type: 'string', format: 'binary' }]),
+      fields.map(({ name, maxCount }) => [
+        name,
+        maxCount
+          ? { type: 'array', items: binary(), minItems: 1, maxItems: maxCount }
+          : binary(),
+      ]),
     ),
   };
 }

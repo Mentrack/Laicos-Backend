@@ -8,6 +8,7 @@ describe('CheckoutConfig', () => {
     expect(config.deliveryMinDays).toBe(1);
     expect(config.deliveryMaxDays).toBe(30);
     expect(config.serviceFeePercent.toFixed(2)).toBe('0.00');
+    expect(config.agentCommissionPercent.toFixed(2)).toBe('0.00');
   });
 
   it('allows a zero fee and same-day delivery', () => {
@@ -32,6 +33,9 @@ describe('CheckoutConfig', () => {
     ['SERVICE_FEE_PERCENT', '-1'],
     ['SERVICE_FEE_PERCENT', '101'],
     ['SERVICE_FEE_PERCENT', '2.555'],
+    ['AGENT_COMMISSION_PERCENT', '-1'],
+    ['AGENT_COMMISSION_PERCENT', '101'],
+    ['AGENT_COMMISSION_PERCENT', '2.555'],
     ['DELIVERY_MIN_DAYS', '-1'],
     ['DELIVERY_MAX_DAYS', '0'],
   ])('refuses %s=%p', (key, value) => {

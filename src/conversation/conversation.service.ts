@@ -9,6 +9,7 @@ import {
   AuditActorType,
   AuditCategory,
   AuditResource,
+  DisputeStatus,
   OrderStatus,
   Role,
   type Conversation,
@@ -43,11 +44,14 @@ import {
   formatMessage,
   type ConversationRow,
 } from './formatters/conversation.formatter';
+import { PayoutConfig } from '../payout/payout.config';
 import { isClosed } from './utils/conversation-window';
 
 const ORDER_PARTICIPANTS = {
   buyerId: true,
   status: true,
+  fulfilledAt: true,
+  dispute: { select: { status: true } },
   handover: { select: { agent: { select: { userId: true } } } },
   farm: {
     select: { cluster: { select: { agent: { select: { userId: true } } } } },
@@ -60,6 +64,7 @@ export class ConversationService {
     private readonly database: PrismaService,
     private readonly chat: ChatGateway,
     private readonly audit: AuditService,
+    private readonly payoutConfig: PayoutConfig,
   ) {}
 
   async open(user: User, orderId: string): Promise<ConversationDto> {
@@ -98,7 +103,7 @@ export class ConversationService {
         code: 'CONVERSATION_NOT_OPEN',
       });
     }
-    if (isClosed(order.status)) {
+    if (isClosed(order, this.payoutConfig.holdHours, new Date())) {
       throw conversationClosed();
     }
     if (!agentUserId) {
@@ -113,7 +118,12 @@ export class ConversationService {
         data: { orderId, buyerId: order.buyerId, agentUserId },
         include: CONVERSATION_INCLUDE,
       });
-      return formatConversation(created, user.id, 0);
+      return formatConversation(
+        created,
+        user.id,
+        0,
+        this.payoutConfig.holdHours,
+      );
     } catch (error) {
       // The other side opened it at the same moment; theirs won.
       if (!isUniqueViolation(error)) {
@@ -169,7 +179,12 @@ export class ConversationService {
     );
     return {
       data: rows.map((row, index) =>
-        formatConversation(row, user.id, unread[index]),
+        formatConversation(
+          row,
+          user.id,
+          unread[index],
+          this.payoutConfig.holdHours,
+        ),
       ),
       metaData: paginationMeta(page, perPage, total),
     };
@@ -221,9 +236,24 @@ export class ConversationService {
       message = await this.database.$transaction(async (tx) => {
         // FOR SHARE: an order closing at this moment waits for this send to
         // commit, or this send sees it closed.
-        const [order] = await tx.$queryRaw<{ status: OrderStatus }[]>`
-          SELECT status FROM "Order" WHERE id = ${conversation.orderId} FOR SHARE`;
-        if (isClosed(order.status)) {
+        const [row] = await tx.$queryRaw<
+          {
+            status: OrderStatus;
+            fulfilledAt: Date | null;
+            disputeStatus: DisputeStatus | null;
+          }[]
+        >`
+          SELECT o.status, o."fulfilledAt", d.status AS "disputeStatus"
+          FROM "Order" o
+          LEFT JOIN "Dispute" d ON d."orderId" = o.id
+          WHERE o.id = ${conversation.orderId}
+          FOR SHARE OF o`;
+        const order = {
+          status: row.status,
+          fulfilledAt: row.fulfilledAt,
+          dispute: row.disputeStatus ? { status: row.disputeStatus } : null,
+        };
+        if (isClosed(order, this.payoutConfig.holdHours, new Date())) {
           throw conversationClosed();
         }
         const created = await tx.message.create({
@@ -333,7 +363,7 @@ export class ConversationService {
       CHAT_EVENTS.conversationRead,
       event,
     );
-    return formatConversation(row, user.id, 0);
+    return formatConversation(row, user.id, 0, this.payoutConfig.holdHours);
   }
 
   /** The sender's earlier message with this clientMessageId, if any. */
@@ -382,7 +412,12 @@ export class ConversationService {
     const unread = await this.database.message.count({
       where: unreadWhere(row, user.id, buyerId),
     });
-    return formatConversation(row, user.id, unread);
+    return formatConversation(
+      row,
+      user.id,
+      unread,
+      this.payoutConfig.holdHours,
+    );
   }
 
   private async buyerIdFor(user: User): Promise<string | null> {

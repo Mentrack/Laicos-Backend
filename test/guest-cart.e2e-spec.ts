@@ -10,6 +10,7 @@ import {
   type State,
   type User,
 } from '../generated/client';
+import type { AuditService } from '../src/audit/audit.service';
 import { CartService } from '../src/cart/cart.service';
 import { testCheckoutConfig } from '../src/payment/tests/checkout-config.fixture';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -24,8 +25,12 @@ const run = randomUUID().slice(0, 8);
 describe('Guest browsing and cart (real Postgres)', () => {
   const db = new PrismaService(new ConfigService());
   const cart = new CartService(db, testCheckoutConfig());
-  // Reads never touch storage.
-  const produceService = new ProduceService(db, {} as StorageService);
+  // Reads never touch storage or the audit log.
+  const produceService = new ProduceService(
+    db,
+    {} as StorageService,
+    {} as AuditService,
+  );
   const users: User[] = [];
   let state: State;
   let lga: Lga;
@@ -96,8 +101,9 @@ describe('Guest browsing and cart (real Postgres)', () => {
 
   afterAll(async () => {
     const ids = users.map((u) => u.id);
-    await db.cartItem.deleteMany({ where: { buyerId: { in: ids } } });
-    await db.cartMerge.deleteMany({ where: { buyerId: { in: ids } } });
+    const mine = { buyer: { userId: { in: ids } } };
+    await db.cartItem.deleteMany({ where: mine });
+    await db.cartMerge.deleteMany({ where: mine });
     await db.produce.deleteMany({
       where: { farmId: { in: [verified.id, unverified.id] } },
     });
@@ -144,8 +150,10 @@ describe('Guest browsing and cart (real Postgres)', () => {
     expect(quote.total).toBe('200.00');
 
     const buyer = await user(Role.BUYER);
+    // Cart rows key on the Buyer profile, not the user.
+    const profile = await db.buyer.create({ data: { userId: buyer.id } });
     await db.cartItem.create({
-      data: { buyerId: buyer.id, produceId: a.id, quantity: 3 },
+      data: { buyerId: profile.id, produceId: a.id, quantity: 3 },
     });
     const key = randomUUID();
     const deviceCart = {

@@ -25,35 +25,20 @@ describe('AuthService password change', () => {
     {} as StorageService,
     { record: jest.fn() } as unknown as AuditService,
   );
-  const dto = { currentPassword: 'Temp-pass', newPassword: 'NewPassword1!' };
+  const dto = { currentPassword: 'Old-pass1!', newPassword: 'NewPassword1!' };
 
   beforeEach(() => jest.clearAllMocks());
 
-  it('clears a temporary password’s flag', async () => {
-    const onboarded = {
-      id: 'user-1',
-      firebaseUid: 'uid-1',
-      email: 'ada@example.com',
-      mustChangePassword: true,
-    } as User;
-    await service.changePassword(onboarded, dto);
-    expect(firebase.auth.updateUser).toHaveBeenCalledWith('uid-1', {
-      password: 'NewPassword1!',
-    });
-    expect(user.update).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { mustChangePassword: false },
-    });
-  });
-
-  it('leaves a permanent password’s user row alone', async () => {
+  it('does not touch the local user', async () => {
     const regular = {
       id: 'user-1',
       firebaseUid: 'uid-1',
       email: 'ada@example.com',
-      mustChangePassword: false,
     } as User;
     await service.changePassword(regular, dto);
+    expect(firebase.auth.updateUser).toHaveBeenCalledWith('uid-1', {
+      password: 'NewPassword1!',
+    });
     expect(user.update).not.toHaveBeenCalled();
   });
 });

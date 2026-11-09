@@ -28,6 +28,7 @@ import { CheckoutExpiryService } from '../src/payment/checkout-expiry.service';
 import { PaymentService } from '../src/payment/payment.service';
 import { RefundService } from '../src/payment/refund.service';
 import { testCheckoutConfig } from '../src/payment/tests/checkout-config.fixture';
+import { NotificationService } from '../src/notifications/notification.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Runs against the docker compose Postgres; test/e2e-guard.ts refuses any
@@ -47,6 +48,11 @@ describe('Payment concurrency (real Postgres)', () => {
     createRefund: jest.fn().mockResolvedValue({ id: 'rf-e2e' }),
   };
   const client = paystack as unknown as PaystackClient;
+  // Redis is not part of these suites; delivery rows are covered elsewhere.
+  const notification = {
+    notify: jest.fn().mockResolvedValue([]),
+    dispatch: jest.fn(),
+  } as unknown as NotificationService;
   const payments = new PaymentService(
     db,
     client,
@@ -60,9 +66,11 @@ describe('Payment concurrency (real Postgres)', () => {
       db,
       new FxConfig(new ConfigService({ OPEN_EXCHANGE_RATES_APP_ID: 'e2e' })),
     ),
-    new RefundService(db, client),
+    new RefundService(db, client, notification),
+    notification,
   );
   const expiry = new CheckoutExpiryService(db);
+  const userIds: string[] = [];
   const buyerIds: string[] = [];
   let farmerUser: User;
   let state: State;
@@ -91,10 +99,14 @@ describe('Payment concurrency (real Postgres)', () => {
     });
   }
 
+  // Cart, address, checkout and order rows key on the Buyer profile, not the
+  // user, so a buyer carries both ids.
   async function buyer() {
     const created = await user(Role.BUYER);
-    buyerIds.push(created.id);
-    return created;
+    userIds.push(created.id);
+    const profile = await db.buyer.create({ data: { userId: created.id } });
+    buyerIds.push(profile.id);
+    return { ...created, buyerId: profile.id };
   }
 
   function produce(stock: number) {
@@ -117,11 +129,11 @@ describe('Payment concurrency (real Postgres)', () => {
     const listing = await produce(10);
     const owner = await buyer();
     await db.cartItem.create({
-      data: { buyerId: owner.id, produceId: listing.id, quantity },
+      data: { buyerId: owner.buyerId, produceId: listing.id, quantity },
     });
     const address = await db.address.create({
       data: {
-        buyerId: owner.id,
+        buyerId: owner.buyerId,
         label: 'E2E',
         street: '1 Test Road',
         stateId: state.id,
@@ -169,7 +181,7 @@ describe('Payment concurrency (real Postgres)', () => {
     await db.address.deleteMany({ where: mine });
     await db.farm.delete({ where: { id: farm.id } });
     await db.user.deleteMany({
-      where: { id: { in: [...buyerIds, farmerUser.id] } },
+      where: { id: { in: [...userIds, farmerUser.id] } },
     });
     await db.lga.delete({ where: { id: lga.id } });
     await db.state.delete({ where: { id: state.id } });
@@ -248,7 +260,7 @@ describe('Payment concurrency (real Postgres)', () => {
     const other = await buyer();
     const address = await db.address.create({
       data: {
-        buyerId: other.id,
+        buyerId: other.buyerId,
         label: 'E2E',
         street: '1 Test Road',
         stateId: state.id,
@@ -257,7 +269,7 @@ describe('Payment concurrency (real Postgres)', () => {
       },
     });
     await db.cartItem.create({
-      data: { buyerId: other.id, produceId: listing.id, quantity: 3 },
+      data: { buyerId: other.buyerId, produceId: listing.id, quantity: 3 },
     });
     await db.checkout.update({
       where: { id: checkout.id },

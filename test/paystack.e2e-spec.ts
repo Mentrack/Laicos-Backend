@@ -8,6 +8,8 @@ import {
   FarmVerificationStatus,
   OrderStatus,
   PaymentStatus,
+  PayeeRole,
+  PayoutItemKind,
   PayoutStatus,
   ProduceStatus,
   Role,
@@ -28,6 +30,7 @@ import { PaystackEventsService } from '../src/payment/paystack-events.service';
 import { RefundService } from '../src/payment/refund.service';
 import { testCheckoutConfig } from '../src/payment/tests/checkout-config.fixture';
 import type { PayoutService } from '../src/payout/payout.service';
+import { NotificationService } from '../src/notifications/notification.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Runs against the docker compose Postgres; test/e2e-guard.ts refuses any
@@ -47,7 +50,12 @@ describe('Paystack (real Postgres)', () => {
     createRefund: jest.fn().mockResolvedValue({ id: 'rf-e2e' }),
   };
   const client = paystack as unknown as PaystackClient;
-  const refunds = new RefundService(db, client);
+  // Redis is not part of these suites; delivery rows are covered elsewhere.
+  const notification = {
+    notify: jest.fn().mockResolvedValue([]),
+    dispatch: jest.fn(),
+  } as unknown as NotificationService;
+  const refunds = new RefundService(db, client, notification);
   const payments = new PaymentService(
     db,
     client,
@@ -62,12 +70,15 @@ describe('Paystack (real Postgres)', () => {
       new FxConfig(new ConfigService({ OPEN_EXCHANGE_RATES_APP_ID: 'e2e' })),
     ),
     refunds,
+    notification,
   );
   const events = new PaystackEventsService(client, payments, refunds, {
     applyTransferResult: jest.fn(),
   } as unknown as PayoutService);
   const userIds: string[] = [];
   let buyer: User;
+  // Cart, address, checkout and order rows key on the Buyer profile, not the user.
+  let buyerId: string;
   let admin: User;
   let farmer: Farmer;
   let state: State;
@@ -111,16 +122,17 @@ describe('Paystack (real Postgres)', () => {
       },
     });
     buyer = await user(Role.BUYER);
+    ({ id: buyerId } = await db.buyer.create({ data: { userId: buyer.id } }));
     admin = await user(Role.ADMIN);
   });
 
   afterAll(async () => {
-    const mine = { buyerId: buyer.id };
+    const mine = { buyerId };
     await db.payoutItem.deleteMany({
-      where: { payout: { farmerId: farmer.id } },
+      where: { payout: { payeeId: farmer.userId } },
     });
-    await db.payout.deleteMany({ where: { farmerId: farmer.id } });
-    await db.farmerBankAccount.deleteMany({ where: { farmerId: farmer.id } });
+    await db.payout.deleteMany({ where: { payeeId: farmer.userId } });
+    await db.bankAccount.deleteMany({ where: { userId: farmer.userId } });
     await db.refund.deleteMany({ where: { payment: { checkout: mine } } });
     await db.payment.deleteMany({ where: { checkout: mine } });
     await db.order.deleteMany({ where: mine });
@@ -150,11 +162,11 @@ describe('Paystack (real Postgres)', () => {
       },
     });
     await db.cartItem.create({
-      data: { buyerId: buyer.id, produceId: listing.id, quantity: 4 },
+      data: { buyerId, produceId: listing.id, quantity: 4 },
     });
     const address = await db.address.create({
       data: {
-        buyerId: buyer.id,
+        buyerId,
         label: 'E2E',
         street: '1 Test Road',
         stateId: state.id,
@@ -215,7 +227,8 @@ describe('Paystack (real Postgres)', () => {
     const payout = (status: PayoutStatus) =>
       db.payout.create({
         data: {
-          farmerId: farmer.id,
+          payeeId: farmer.userId,
+          payeeRole: PayeeRole.FARMER,
           amount: '400.00',
           bankName: 'GTBank',
           accountNumber: '0123456789',
@@ -223,7 +236,16 @@ describe('Paystack (real Postgres)', () => {
           recipientCode: 'RCP_e2e',
           approvedById: admin.id,
           status,
-          items: { create: [{ orderId: order.id, amount: '400.00', status }] },
+          items: {
+            create: [
+              {
+                kind: PayoutItemKind.PRODUCE,
+                orderId: order.id,
+                amount: '400.00',
+                status,
+              },
+            ],
+          },
         },
       });
     await payout(PayoutStatus.FAILED);

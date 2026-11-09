@@ -13,7 +13,6 @@ import { Role } from '../../generated/client';
 import { FirebaseService } from '../auth/firebase/firebase.service';
 import {
   assertActivated,
-  passwordChangeRequiredError,
   requireLocalUser,
   verifySessionToken,
 } from '../auth/utils/session';
@@ -98,9 +97,6 @@ export class ChatGateway
     const decoded = await verifySessionToken(this.firebase, token);
     const user = await requireLocalUser(this.database, decoded.uid);
     assertActivated(user);
-    if (user.mustChangePassword) {
-      throw passwordChangeRequiredError();
-    }
     if (!CHAT_ROLES.includes(user.role)) {
       throw new ForbiddenException('Insufficient role');
     }

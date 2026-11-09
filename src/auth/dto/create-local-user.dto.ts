@@ -23,8 +23,6 @@ export class CreateLocalUserDto extends OmitType(RegisterDto, [
   buyer?: Prisma.BuyerCreateWithoutUserInput;
   /** The ADMIN user's profile, created in the same write. */
   admin?: Prisma.AdminCreateWithoutUserInput;
-  /** Set on an invited admin's temporary password. */
-  mustChangePassword?: boolean;
   /** Stored in the same write, so no half-created user needs undoing. */
   refreshToken?: string;
 }

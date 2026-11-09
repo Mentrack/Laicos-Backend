@@ -39,7 +39,7 @@ export class OrderController {
   @ApiOperation({
     summary: 'Buy Now',
     description:
-      'Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee plus the service fee no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.',
+      'Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee, the service fee and the agent commission no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -89,7 +89,7 @@ export class OrderController {
   @ApiOperation({
     summary: 'Get my order dashboard figures',
     description:
-      'Farmers only, across their farms; unpaid orders are left out. totalEarnings is the value of FULFILLED orders, not money paid out; activeOrders counts PENDING to SHIPPED.',
+      'Farmers only, across their farms; unpaid orders are left out. totalEarnings is the sum of your SUCCEEDED payouts, the same figure as GET /payouts/summary; activeOrders counts PENDING to SHIPPED.',
   })
   @Auth(Role.FARMER)
   @ApiEnvelope(OrderSummaryDto)
@@ -193,6 +193,22 @@ export class OrderController {
   ) {
     const data = await this.orders.markReady(user, id);
     return { data, message: 'Order marked ready' };
+  }
+
+  @Patch(':id/received')
+  @ApiOperation({
+    summary: 'Confirm delivery',
+    description:
+      'Buyers only, on their own SHIPPED order (409 ORDER_NOT_SHIPPED otherwise). Sets FULFILLED and starts the dispute window (PAYOUT_HOLD_HOURS, default 24); the order chat stays writable during it. An unconfirmed order stays SHIPPED. A placeholder until logistics confirm delivery.',
+  })
+  @Auth(Role.BUYER)
+  @ApiEnvelope(OrderDto)
+  async confirmReceived(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.orders.confirmReceived(user, id);
+    return { data, message: 'Order received' };
   }
 
   @Patch(':id/cancel')

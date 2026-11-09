@@ -12,6 +12,8 @@ const farmer = {
   role: Role.FARMER,
 };
 
+const link = 'https://laicos.firebaseapp.com/__/auth/action?oobCode=abc';
+
 describe('FarmerActivationService', () => {
   const user = {
     findUnique: jest.fn(),
@@ -19,7 +21,10 @@ describe('FarmerActivationService', () => {
     update: jest.fn(),
   };
   const database = { user };
-  const firebase = { auth: { getUser: jest.fn(), updateUser: jest.fn() } };
+  const firebase = {
+    auth: { getUser: jest.fn(), updateUser: jest.fn() },
+    generatePasswordResetLink: jest.fn(),
+  };
   const invites = { sendInvite: jest.fn(), sendRejection: jest.fn() };
   const service = new FarmerActivationService(
     database as unknown as PrismaService,
@@ -35,70 +40,60 @@ describe('FarmerActivationService', () => {
     user.updateMany.mockResolvedValue({ count: 1 });
     firebase.auth.getUser.mockResolvedValue({ providerData: [] });
     firebase.auth.updateUser.mockResolvedValue(undefined);
+    firebase.generatePasswordResetLink.mockResolvedValue(link);
     invites.sendInvite.mockResolvedValue(undefined);
   });
   afterEach(() => error.mockRestore());
 
-  it('activates a farmer once, on a temporary password they must change', async () => {
+  it('emails a set-password link to a farmer with no sign-in', async () => {
     await service.activate('user-1');
 
     expect(user.updateMany).toHaveBeenCalledWith({
       where: { id: 'user-1', role: Role.FARMER, activatedAt: null },
-      data: {
-        activatedAt: expect.any(Date) as unknown,
-        mustChangePassword: true,
-      },
+      data: { activatedAt: expect.any(Date) as unknown },
     });
-    const [[uid, { password }]] = firebase.auth.updateUser.mock.calls as [
-      [string, { password: string }],
-    ];
-    expect(uid).toBe('uid-1');
-    expect(password).toHaveLength(12);
-    expect(invites.sendInvite).toHaveBeenCalledWith(farmer, password);
+    expect(firebase.generatePasswordResetLink).toHaveBeenCalledWith(
+      'ada@example.com',
+    );
+    expect(firebase.auth.updateUser).not.toHaveBeenCalled();
+    expect(invites.sendInvite).toHaveBeenCalledWith(farmer, link);
   });
 
-  it('sets no password when the account already has one', async () => {
+  it('keeps the activation when no link can be generated', async () => {
+    firebase.generatePasswordResetLink.mockResolvedValue(null);
+    await expect(service.activate('user-1')).resolves.toBeUndefined();
+    expect(invites.sendInvite).not.toHaveBeenCalled();
+    expect(user.update).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalled();
+  });
+
+  it('a farmer with a password gets the verified email', async () => {
     firebase.auth.getUser.mockResolvedValue({
       providerData: [{ providerId: 'password' }],
     });
     await service.activate('user-1');
-    expect(firebase.auth.updateUser).not.toHaveBeenCalled();
+    expect(firebase.generatePasswordResetLink).not.toHaveBeenCalled();
     expect(invites.sendInvite).toHaveBeenCalledWith(farmer, null);
   });
 
-  it('sets no password for a Google account', async () => {
+  it('a farmer with Google gets the verified email', async () => {
     firebase.auth.getUser.mockResolvedValue({
       providerData: [{ providerId: 'google.com' }],
     });
     await service.activate('user-1');
     expect(user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: {
-          activatedAt: expect.any(Date) as unknown,
-          mustChangePassword: false,
-        },
+        data: { activatedAt: expect.any(Date) as unknown },
       }),
     );
-    expect(firebase.auth.updateUser).not.toHaveBeenCalled();
+    expect(firebase.generatePasswordResetLink).not.toHaveBeenCalled();
     expect(invites.sendInvite).toHaveBeenCalledWith(farmer, null);
   });
 
   it('does nothing for a farmer already active', async () => {
     user.updateMany.mockResolvedValue({ count: 0 });
     await service.activate('user-1');
-    expect(firebase.auth.updateUser).not.toHaveBeenCalled();
     expect(invites.sendInvite).not.toHaveBeenCalled();
-  });
-
-  it('undoes the activation and logs, never throws, when Firebase fails', async () => {
-    firebase.auth.updateUser.mockRejectedValue(new Error('firebase down'));
-    await expect(service.activate('user-1')).resolves.toBeUndefined();
-    expect(user.update).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { activatedAt: null, mustChangePassword: false },
-    });
-    expect(invites.sendInvite).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalled();
   });
 
   it('keeps the activation, and logs, when the invite email fails', async () => {

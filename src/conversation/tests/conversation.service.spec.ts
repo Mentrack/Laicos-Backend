@@ -9,6 +9,8 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { ConfigService } from '@nestjs/config';
+import { PayoutConfig } from '../../payout/payout.config';
 import { AuditService } from '../../audit/audit.service';
 import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import type { PrismaService } from '../../prisma/prisma.service';
@@ -27,10 +29,14 @@ function uniqueViolation() {
   });
 }
 
+const longAgo = new Date('2020-01-01T00:00:00Z');
+
 function orderRow(overrides: Record<string, unknown> = {}) {
   return {
     buyerId: buyer.id,
     status: OrderStatus.PENDING,
+    fulfilledAt: null,
+    dispute: null,
     handover: null,
     farm: { cluster: { agent: { userId: agent.id } } },
     ...overrides,
@@ -51,6 +57,8 @@ function conversationRow(overrides: Record<string, unknown> = {}) {
     order: {
       orderNumber: 'ORD-000123',
       status: OrderStatus.PENDING,
+      fulfilledAt: null,
+      dispute: null,
       produceName: 'Cassava',
       quantity: 5,
       type: ProduceType.LOCAL,
@@ -124,6 +132,7 @@ describe('ConversationService', () => {
     database as unknown as PrismaService,
     chat as unknown as ChatGateway,
     audit as unknown as AuditService,
+    new PayoutConfig(new ConfigService({})),
   );
 
   beforeEach(() => {
@@ -254,7 +263,9 @@ describe('ConversationService', () => {
     it.each([OrderStatus.FULFILLED, OrderStatus.CANCELLED])(
       'refuses to start a thread on a %s order',
       async (status) => {
-        database.order.findUnique.mockResolvedValue(orderRow({ status }));
+        database.order.findUnique.mockResolvedValue(
+          orderRow({ status, fulfilledAt: longAgo }),
+        );
         await expect(
           errorBody(service.open(buyer, 'order-1')),
         ).resolves.toMatchObject({
@@ -451,7 +462,13 @@ describe('ConversationService', () => {
     beforeEach(() => {
       database.conversation.findUnique.mockResolvedValue(conversation);
       database.message.findUnique.mockResolvedValue(null);
-      tx.$queryRaw.mockResolvedValue([{ status: OrderStatus.PREPARING }]);
+      tx.$queryRaw.mockResolvedValue([
+        {
+          status: OrderStatus.PREPARING,
+          fulfilledAt: null,
+          disputeStatus: null,
+        },
+      ]);
       tx.message.create.mockResolvedValue(message);
     });
 
@@ -481,7 +498,9 @@ describe('ConversationService', () => {
     it.each([OrderStatus.FULFILLED, OrderStatus.CANCELLED])(
       'refuses a new message once the order is %s',
       async (status) => {
-        tx.$queryRaw.mockResolvedValue([{ status }]);
+        tx.$queryRaw.mockResolvedValue([
+          { status, fulfilledAt: longAgo, disputeStatus: null },
+        ]);
         await expect(
           errorBody(service.send(buyer, 'conv-1', send)),
         ).resolves.toMatchObject({
@@ -492,6 +511,29 @@ describe('ConversationService', () => {
         expect(chat.emitToUsers).not.toHaveBeenCalled();
       },
     );
+
+    it('still takes a message inside the dispute window or with an OPEN dispute', async () => {
+      tx.$queryRaw.mockResolvedValue([
+        {
+          status: OrderStatus.FULFILLED,
+          fulfilledAt: new Date(),
+          disputeStatus: null,
+        },
+      ]);
+      await expect(service.send(buyer, 'conv-1', send)).resolves.toEqual(
+        message,
+      );
+      tx.$queryRaw.mockResolvedValue([
+        {
+          status: OrderStatus.FULFILLED,
+          fulfilledAt: longAgo,
+          disputeStatus: 'OPEN',
+        },
+      ]);
+      await expect(service.send(buyer, 'conv-1', send)).resolves.toEqual(
+        message,
+      );
+    });
 
     it('returns the original on a retry, without re-notifying', async () => {
       database.message.findUnique.mockResolvedValue(message);
@@ -504,7 +546,13 @@ describe('ConversationService', () => {
 
     it('returns the original on a retry even after the order closed', async () => {
       database.message.findUnique.mockResolvedValue(message);
-      tx.$queryRaw.mockResolvedValue([{ status: OrderStatus.FULFILLED }]);
+      tx.$queryRaw.mockResolvedValue([
+        {
+          status: OrderStatus.FULFILLED,
+          fulfilledAt: longAgo,
+          disputeStatus: null,
+        },
+      ]);
       await expect(service.send(buyer, 'conv-1', send)).resolves.toEqual(
         message,
       );

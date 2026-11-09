@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional } from 'class-validator';
-import { PayoutStatus } from '../../../generated/client';
+import { PayeeRole, PayoutStatus } from '../../../generated/client';
 import { PaginationQueryDto } from '../../common/pagination';
 
 export class PayoutQueryDto extends PaginationQueryDto {
@@ -8,4 +8,9 @@ export class PayoutQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(PayoutStatus)
   status?: PayoutStatus;
+
+  @ApiPropertyOptional({ enum: PayeeRole, enumName: 'PayeeRole' })
+  @IsOptional()
+  @IsEnum(PayeeRole)
+  payeeRole?: PayeeRole;
 }
