@@ -8,6 +8,7 @@ import {
   farmRejectedEmail,
   farmerInviteEmail,
 } from '../mail/templates';
+import { passwordResetUrl } from './utils/password-reset-url';
 
 /** Emails a farmer the outcome of their farm's verification. */
 @Injectable()
@@ -18,21 +19,21 @@ export class FarmerInviteService {
   ) {}
 
   /**
-   * `temporaryPassword` is set only for an onboarded farmer, who had none.
+   * `resetLink` is set only for an onboarded farmer, who has no sign-in yet.
    * Everyone else already signs in and is told they have full access.
    */
-  async sendInvite(user: User, temporaryPassword: string | null) {
-    const loginUrl = webappUrl(this.config, '/login');
+  async sendInvite(user: User, resetLink: string | null) {
     await this.mail.send(
       user.email,
-      temporaryPassword
+      resetLink
         ? farmerInviteEmail({
             firstName: user.firstName,
-            email: user.email,
-            temporaryPassword,
-            loginUrl,
+            setPasswordUrl: passwordResetUrl(this.config, resetLink),
           })
-        : accountVerifiedEmail({ firstName: user.firstName, loginUrl }),
+        : accountVerifiedEmail({
+            firstName: user.firstName,
+            loginUrl: webappUrl(this.config, '/login'),
+          }),
     );
   }
 

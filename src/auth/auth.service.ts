@@ -18,6 +18,7 @@ import {
   GoogleRegisterDto,
   CreateLocalUserDto,
   FirebaseAuthTokensDto,
+  TokenPairDto,
   UpdateProfileDto,
   VerifyEmailDto,
 } from './dto';
@@ -34,7 +35,7 @@ import {
   invalidVerificationCodeError,
   needsEmailVerification,
 } from './utils/email-verification';
-import { webappUrl } from '../common/config';
+import { passwordResetUrl } from './utils/password-reset-url';
 import {
   IMAGE_SIGNATURES,
   matchSignature,
@@ -121,10 +122,17 @@ export class AuthService {
       where: { id: user.id },
       data: { isVerified: true },
     });
-    const tokens = await this.firebase.signInWithCustomToken(user.firebaseUid);
-    await this.saveRefreshToken(verified.id, tokens.refreshToken);
+    const session = await this.startSession(verified);
     await this.otp.discard(user.id);
-    return { user: verified, ...toTokenPair(tokens) };
+    return session;
+  }
+
+  async startSession(
+    user: UserModel,
+  ): Promise<{ user: UserModel } & TokenPairDto> {
+    const tokens = await this.firebase.signInWithCustomToken(user.firebaseUid);
+    await this.saveRefreshToken(user.id, tokens.refreshToken);
+    return { user, ...toTokenPair(tokens) };
   }
 
   resendVerification(email: string): Promise<void> {
@@ -234,23 +242,8 @@ export class AuthService {
       email,
       passwordResetEmail({
         firstName: user.firstName,
-        resetUrl: this.webappResetUrl(firebaseLink),
+        resetUrl: passwordResetUrl(this.config, firebaseLink),
       }),
-    );
-  }
-
-  /**
-   * Firebase's link opens Firebase's hosted page; the webapp has its own,
-   * which posts the code to POST /auth/forgot-password/confirm.
-   */
-  private webappResetUrl(firebaseLink: string): string {
-    const oobCode = new URL(firebaseLink).searchParams.get('oobCode');
-    if (!oobCode) {
-      throw new Error('Firebase reset link has no oobCode');
-    }
-    return webappUrl(
-      this.config,
-      `/reset-password?oobCode=${encodeURIComponent(oobCode)}`,
     );
   }
 
@@ -270,12 +263,6 @@ export class AuthService {
     await this.firebase.auth.updateUser(user.firebaseUid, {
       password: dto.newPassword,
     });
-    if (user.mustChangePassword) {
-      await this.database.user.update({
-        where: { id: user.id },
-        data: { mustChangePassword: false },
-      });
-    }
     await this.firebase.auth.revokeRefreshTokens(user.firebaseUid);
     await this.deleteRefreshToken(user.id);
   }

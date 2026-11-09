@@ -53,12 +53,6 @@ export class UserDto {
   })
   applicationStatus?: ApplicationStatus | null;
 
-  @ApiProperty({
-    description:
-      'On the temporary password from a farmer’s invite. Every route but GET /auth/me, PATCH /auth/change-password and POST /auth/logout answers 403 PASSWORD_CHANGE_REQUIRED until it is changed.',
-  })
-  mustChangePassword: boolean;
-
   @ApiProperty()
   createdAt: Date;
 

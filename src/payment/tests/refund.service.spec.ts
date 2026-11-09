@@ -1,6 +1,7 @@
 import { HttpException } from '@nestjs/common';
 import {
   Currency,
+  DisputeStatus,
   OrderStatus,
   PaymentStatus,
   PayoutStatus,
@@ -9,8 +10,10 @@ import {
   Role,
   type User,
 } from '../../../generated/client';
+import { proportionalShare } from '../../common/money';
 import type { PaystackClient } from '../../paystack/paystack.client';
 import { PaystackError } from '../../paystack/paystack-error';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RefundService } from '../refund.service';
 
@@ -23,7 +26,7 @@ async function errorBody(promise: Promise<unknown>) {
   return (error as HttpException).getResponse();
 }
 
-// A ₦60,200 checkout (54,000 items + 3,500 delivery + 2,700 service fee).
+// A ₦62,900 checkout (54,000 items + 3,500 delivery + 2,700 service fee + 2,700 agent commission).
 function paid(overrides: Record<string, unknown> = {}) {
   return {
     id: 'pay-1',
@@ -31,8 +34,8 @@ function paid(overrides: Record<string, unknown> = {}) {
     checkoutId: 'checkout-1',
     status: PaymentStatus.SUCCEEDED,
     currency: Currency.NGN,
-    amount: d('60200'),
-    chargedAmount: d('60200'),
+    amount: d('62900'),
+    chargedAmount: d('62900'),
     checkout: { subtotal: d('54000'), serviceFee: d('2700') },
     refunds: [],
     ...overrides,
@@ -62,7 +65,7 @@ describe('RefundService', () => {
     payment: { findUniqueOrThrow: jest.fn() },
     order: { findFirst: jest.fn(), findMany: jest.fn() },
     payoutItem: { findFirst: jest.fn() },
-    refund: { create: jest.fn() },
+    refund: { create: jest.fn(), updateMany: jest.fn() },
   };
   const database = {
     payment: { findUnique: jest.fn() },
@@ -76,9 +79,11 @@ describe('RefundService', () => {
       callback(tx),
   };
   const paystack = { createRefund: jest.fn() };
+  const notification = { notify: jest.fn(), dispatch: jest.fn() };
   const service = new RefundService(
     database as unknown as PrismaService,
     paystack as unknown as PaystackClient,
+    notification as unknown as NotificationService,
   );
 
   beforeEach(() => {
@@ -117,6 +122,7 @@ describe('RefundService', () => {
         id: 'order-1',
         status: OrderStatus.CANCELLED,
         totalPrice: d('9000'),
+        agentCommission: d('450'),
       });
       await expect(
         service.refund(admin, 'PAY-000001', {
@@ -124,7 +130,7 @@ describe('RefundService', () => {
           reason: 'Farmer cancelled',
         }),
       ).resolves.toMatchObject({
-        amount: '9450.00',
+        amount: '9900.00',
         status: RefundStatus.PENDING,
       });
       expect(tx.$executeRaw).toHaveBeenCalledWith(
@@ -133,10 +139,11 @@ describe('RefundService', () => {
       );
       expect(tx.order.findFirst).toHaveBeenCalledWith({
         where: { id: 'order-1', checkoutId: 'checkout-1' },
+        include: { dispute: true },
       });
       expect(paystack.createRefund).toHaveBeenCalledWith({
         reference: 'PAY-000001',
-        amount: 945_000,
+        amount: 990_000,
       });
       expect(database.refund.update).toHaveBeenCalledWith({
         where: { id: 'refund-1' },
@@ -152,14 +159,15 @@ describe('RefundService', () => {
         id: 'order-1',
         status: OrderStatus.CANCELLED,
         totalPrice: d('9000'),
+        agentCommission: d('450'),
       });
-      // 9450 / 60200 × 39.35 = 6.1770… → 6.17
+      // 9900 / 62900 × 39.35 = 6.1936… → 6.19
       await expect(
         service.refund(admin, 'PAY-000001', {
           orderId: 'order-1',
           reason: 'r',
         }),
-      ).resolves.toMatchObject({ amount: '6.17' });
+      ).resolves.toMatchObject({ amount: '6.19' });
     });
 
     it('refunds the remaining balance when no order is given', async () => {
@@ -173,7 +181,7 @@ describe('RefundService', () => {
       );
       await expect(
         service.refund(admin, 'PAY-000001', { reason: 'Checkout cancelled' }),
-      ).resolves.toMatchObject({ amount: '50750.00' });
+      ).resolves.toMatchObject({ amount: '53450.00' });
     });
 
     it('never refunds past what was charged', async () => {
@@ -186,6 +194,7 @@ describe('RefundService', () => {
         id: 'order-1',
         status: OrderStatus.CANCELLED,
         totalPrice: d('9000'),
+        agentCommission: d('450'),
       });
       await expect(
         errorBody(
@@ -200,7 +209,7 @@ describe('RefundService', () => {
 
     it('refuses when nothing is left', async () => {
       tx.payment.findUniqueOrThrow.mockResolvedValue(
-        paid({ refunds: [refundRow({ amount: d('60200') })] }),
+        paid({ refunds: [refundRow({ amount: d('62900') })] }),
       );
       await expect(
         errorBody(service.refund(admin, 'PAY-000001', { reason: 'r' })),
@@ -241,6 +250,7 @@ describe('RefundService', () => {
         id: 'order-1',
         status: OrderStatus.CANCELLED,
         totalPrice: d('9000'),
+        agentCommission: d('450'),
       });
       tx.payment.findUniqueOrThrow.mockResolvedValue(
         paid({
@@ -272,7 +282,7 @@ describe('RefundService', () => {
           orderId: 'order-1',
           reason: 'r',
         }),
-      ).resolves.toMatchObject({ amount: '9450.00' });
+      ).resolves.toMatchObject({ amount: '9900.00' });
     });
 
     it('retries the refund of an orphan whose automatic refund failed', async () => {
@@ -281,7 +291,7 @@ describe('RefundService', () => {
           status: PaymentStatus.ORPHANED,
           refunds: [
             refundRow({
-              amount: d('60200'),
+              amount: d('62900'),
               status: RefundStatus.FAILED,
               initiatedById: null,
             }),
@@ -291,7 +301,7 @@ describe('RefundService', () => {
       await expect(
         service.refund(admin, 'PAY-000001', { reason: 'Retry' }),
       ).resolves.toMatchObject({
-        amount: '60200.00',
+        amount: '62900.00',
         status: RefundStatus.PENDING,
       });
     });
@@ -304,6 +314,7 @@ describe('RefundService', () => {
         id: 'order-1',
         status: OrderStatus.CANCELLED,
         totalPrice: d('9000'),
+        agentCommission: d('450'),
       });
       await expect(
         errorBody(
@@ -334,11 +345,17 @@ describe('RefundService', () => {
       expect(tx.refund.create).not.toHaveBeenCalled();
     });
 
-    it("takes the checkout farmers' payout locks, sorted, before checking for payouts", async () => {
+    it("takes the checkout's farmer and agent payout locks, sorted, before checking for payouts", async () => {
       tx.order.findMany.mockResolvedValue([
-        { farm: { ownerId: 'farmer-b' } },
-        { farm: { ownerId: 'farmer-a' } },
-        { farm: { ownerId: 'farmer-b' } },
+        {
+          farm: { owner: { userId: 'user-c' } },
+          handover: { agent: { userId: 'user-a' } },
+        },
+        { farm: { owner: { userId: 'user-b' } }, handover: null },
+        {
+          farm: { owner: { userId: 'user-c' } },
+          handover: { agent: null },
+        },
       ]);
       const order: string[] = [];
       tx.$executeRaw.mockImplementation((_sql: unknown, key: string) => {
@@ -352,12 +369,16 @@ describe('RefundService', () => {
       await service.refund(admin, 'PAY-000001', { reason: 'r' });
       expect(tx.order.findMany).toHaveBeenCalledWith({
         where: { checkoutId: 'checkout-1' },
-        select: { farm: { select: { ownerId: true } } },
+        select: {
+          farm: { select: { owner: { select: { userId: true } } } },
+          handover: { select: { agent: { select: { userId: true } } } },
+        },
       });
       expect(order).toEqual([
         'payment:pay-1',
-        'payout:farmer:farmer-a',
-        'payout:farmer:farmer-b',
+        'payout:user:user-a',
+        'payout:user:user-b',
+        'payout:user:user-c',
         'payout check',
       ]);
     });
@@ -367,6 +388,7 @@ describe('RefundService', () => {
         id: 'order-1',
         status: OrderStatus.CANCELLED,
         totalPrice: d('9000'),
+        agentCommission: d('450'),
       });
       await service.refund(admin, 'PAY-000001', {
         orderId: 'order-1',
@@ -417,7 +439,231 @@ describe('RefundService', () => {
     });
   });
 
+  describe('re-issuing a dispute refund', () => {
+    const disputed = (refundPercent: string) => ({
+      id: 'order-1',
+      status: OrderStatus.FULFILLED,
+      totalPrice: d('9000'),
+      agentCommission: d('450'),
+      dispute: {
+        id: 'dispute-1',
+        status: DisputeStatus.RESOLVED,
+        refundPercent: d(refundPercent),
+      },
+    });
+
+    it("after the dispute's refund failed, creates a new one for the same amount", async () => {
+      tx.order.findFirst.mockResolvedValue(disputed('30'));
+      tx.payment.findUniqueOrThrow.mockResolvedValue(
+        paid({
+          refunds: [
+            refundRow({
+              orderId: 'order-1',
+              disputeId: 'dispute-1',
+              amount: d('2970'),
+              status: RefundStatus.FAILED,
+            }),
+          ],
+        }),
+      );
+      await expect(
+        service.refund(admin, 'PAY-000001', {
+          orderId: 'order-1',
+          reason: 'Re-issue',
+        }),
+      ).resolves.toMatchObject({ amount: '2970.00' });
+      expect(tx.refund.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          orderId: 'order-1',
+          disputeId: 'dispute-1',
+          amount: d('2970'),
+        }) as unknown,
+      });
+    });
+
+    it('still refuses while the dispute refund is pending', async () => {
+      tx.order.findFirst.mockResolvedValue(disputed('30'));
+      tx.payment.findUniqueOrThrow.mockResolvedValue(
+        paid({
+          refunds: [
+            refundRow({
+              orderId: 'order-1',
+              disputeId: 'dispute-1',
+              amount: d('2970'),
+            }),
+          ],
+        }),
+      );
+      await expect(
+        errorBody(
+          service.refund(admin, 'PAY-000001', {
+            orderId: 'order-1',
+            reason: 'r',
+          }),
+        ),
+      ).resolves.toMatchObject({ code: 'ORDER_ALREADY_REFUNDED' });
+    });
+
+    it('refuses a dispute solved without a refund', async () => {
+      tx.order.findFirst.mockResolvedValue(disputed('0'));
+      await expect(
+        errorBody(
+          service.refund(admin, 'PAY-000001', {
+            orderId: 'order-1',
+            reason: 'r',
+          }),
+        ),
+      ).resolves.toMatchObject({ code: 'ORDER_NOT_REFUNDABLE' });
+    });
+
+    it('a cancelled order has no dispute link', async () => {
+      tx.order.findFirst.mockResolvedValue({
+        ...disputed('30'),
+        status: OrderStatus.CANCELLED,
+        dispute: null,
+      });
+      await service.refund(admin, 'PAY-000001', {
+        orderId: 'order-1',
+        reason: 'r',
+      });
+      expect(tx.refund.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ disputeId: null }) as unknown,
+      });
+    });
+  });
+
+  describe('createForDispute', () => {
+    const order = {
+      id: 'order-1',
+      orderNumber: 'ORD-000001',
+      totalPrice: d('9000'),
+      agentCommission: d('450'),
+    };
+    const dispute = (refundPercent: string) => ({
+      id: 'dispute-1',
+      refundPercent: d(refundPercent),
+      resolutionNote: 'Partly spoiled',
+    });
+
+    it('refunds the percent of what the buyer paid, rounded down', async () => {
+      // Paid 9001 + 450 + 450.05 = 9901.05; × 33.33% = 3300.0199… → 3300.01
+      const refund = await service.createForDispute(
+        tx as unknown as Prisma.TransactionClient,
+        paid(),
+        { ...order, totalPrice: d('9001') },
+        dispute('33.33'),
+        admin,
+      );
+      expect(refund.amount).toEqual(d('3300.01'));
+      expect(tx.refund.create).toHaveBeenCalledWith({
+        data: {
+          paymentId: 'pay-1',
+          orderId: 'order-1',
+          disputeId: 'dispute-1',
+          amount: d('3300.01'),
+          reason: 'Partly spoiled',
+          initiatedById: admin.id,
+        },
+      });
+    });
+
+    it('converts a USD payment in proportion, after rounding the naira down', async () => {
+      // 9900 × 30% = 2970; 2970 × 39.35 / 62900 = 1.8580… → 1.85
+      const refund = await service.createForDispute(
+        tx as unknown as Prisma.TransactionClient,
+        paid({ currency: Currency.USD, chargedAmount: d('39.35') }),
+        order,
+        dispute('30'),
+        admin,
+      );
+      expect(refund.amount).toEqual(
+        proportionalShare(d('2970'), d('62900'), d('39.35')),
+      );
+      expect(refund.amount).toEqual(d('1.85'));
+    });
+
+    it('refuses more than is left on the payment', async () => {
+      await expect(
+        errorBody(
+          service.createForDispute(
+            tx as unknown as Prisma.TransactionClient,
+            paid({
+              refunds: [
+                refundRow({
+                  amount: d('61000'),
+                  status: RefundStatus.PROCESSED,
+                }),
+              ],
+            }),
+            order,
+            dispute('30'),
+            admin,
+          ),
+        ),
+      ).resolves.toMatchObject({ code: 'REFUND_EXCEEDS_BALANCE' });
+      expect(tx.refund.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('applyResult', () => {
+    beforeEach(() => {
+      tx.refund.updateMany.mockResolvedValue({ count: 1 });
+      tx.payment.findUniqueOrThrow.mockResolvedValue({
+        currency: Currency.NGN,
+        checkout: { buyer: { userId: 'buyer-user-1' } },
+      });
+      notification.notify.mockResolvedValue(['delivery-1']);
+    });
+
+    it('tells the buyer a processed refund went out, dispatching after commit', async () => {
+      database.refund.findFirst.mockResolvedValue(
+        refundRow({ amount: d('1500') }),
+      );
+      await service.applyResult({
+        providerRefundId: '3018284',
+        transactionReference: 'PAY-000001',
+        processed: true,
+        reason: null,
+      });
+      expect(notification.notify).toHaveBeenCalledWith(
+        {
+          userIds: ['buyer-user-1'],
+          type: 'REFUND_PROCESSED',
+          params: {
+            refundId: 'refund-1',
+            amount: '1500.00',
+            currency: Currency.NGN,
+          },
+        },
+        tx,
+      );
+      expect(notification.dispatch).toHaveBeenCalledWith(['delivery-1']);
+    });
+
+    it('does not notify for a failed result', async () => {
+      database.refund.findFirst.mockResolvedValue(refundRow());
+      await service.applyResult({
+        providerRefundId: '3018284',
+        transactionReference: 'PAY-000001',
+        processed: false,
+        reason: 'Bank declined',
+      });
+      expect(notification.notify).not.toHaveBeenCalled();
+      expect(notification.dispatch.mock.calls.flat(2)).toEqual([]);
+    });
+
+    it('does not notify when another webhook settled it first', async () => {
+      database.refund.findFirst.mockResolvedValue(refundRow());
+      tx.refund.updateMany.mockResolvedValue({ count: 0 });
+      await service.applyResult({
+        providerRefundId: '3018284',
+        transactionReference: 'PAY-000001',
+        processed: true,
+        reason: null,
+      });
+      expect(notification.notify).not.toHaveBeenCalled();
+    });
+
     it('marks the refund matched by id processed', async () => {
       database.refund.findFirst.mockResolvedValue(refundRow());
       await service.applyResult({
@@ -429,7 +675,7 @@ describe('RefundService', () => {
       expect(database.refund.findFirst).toHaveBeenCalledWith({
         where: { providerRefundId: '3018284' },
       });
-      expect(database.refund.updateMany).toHaveBeenCalledWith({
+      expect(tx.refund.updateMany).toHaveBeenCalledWith({
         where: { id: 'refund-1', status: RefundStatus.PENDING },
         data: { status: RefundStatus.PROCESSED },
       });
@@ -452,7 +698,7 @@ describe('RefundService', () => {
         },
         orderBy: { createdAt: 'asc' },
       });
-      expect(database.refund.updateMany).toHaveBeenCalledWith({
+      expect(tx.refund.updateMany).toHaveBeenCalledWith({
         where: { id: 'refund-1', status: RefundStatus.PENDING },
         data: { status: RefundStatus.FAILED, failureReason: 'Bank declined' },
       });
@@ -468,7 +714,7 @@ describe('RefundService', () => {
         processed: true,
         reason: null,
       });
-      expect(database.refund.updateMany).not.toHaveBeenCalled();
+      expect(tx.refund.updateMany).not.toHaveBeenCalled();
       expect(database.refund.update).not.toHaveBeenCalled();
     });
 
@@ -480,7 +726,7 @@ describe('RefundService', () => {
         processed: true,
         reason: null,
       });
-      expect(database.refund.updateMany).not.toHaveBeenCalled();
+      expect(tx.refund.updateMany).not.toHaveBeenCalled();
     });
   });
 });

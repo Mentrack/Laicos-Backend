@@ -12,38 +12,31 @@ import {
 const loginUrl = 'https://app.laicos.ng/login';
 
 describe('email templates', () => {
-  it('invites a farmer with their temporary password and the login link', () => {
-    const email = farmerInviteEmail({
-      firstName: 'Ada',
-      email: 'ada@example.com',
-      temporaryPassword: 'Tmp-Pass_123',
-      loginUrl,
-    });
+  it('invites a farmer with a link to set their password', () => {
+    const setPasswordUrl = 'https://app.laicos.ng/reset-password?oobCode=abc';
+    const email = farmerInviteEmail({ firstName: 'Ada', setPasswordUrl });
     expect(email.subject).toBe('Your farm is verified – welcome to LAICOS');
     for (const body of [email.html, email.text]) {
       expect(body).toContain('Ada');
-      expect(body).toContain('ada@example.com');
-      expect(body).toContain('Tmp-Pass_123');
-      expect(body).toContain(loginUrl);
-      expect(body).toMatch(/change (it|your password)/i);
+      expect(body).toContain(setPasswordUrl);
+      expect(body).not.toContain('Temporary password');
+      expect(body).toContain('Forgot password');
     }
+    expect(email.html).toContain('Set your password');
   });
 
-  it('invites an admin with their temporary password and the login link', () => {
+  it('invites an admin with a link to set up their account', () => {
+    const acceptUrl = 'https://app.laicos.ng/admin-invite?token=abc';
     const email = adminInviteEmail({
-      firstName: 'Laicos',
-      email: 'admin@laicos.test',
-      temporaryPassword: 'Tmp-Pass_123',
-      loginUrl,
+      acceptUrl,
+      expiresAt: new Date('2026-11-16T12:00:00.000Z'),
     });
-    expect(email.subject).toMatch(/admin/i);
+    expect(email.subject).toBe("You're invited to be a LAICOS admin");
     for (const body of [email.html, email.text]) {
-      expect(body).toContain('Laicos');
-      expect(body).toContain('admin@laicos.test');
-      expect(body).toContain('Tmp-Pass_123');
-      expect(body).toContain(loginUrl);
-      expect(body).toMatch(/change your password/i);
+      expect(body).toContain(acceptUrl);
+      expect(body).not.toContain('Temporary password');
     }
+    expect(email.html).toContain('Set up your account');
   });
 
   it('tells someone who already has a password that they have full access', () => {

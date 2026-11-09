@@ -5,7 +5,7 @@ export class OrderSummaryDto {
   @ApiProperty({
     type: String,
     example: '450000.00',
-    description: 'Value of all FULFILLED orders on your farms',
+    description: 'NGN paid out to you: the sum of your SUCCEEDED payouts',
   })
   totalEarnings: string;
 

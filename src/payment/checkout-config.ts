@@ -12,6 +12,7 @@ import {
 export class CheckoutConfig {
   readonly deliveryFee: Prisma.Decimal;
   readonly serviceFeePercent: Prisma.Decimal;
+  readonly agentCommissionPercent: Prisma.Decimal;
   readonly holdMinutes: number;
   readonly deliveryMinDays: number;
   readonly deliveryMaxDays: number;
@@ -19,6 +20,11 @@ export class CheckoutConfig {
   constructor(config: ConfigService) {
     this.deliveryFee = naira(config, 'DELIVERY_FEE');
     this.serviceFeePercent = percentConfig(config, 'SERVICE_FEE_PERCENT', 100);
+    this.agentCommissionPercent = percentConfig(
+      config,
+      'AGENT_COMMISSION_PERCENT',
+      100,
+    );
     this.holdMinutes = wholeNumberConfig(config, 'CHECKOUT_HOLD_MINUTES', 1);
     this.deliveryMinDays = wholeNumberConfig(config, 'DELIVERY_MIN_DAYS', 0);
     this.deliveryMaxDays = wholeNumberConfig(config, 'DELIVERY_MAX_DAYS', 1);

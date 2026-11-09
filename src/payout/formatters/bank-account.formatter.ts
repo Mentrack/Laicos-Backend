@@ -1,8 +1,8 @@
-import type { FarmerBankAccount } from '../../../generated/client';
+import type { BankAccount } from '../../../generated/client';
 import type { BankAccountDto } from '../dto';
 import { maskAccount } from '../utils/mask-account';
 
-export function formatBankAccount(account: FarmerBankAccount): BankAccountDto {
+export function formatBankAccount(account: BankAccount): BankAccountDto {
   return {
     bankCode: account.bankCode,
     bankName: account.bankName,

@@ -19,7 +19,7 @@ import { BankAccountService } from './bank-account.service';
 import { BankAccountDto, BankDto, SetBankAccountDto } from './dto';
 
 const SET_DESCRIPTION =
-  "Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the farmer. Any change holds the farmer's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.";
+  "Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the account holder. Any change holds the holder's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.";
 
 @Controller()
 @ApiTags('Bank accounts')
@@ -63,10 +63,37 @@ export class BankAccountController {
     return { data, message: 'Bank account saved' };
   }
 
+  @Get('agents/me/bank-account')
+  @ApiOperation({
+    summary: "Get the agent's own payout bank account",
+    description: '404 BANK_ACCOUNT_NOT_FOUND until one is set.',
+  })
+  @VerifiedAgent()
+  @ApiEnvelope(BankAccountDto)
+  async findMineAsAgent(@CurrentUser() user: User) {
+    const data = await this.accounts.findMine(user);
+    return { data, message: 'Bank account retrieved' };
+  }
+
+  @Put('agents/me/bank-account')
+  @ApiOperation({
+    summary: "Set the agent's own payout bank account",
+    description: `Verified agents only. ${SET_DESCRIPTION}`,
+  })
+  @VerifiedAgent()
+  @ApiEnvelope(BankAccountDto)
+  async setMineAsAgent(
+    @CurrentUser() user: User,
+    @Body() dto: SetBankAccountDto,
+  ) {
+    const data = await this.accounts.setMine(user, dto);
+    return { data, message: 'Bank account saved' };
+  }
+
   @Put('agents/me/farmers/:farmerId/bank-account')
   @ApiOperation({
     summary: "Set a cluster farmer's payout bank account",
-    description: `Verified agents only, for farmers with a farm in my cluster (404 FARMER_NOT_FOUND otherwise). ${SET_DESCRIPTION}`,
+    description: `Verified agents only, for farmers with a farm in my cluster (404 FARMER_NOT_FOUND otherwise). Onboarding only: 409 BANK_ACCOUNT_LOCKED once the farmer has an account, after which only the farmer can change it. ${SET_DESCRIPTION}`,
   })
   @VerifiedAgent()
   @ApiEnvelope(BankAccountDto)

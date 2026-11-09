@@ -4,7 +4,6 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { FirebaseService } from '../firebase/firebase.service';
 import {
   assertActivated,
-  passwordChangeRequiredError,
   requireLocalUser,
   verifySessionToken,
 } from '../utils/session';
@@ -91,12 +90,5 @@ describe('session helpers', () => {
         isVerified: true,
       }),
     ).not.toThrow();
-  });
-
-  it('gives the password-change refusal its own code', () => {
-    expect(passwordChangeRequiredError().getResponse()).toEqual({
-      message: 'Change your password to continue',
-      code: 'PASSWORD_CHANGE_REQUIRED',
-    });
   });
 });

@@ -46,83 +46,67 @@ function paragraph(html: string): string {
 }
 
 export function adminInviteEmail(input: {
-  firstName: string;
-  email: string;
-  temporaryPassword: string;
-  loginUrl: string;
+  acceptUrl: string;
+  expiresAt: Date;
 }): RenderedEmail {
-  const title = 'Your LAICOS admin account';
+  const title = 'You’re invited to be a LAICOS admin';
+  const expires = input.expiresAt.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'Africa/Lagos',
+  });
+  const intro =
+    'An admin invited you to help run LAICOS. Set up your account to choose your name and password.';
+  const expiry = `This link expires on ${expires}.`;
   return {
-    subject: 'Your LAICOS admin account',
+    subject: "You're invited to be a LAICOS admin",
     html: layout(
       title,
       [
-        paragraph(`Hi ${escapeHtml(input.firstName)},`),
-        paragraph(
-          'An admin created a LAICOS account for you. Log in with these details:',
-        ),
-        `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 14px;background:#f4f6f5;border-radius:12px;padding:16px;width:100%">
-          <tr><td style="padding:4px 0;color:#6b7570">Email</td><td style="padding:4px 0;font-weight:600">${escapeHtml(input.email)}</td></tr>
-          <tr><td style="padding:4px 0;color:#6b7570">Temporary password</td><td style="padding:4px 0;font-weight:600;font-family:monospace">${escapeHtml(input.temporaryPassword)}</td></tr>
-        </table>`,
-        paragraph(
-          'You’ll be asked to change your password as soon as you log in.',
-        ),
-        button('Log in', input.loginUrl),
+        paragraph(intro),
+        button('Set up your account', input.acceptUrl),
+        paragraph(expiry),
       ].join('\n'),
     ),
     text: [
-      `Hi ${input.firstName},`,
+      intro,
       '',
-      'An admin created a LAICOS account for you. Log in with these details:',
+      `Set up your account: ${input.acceptUrl}`,
       '',
-      `Email: ${input.email}`,
-      `Temporary password: ${input.temporaryPassword}`,
-      '',
-      'You’ll be asked to change your password as soon as you log in.',
-      '',
-      `Log in: ${input.loginUrl}`,
+      expiry,
     ].join('\n'),
   };
 }
 
 export function farmerInviteEmail(input: {
   firstName: string;
-  email: string;
-  temporaryPassword: string;
-  loginUrl: string;
+  setPasswordUrl: string;
 }): RenderedEmail {
   const title = 'Your farm is verified';
+  const intro =
+    'An agent has verified your farm, so your LAICOS account is ready. Set your password to log in.';
+  const expiry =
+    'The link expires in an hour; after that, use Forgot password on the login page.';
   return {
     subject: 'Your farm is verified – welcome to LAICOS',
     html: layout(
       title,
       [
         paragraph(`Hi ${escapeHtml(input.firstName)},`),
-        paragraph(
-          'An agent has verified your farm, so your LAICOS account is ready. Log in with these details:',
-        ),
-        `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 14px;background:#f4f6f5;border-radius:12px;padding:16px;width:100%">
-          <tr><td style="padding:4px 0;color:#6b7570">Email</td><td style="padding:4px 0;font-weight:600">${escapeHtml(input.email)}</td></tr>
-          <tr><td style="padding:4px 0;color:#6b7570">Temporary password</td><td style="padding:4px 0;font-weight:600;font-family:monospace">${escapeHtml(input.temporaryPassword)}</td></tr>
-        </table>`,
-        paragraph(
-          'You’ll be asked to change your password as soon as you log in.',
-        ),
-        button('Log in', input.loginUrl),
+        paragraph(intro),
+        button('Set your password', input.setPasswordUrl),
+        paragraph(expiry),
       ].join('\n'),
     ),
     text: [
       `Hi ${input.firstName},`,
       '',
-      'An agent has verified your farm, so your LAICOS account is ready. Log in with these details:',
+      intro,
       '',
-      `Email: ${input.email}`,
-      `Temporary password: ${input.temporaryPassword}`,
+      `Set your password: ${input.setPasswordUrl}`,
       '',
-      'You’ll be asked to change your password as soon as you log in.',
-      '',
-      `Log in: ${input.loginUrl}`,
+      expiry,
     ].join('\n'),
   };
 }
@@ -322,4 +306,138 @@ export function orderReceivedEmail(input: {
     ),
     text: `Hi ${input.firstName},\n\n${line}\n\nOpen LAICOS to see the details.`,
   };
+}
+
+function simpleEmail(input: {
+  firstName: string;
+  title: string;
+  subject: string;
+  lines: string[];
+  quote?: string;
+}): RenderedEmail {
+  const { firstName, title, subject, lines, quote } = input;
+  return {
+    subject,
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(firstName)},`),
+        ...lines.map((line) => paragraph(escapeHtml(line))),
+        ...(quote
+          ? [
+              `<blockquote style="margin:0 0 14px;padding:12px 16px;border-left:4px solid ${BRAND};background:#f4f6f5;border-radius:8px">${escapeHtml(quote)}</blockquote>`,
+            ]
+          : []),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${firstName},`,
+      '',
+      ...lines.flatMap((line) => [line, '']),
+      ...(quote ? [quote, ''] : []),
+    ]
+      .join('\n')
+      .trimEnd(),
+  };
+}
+
+export function orderShippedLine(
+  produceName: string,
+  orderNumber: string,
+): string {
+  return `Your order ${orderNumber} (${produceName}) is on its way.`;
+}
+
+export function orderShippedEmail(input: {
+  firstName: string;
+  orderNumber: string;
+  produceName: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Your order has shipped',
+    subject: `Order ${input.orderNumber} has shipped`,
+    lines: [
+      orderShippedLine(input.produceName, input.orderNumber),
+      'Once the produce arrives, open LAICOS to confirm delivery, or report a problem if something is wrong.',
+    ],
+  });
+}
+
+export function disputeRaisedLine(orderNumber: string): string {
+  return `A dispute was raised on order ${orderNumber}.`;
+}
+
+export function disputeRaisedEmail(input: {
+  firstName: string;
+  orderNumber: string;
+  reason: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Dispute raised',
+    subject: `Dispute raised on order ${input.orderNumber}`,
+    lines: [disputeRaisedLine(input.orderNumber), 'The reason given:'],
+    quote: input.reason,
+  });
+}
+
+export function disputeResolvedLine(
+  orderNumber: string,
+  refundPercent: string,
+): string {
+  return `The dispute on order ${orderNumber} was resolved with a ${refundPercent}% refund.`;
+}
+
+export function disputeResolvedEmail(input: {
+  firstName: string;
+  orderNumber: string;
+  refundPercent: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Dispute resolved',
+    subject: `Dispute resolved on order ${input.orderNumber}`,
+    lines: [
+      disputeResolvedLine(input.orderNumber, input.refundPercent),
+      'Open LAICOS to see the details.',
+    ],
+  });
+}
+
+export function refundProcessedLine(amount: string, currency: string): string {
+  return `Your refund of ${amount} ${currency} has been processed.`;
+}
+
+export function refundProcessedEmail(input: {
+  firstName: string;
+  amount: string;
+  currency: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Refund processed',
+    subject: `Your refund of ${input.amount} ${input.currency} is on its way`,
+    lines: [
+      refundProcessedLine(input.amount, input.currency),
+      'It can take a few days to reach your account, depending on your bank.',
+    ],
+  });
+}
+
+export function payoutPaidLine(reference: string, amount: string): string {
+  return `Payout ${reference} of NGN ${amount} has been paid to your bank account.`;
+}
+
+export function payoutPaidEmail(input: {
+  firstName: string;
+  reference: string;
+  amount: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Payout paid',
+    subject: `Payout ${input.reference} paid`,
+    lines: [payoutPaidLine(input.reference, input.amount)],
+  });
 }

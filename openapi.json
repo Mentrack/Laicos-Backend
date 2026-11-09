@@ -454,7 +454,7 @@
     },
     "/auth/change-password": {
       "patch": {
-        "description": "Signs the user out of every session; they log in again with the new password. Clears mustChangePassword.",
+        "description": "Signs the user out of every session; they log in again with the new password.",
         "operationId": "AuthController_changePassword",
         "parameters": [],
         "requestBody": {
@@ -492,7 +492,7 @@
     },
     "/auth/logout": {
       "post": {
-        "description": "Revokes every refresh token for the user: all devices are signed out and ID tokens already issued stop working at once. Allowed while a password change is pending.",
+        "description": "Revokes every refresh token for the user: all devices are signed out and ID tokens already issued stop working at once.",
         "operationId": "AuthController_logout",
         "parameters": [],
         "responses": {
@@ -520,7 +520,7 @@
     },
     "/auth/me": {
       "get": {
-        "description": "Read fresh on every call. Allowed while a password change is pending, and while the farmer is suspended, so the client can check mustChangePassword and who is signed in.",
+        "description": "Read fresh on every call. Allowed while the farmer is suspended, so the client can check who is signed in.",
         "operationId": "AuthController_getCurrentUser",
         "parameters": [],
         "responses": {
@@ -3104,7 +3104,7 @@
     },
     "/orders": {
       "post": {
-        "description": "Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee plus the service fee no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.",
+        "description": "Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee, the service fee and the agent commission no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.",
         "operationId": "OrderController_create",
         "parameters": [
           {
@@ -3281,7 +3281,7 @@
     },
     "/orders/summary": {
       "get": {
-        "description": "Farmers only, across their farms; unpaid orders are left out. totalEarnings is the value of FULFILLED orders, not money paid out; activeOrders counts PENDING to SHIPPED.",
+        "description": "Farmers only, across their farms; unpaid orders are left out. totalEarnings is the sum of your SUCCEEDED payouts, the same figure as GET /payouts/summary; activeOrders counts PENDING to SHIPPED.",
         "operationId": "OrderController_summary",
         "parameters": [],
         "responses": {
@@ -3572,6 +3572,43 @@
         ]
       }
     },
+    "/orders/{id}/received": {
+      "patch": {
+        "description": "Buyers only, on their own SHIPPED order (409 ORDER_NOT_SHIPPED otherwise). Sets FULFILLED and starts the dispute window (PAYOUT_HOLD_HOURS, default 24); the order chat stays writable during it. An unconfirmed order stays SHIPPED. A placeholder until logistics confirm delivery.",
+        "operationId": "OrderController_confirmReceived",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm delivery",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
     "/orders/{id}/cancel": {
       "patch": {
         "description": "Farmers can cancel until the order is ready; buyers only before it is confirmed. A reason is required.",
@@ -3714,7 +3751,7 @@
     },
     "/admin/payments/{reference}/refunds": {
       "post": {
-        "description": "The payment must be SUCCEEDED; an ORPHANED payment can only have its balance refunded (to retry a failed automatic refund). With orderId: a CANCELLED order on this payment, refunded its price plus its share of the service fee (delivery is not refunded). Without: the payment's remaining balance, refused while any order on the checkout has a pending or paid payout. Paid back in the payment's currency through Paystack; status becomes PROCESSED when Paystack confirms, or FAILED if Paystack refuses (ask again to retry). An unknown outcome stays PENDING until Paystack reports it. 409 PAYMENT_NOT_REFUNDABLE, ORDER_NOT_REFUNDABLE, ORDER_ALREADY_REFUNDED, NOTHING_TO_REFUND, REFUND_EXCEEDS_BALANCE, ORDERS_PAID_OUT.",
+        "description": "The payment must be SUCCEEDED; an ORPHANED payment can only have its balance refunded (to retry a failed automatic refund). With orderId: a CANCELLED order on this payment, refunded its price, its agent commission and its share of the service fee (delivery is not refunded). Without: the payment's remaining balance, refused while any order on the checkout has a pending or paid payout. Paid back in the payment's currency through Paystack; status becomes PROCESSED when Paystack confirms, or FAILED if Paystack refuses (ask again to retry). An unknown outcome stays PENDING until Paystack reports it. 409 PAYMENT_NOT_REFUNDABLE, ORDER_NOT_REFUNDABLE, ORDER_ALREADY_REFUNDED, NOTHING_TO_REFUND, REFUND_EXCEEDS_BALANCE, ORDERS_PAID_OUT.",
         "operationId": "AdminPaymentController_refund",
         "parameters": [
           {
@@ -3815,7 +3852,7 @@
         ]
       },
       "put": {
-        "description": "Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the farmer. Any change holds the farmer's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
+        "description": "Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the account holder. Any change holds the holder's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
         "operationId": "BankAccountController_setMine",
         "parameters": [],
         "requestBody": {
@@ -3851,9 +3888,73 @@
         ]
       }
     },
+    "/agents/me/bank-account": {
+      "get": {
+        "description": "404 BANK_ACCOUNT_NOT_FOUND until one is set.",
+        "operationId": "BankAccountController_findMineAsAgent",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankAccountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the agent's own payout bank account",
+        "tags": [
+          "Bank accounts"
+        ]
+      },
+      "put": {
+        "description": "Verified agents only. Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the account holder. Any change holds the holder's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
+        "operationId": "BankAccountController_setMineAsAgent",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetBankAccountDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BankAccountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the agent's own payout bank account",
+        "tags": [
+          "Bank accounts"
+        ]
+      }
+    },
     "/agents/me/farmers/{farmerId}/bank-account": {
       "put": {
-        "description": "Verified agents only, for farmers with a farm in my cluster (404 FARMER_NOT_FOUND otherwise). Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the farmer. Any change holds the farmer's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
+        "description": "Verified agents only, for farmers with a farm in my cluster (404 FARMER_NOT_FOUND otherwise). Onboarding only: 409 BANK_ACCOUNT_LOCKED once the farmer has an account, after which only the farmer can change it. Resolves the account with Paystack (422 BANK_ACCOUNT_UNRESOLVED if the bank can't find it) and registers it for payouts. Check accountName in the response is the account holder. Any change holds the holder's payouts for 24h. 400 UNKNOWN_BANK for a code not in GET /banks; 409 PAYMENT_PROVIDER_UNAVAILABLE when Paystack is down.",
         "operationId": "BankAccountController_setForFarmer",
         "parameters": [
           {
@@ -3898,95 +3999,9 @@
         ]
       }
     },
-    "/admin/payouts/eligible": {
-      "get": {
-        "description": "One row per farmer whose FULFILLED, paid orders are past PAYOUT_HOLD_HOURS and not yet paid out, and whose bank account has been unchanged for 24h. Check accountName against the farmer before approving.",
-        "operationId": "AdminPayoutController_findEligible",
-        "parameters": [
-          {
-            "name": "page",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "perPage",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "maximum": 50,
-              "default": 20,
-              "type": "number"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EligiblePayoutListResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List farmers due a payout",
-        "tags": [
-          "Payouts"
-        ]
-      }
-    },
     "/admin/payouts": {
-      "post": {
-        "description": "One NGN transfer per farmer for all their eligible orders, sent in one Paystack bulk transfer from the balance. Payouts start PENDING and settle by webhook (SUCCEEDED, FAILED or REVERSED; the last two free the orders to be paid again). Farmers with nothing eligible are returned in skippedFarmerIds.",
-        "operationId": "AdminPayoutController_approve",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApprovePayoutsDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PayoutBatchResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Pay farmers",
-        "tags": [
-          "Payouts"
-        ]
-      },
       "get": {
-        "description": "Newest first.",
+        "description": "Newest first. Payouts are created automatically every PAYOUT_RUN_MINUTES, one per farmer (produce) or agent (commission), once the buyer has confirmed delivery and the dispute window has passed. FAILED payouts are retried on the next run; REVERSED ones only after the payee changes their bank account.",
         "operationId": "AdminPayoutController_findAll",
         "parameters": [
           {
@@ -4017,6 +4032,14 @@
             "schema": {
               "$ref": "#/components/schemas/PayoutStatus"
             }
+          },
+          {
+            "name": "payeeRole",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/PayeeRole"
+            }
           }
         ],
         "responses": {
@@ -4044,7 +4067,7 @@
     },
     "/payouts": {
       "get": {
-        "description": "Newest first.",
+        "description": "Your SUCCEEDED payouts, newest first.",
         "operationId": "PayoutController_findMine",
         "parameters": [
           {
@@ -4087,6 +4110,34 @@
           }
         ],
         "summary": "List my payouts",
+        "tags": [
+          "Payouts"
+        ]
+      }
+    },
+    "/payouts/summary": {
+      "get": {
+        "description": "The sum of your SUCCEEDED payouts: produce for a farmer, commission for an agent.",
+        "operationId": "PayoutController_summary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayoutSummaryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get my total earnings",
         "tags": [
           "Payouts"
         ]
@@ -4328,7 +4379,7 @@
     },
     "/cart/checkout": {
       "post": {
-        "description": "All or nothing: reserves stock for every item, places the orders AWAITING_PAYMENT under one checkout and empties the cart. Pay with POST /checkouts/{id}/payments before expiresAt or the stock is released. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when items plus delivery and the service fee no longer total expectedTotal. 404 ADDRESS_NOT_FOUND, 400 INVALID_DELIVERY_DATE. Retrying with the same Idempotency-Key returns the original checkout.",
+        "description": "All or nothing: reserves stock for every item, places the orders AWAITING_PAYMENT under one checkout and empties the cart. Pay with POST /checkouts/{id}/payments before expiresAt or the stock is released. 409 CART_NEEDS_ATTENTION lists every item that cannot be ordered (in error.details); 409 CART_PRICE_CHANGED when items plus delivery, the service fee and the agent commission no longer total expectedTotal. 404 ADDRESS_NOT_FOUND, 400 INVALID_DELIVERY_DATE. Retrying with the same Idempotency-Key returns the original checkout.",
         "operationId": "CartController_checkout",
         "parameters": [
           {
@@ -5028,7 +5079,7 @@
     },
     "/admins": {
       "post": {
-        "description": "Creates their account with a temporary password and emails it. They must change that password before any other route. 409 when the email is registered.",
+        "description": "Emails a link, valid for 7 days, where they choose their name and password. 409 when the email is registered or already has a pending invite.",
         "operationId": "AdminController_invite",
         "parameters": [],
         "requestBody": {
@@ -5047,7 +5098,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminProfileResponseDto"
+                  "$ref": "#/components/schemas/AdminInviteResponseDto"
                 }
               }
             }
@@ -5059,6 +5110,137 @@
           }
         ],
         "summary": "Invite an admin",
+        "tags": [
+          "Admins"
+        ]
+      }
+    },
+    "/admins/invites": {
+      "get": {
+        "operationId": "AdminController_findInvites",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "ACCEPTED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInviteListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List admin invites",
+        "tags": [
+          "Admins"
+        ]
+      }
+    },
+    "/admins/invites/accept": {
+      "post": {
+        "description": "Creates the admin account for the invited email and signs it in. 400 INVITE_INVALID when the link is unknown or already used, 400 INVITE_EXPIRED when it has expired, 409 when the email already has an account.",
+        "operationId": "AdminController_accept",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptAdminInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Accept an admin invite",
+        "tags": [
+          "Admins"
+        ]
+      }
+    },
+    "/admins/invites/{id}/resend": {
+      "post": {
+        "description": "Issues a new link and invalidates the old one. 409 when the invite was accepted or the email now has an account.",
+        "operationId": "AdminController_resend",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminInviteResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resend an admin invite",
         "tags": [
           "Admins"
         ]
@@ -5277,7 +5459,7 @@
     },
     "/agents/me/farmers": {
       "post": {
-        "description": "Verified agents only. Creates the farmer without a password: like self-signup, they get access, and a temporary password by invite, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. The response includes verificationId; upload the farmer’s ID and the ownership document through POST /verifications/{verificationId}/documents. Approval needs both. 409 when the email is registered.",
+        "description": "Verified agents only. Creates the farmer without a password: like self-signup, they get access, and an email invite to set a password, when the farm is verified. The farm takes my state and LGA, names me as referral, and its verification round is assigned to me. The response includes verificationId; upload the farmer’s ID and the ownership document through POST /verifications/{verificationId}/documents. Approval needs both. 409 when the email is registered.",
         "operationId": "AgentController_onboardFarmer",
         "parameters": [],
         "requestBody": {
@@ -6180,6 +6362,252 @@
           "Messages"
         ]
       }
+    },
+    "/orders/{id}/disputes": {
+      "post": {
+        "description": "Multipart: `reason`, `quantityAffected` (1 to the order's quantity) and 1–5 `photos` (JPEG, PNG or WebP, 5 MB each). Allowed while the order is SHIPPED, or FULFILLED within the dispute window (PAYOUT_HOLD_HOURS after the buyer confirmed delivery), and before any payout on it. Holds the farmer's and agent's payouts until an admin resolves it. 409 DISPUTE_WINDOW_CLOSED, DISPUTE_EXISTS; 400 INVALID_QUANTITY.",
+        "operationId": "DisputeController_raise",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/RaiseDisputeDto"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "photos"
+                    ],
+                    "properties": {
+                      "photos": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "binary"
+                        },
+                        "minItems": 1,
+                        "maxItems": 5
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Dispute a delivered order",
+        "tags": [
+          "Disputes"
+        ]
+      }
+    },
+    "/orders/{id}/dispute": {
+      "get": {
+        "description": "For the buyer, the farm owner, the handover agent or an admin. Photo URLs are presigned. 404 DISPUTE_NOT_FOUND when there is none or the order is not yours.",
+        "operationId": "DisputeController_findForOrder",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get an order's dispute",
+        "tags": [
+          "Disputes"
+        ]
+      }
+    },
+    "/admin/disputes": {
+      "get": {
+        "description": "Oldest first. Filter by status, e.g. OPEN for the queue.",
+        "operationId": "AdminDisputeController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/DisputeStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List disputes",
+        "tags": [
+          "Disputes"
+        ]
+      }
+    },
+    "/admin/disputes/{id}": {
+      "get": {
+        "operationId": "AdminDisputeController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a dispute",
+        "tags": [
+          "Disputes"
+        ]
+      }
+    },
+    "/admin/disputes/{id}/resolve": {
+      "post": {
+        "description": "refundPercent (0–100, 2 dp) of what the buyer paid for the order goes back to them through Paystack; the farmer and agent are paid the rest by the next payout run once the refund is PROCESSED. 0 means solved without a refund. A SHIPPED order becomes FULFILLED. If the refund FAILS, re-issue it with POST /admin/payments/:reference/refunds and this orderId. 409 DISPUTE_RESOLVED, REFUND_EXCEEDS_BALANCE, PAYMENT_NOT_REFUNDABLE.",
+        "operationId": "AdminDisputeController_resolve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveDisputeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resolve a dispute",
+        "tags": [
+          "Disputes"
+        ]
+      }
     }
   },
   "info": {
@@ -6288,7 +6716,8 @@
           "CHAT",
           "SOURCING",
           "ASSIGNMENT",
-          "MATCHING"
+          "MATCHING",
+          "DISPUTE"
         ]
       },
       "AuditResource": {
@@ -6302,7 +6731,8 @@
           "PAYOUT",
           "CONVERSATION",
           "SOURCING_REQUEST",
-          "CHECKOUT"
+          "CHECKOUT",
+          "DISPUTE"
         ]
       },
       "AuditEventActionDto": {
@@ -6621,10 +7051,6 @@
               }
             ]
           },
-          "mustChangePassword": {
-            "type": "boolean",
-            "description": "On the temporary password from a farmer’s invite. Every route but GET /auth/me, PATCH /auth/change-password and POST /auth/logout answers 403 PASSWORD_CHANGE_REQUIRED until it is changed."
-          },
           "createdAt": {
             "format": "date-time",
             "type": "string"
@@ -6646,7 +7072,6 @@
           "agreedToTerms",
           "isVerified",
           "activatedAt",
-          "mustChangePassword",
           "createdAt",
           "updatedAt"
         ]
@@ -6968,7 +7393,12 @@
       "NotificationType": {
         "type": "string",
         "enum": [
-          "ORDER_RECEIVED"
+          "ORDER_RECEIVED",
+          "ORDER_SHIPPED",
+          "DISPUTE_RAISED",
+          "DISPUTE_RESOLVED",
+          "REFUND_PROCESSED",
+          "PAYOUT_PAID"
         ]
       },
       "NotificationDto": {
@@ -10379,7 +10809,7 @@
             "type": "number",
             "minimum": 0,
             "example": 57500,
-            "description": "The grand total the buyer saw: items plus the delivery fee plus the service fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
+            "description": "The grand total the buyer saw: items plus the delivery fee, the service fee and the agent commission. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
           },
           "addressId": {
             "type": "string",
@@ -10486,6 +10916,17 @@
             "type": "string",
             "example": "17525.00"
           },
+          "agentCommission": {
+            "type": "string",
+            "example": "875.25",
+            "description": "Agent commission the buyer paid on top of totalPrice, snapshotted at checkout"
+          },
+          "fulfilledAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "When the buyer confirmed delivery; null until then"
+          },
           "status": {
             "allOf": [
               {
@@ -10530,6 +10971,8 @@
           "buyerId",
           "quantity",
           "totalPrice",
+          "agentCommission",
+          "fulfilledAt",
           "status",
           "type",
           "cancellationReason",
@@ -10680,10 +11123,15 @@
             "example": "2700.00",
             "description": "SERVICE_FEE_PERCENT of subtotal"
           },
+          "agentCommission": {
+            "type": "string",
+            "example": "2700.00",
+            "description": "AGENT_COMMISSION_PERCENT of each order's price, summed; paid on top by the buyer"
+          },
           "totalPrice": {
             "type": "string",
-            "example": "57500.00",
-            "description": "subtotal + deliveryFee + serviceFee: the amount to pay"
+            "example": "60200.00",
+            "description": "subtotal + deliveryFee + serviceFee + agentCommission: the amount to pay"
           },
           "expiresAt": {
             "format": "date-time",
@@ -10730,6 +11178,7 @@
           "subtotal",
           "deliveryFee",
           "serviceFee",
+          "agentCommission",
           "totalPrice",
           "expiresAt",
           "paidAt",
@@ -10864,7 +11313,7 @@
           "totalEarnings": {
             "type": "string",
             "example": "450000.00",
-            "description": "Value of all FULFILLED orders on your farms"
+            "description": "NGN paid out to you: the sum of your SUCCEEDED payouts"
           },
           "activeOrders": {
             "type": "number",
@@ -11039,7 +11488,7 @@
           "orderId": {
             "type": "string",
             "format": "uuid",
-            "description": "A CANCELLED order on this payment: refunds its price plus its share of the service fee. Omit to refund the payment's remaining balance."
+            "description": "A CANCELLED order on this payment: refunds its price, its agent commission and its share of the service fee. Omit to refund the payment's remaining balance."
           },
           "reason": {
             "type": "string",
@@ -11233,132 +11682,6 @@
           "accountNumber"
         ]
       },
-      "EligibleOrderDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "orderNumber": {
-            "type": "string",
-            "example": "ORD-000123"
-          },
-          "amount": {
-            "type": "string",
-            "example": "4000.00"
-          },
-          "fulfilledAt": {
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "orderNumber",
-          "amount",
-          "fulfilledAt"
-        ]
-      },
-      "EligiblePayoutDto": {
-        "type": "object",
-        "properties": {
-          "farmerId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Farmer.id; send to POST /admin/payouts"
-          },
-          "farmerCode": {
-            "type": "string",
-            "example": "FRM-000123"
-          },
-          "firstName": {
-            "type": "string",
-            "example": "Ada"
-          },
-          "lastName": {
-            "type": "string",
-            "example": "Okafor"
-          },
-          "bankName": {
-            "type": "string",
-            "example": "Guaranty Trust Bank"
-          },
-          "accountNumber": {
-            "type": "string",
-            "example": "******6789"
-          },
-          "accountName": {
-            "type": "string",
-            "example": "ADA OKAFOR",
-            "description": "As the bank holds it; check it matches the farmer"
-          },
-          "total": {
-            "type": "string",
-            "example": "9000.00",
-            "description": "NGN"
-          },
-          "orders": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EligibleOrderDto"
-            }
-          }
-        },
-        "required": [
-          "farmerId",
-          "farmerCode",
-          "firstName",
-          "lastName",
-          "bankName",
-          "accountNumber",
-          "accountName",
-          "total",
-          "orders"
-        ]
-      },
-      "EligiblePayoutListResponseDto": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "example": "OK"
-          },
-          "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EligiblePayoutDto"
-            }
-          },
-          "metaData": {
-            "$ref": "#/components/schemas/PaginationMetaDto"
-          }
-        },
-        "required": [
-          "message",
-          "data",
-          "metaData"
-        ]
-      },
-      "ApprovePayoutsDto": {
-        "type": "object",
-        "properties": {
-          "farmerIds": {
-            "uniqueItems": true,
-            "minItems": 1,
-            "maxItems": 100,
-            "description": "Farmer.id values from GET /admin/payouts/eligible (1-100)",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        },
-        "required": [
-          "farmerIds"
-        ]
-      },
       "PayoutStatus": {
         "type": "string",
         "enum": [
@@ -11366,6 +11689,13 @@
           "SUCCEEDED",
           "FAILED",
           "REVERSED"
+        ]
+      },
+      "PayeeRole": {
+        "type": "string",
+        "enum": [
+          "FARMER",
+          "AGENT"
         ]
       },
       "PayoutItemDto": {
@@ -11396,10 +11726,17 @@
             "type": "string",
             "example": "PO-000123"
           },
-          "farmerId": {
+          "payeeId": {
             "type": "string",
             "format": "uuid",
-            "description": "Farmer.id"
+            "description": "User.id of the farmer or agent paid"
+          },
+          "payeeRole": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PayeeRole"
+              }
+            ]
           },
           "amount": {
             "type": "string",
@@ -11448,7 +11785,8 @@
         "required": [
           "id",
           "reference",
-          "farmerId",
+          "payeeId",
+          "payeeRole",
           "amount",
           "status",
           "bankName",
@@ -11458,45 +11796,6 @@
           "paidAt",
           "createdAt",
           "items"
-        ]
-      },
-      "PayoutBatchDto": {
-        "type": "object",
-        "properties": {
-          "payouts": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PayoutDto"
-            }
-          },
-          "skippedFarmerIds": {
-            "description": "Farmers with nothing eligible (or no bank account) right now",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        },
-        "required": [
-          "payouts",
-          "skippedFarmerIds"
-        ]
-      },
-      "PayoutBatchResponseDto": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "example": "OK"
-          },
-          "data": {
-            "$ref": "#/components/schemas/PayoutBatchDto"
-          }
-        },
-        "required": [
-          "message",
-          "data"
         ]
       },
       "PayoutListResponseDto": {
@@ -11520,6 +11819,35 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "PayoutSummaryDto": {
+        "type": "object",
+        "properties": {
+          "totalEarnings": {
+            "type": "string",
+            "example": "9235.50",
+            "description": "NGN: the sum of your SUCCEEDED payouts"
+          }
+        },
+        "required": [
+          "totalEarnings"
+        ]
+      },
+      "PayoutSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PayoutSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
         ]
       },
       "CartItemIssue": {
@@ -11658,10 +11986,15 @@
             "example": "2250.00",
             "description": "SERVICE_FEE_PERCENT of total"
           },
+          "agentCommission": {
+            "type": "string",
+            "example": "2250.00",
+            "description": "AGENT_COMMISSION_PERCENT of each item line, summed; paid on top by the buyer"
+          },
           "grandTotal": {
             "type": "string",
-            "example": "48500.00",
-            "description": "total + deliveryFee + serviceFee: what checkout will charge"
+            "example": "50750.00",
+            "description": "total + deliveryFee + serviceFee + agentCommission: what checkout will charge"
           },
           "items": {
             "description": "Newest first",
@@ -11676,6 +12009,7 @@
           "total",
           "deliveryFee",
           "serviceFee",
+          "agentCommission",
           "grandTotal",
           "items"
         ]
@@ -11788,10 +12122,15 @@
             "example": "2250.00",
             "description": "SERVICE_FEE_PERCENT of total"
           },
+          "agentCommission": {
+            "type": "string",
+            "example": "2250.00",
+            "description": "AGENT_COMMISSION_PERCENT of each item line, summed; paid on top by the buyer"
+          },
           "grandTotal": {
             "type": "string",
-            "example": "48500.00",
-            "description": "total + deliveryFee + serviceFee: what checkout will charge"
+            "example": "50750.00",
+            "description": "total + deliveryFee + serviceFee + agentCommission: what checkout will charge"
           },
           "items": {
             "description": "In request order",
@@ -11814,6 +12153,7 @@
           "total",
           "deliveryFee",
           "serviceFee",
+          "agentCommission",
           "grandTotal",
           "items",
           "unavailableProduceIds"
@@ -11896,10 +12236,15 @@
             "example": "2250.00",
             "description": "SERVICE_FEE_PERCENT of total"
           },
+          "agentCommission": {
+            "type": "string",
+            "example": "2250.00",
+            "description": "AGENT_COMMISSION_PERCENT of each item line, summed; paid on top by the buyer"
+          },
           "grandTotal": {
             "type": "string",
-            "example": "48500.00",
-            "description": "total + deliveryFee + serviceFee: what checkout will charge"
+            "example": "50750.00",
+            "description": "total + deliveryFee + serviceFee + agentCommission: what checkout will charge"
           },
           "items": {
             "description": "Newest first",
@@ -11921,6 +12266,7 @@
           "total",
           "deliveryFee",
           "serviceFee",
+          "agentCommission",
           "grandTotal",
           "items",
           "skipped"
@@ -11963,7 +12309,7 @@
             "type": "number",
             "minimum": 0,
             "example": 57500,
-            "description": "The grand total the buyer saw: items plus the delivery fee plus the service fee. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
+            "description": "The grand total the buyer saw: items plus the delivery fee, the service fee and the agent commission. If current prices total differently, checkout is refused with CART_PRICE_CHANGED."
           },
           "addressId": {
             "type": "string",
@@ -12614,6 +12960,94 @@
           "email": {
             "type": "string",
             "example": "ngozi@laicos.ng"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "AdminInviteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "example": "ngozi@laicos.ng"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "acceptedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "expiresAt",
+          "acceptedAt",
+          "createdAt"
+        ]
+      },
+      "AdminInviteResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminInviteDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "AdminInviteListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminInviteDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "AcceptAdminInviteDto": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The token from the emailed invite link"
+          },
+          "password": {
+            "type": "string",
+            "example": "Password1!"
           },
           "firstName": {
             "type": "string",
@@ -12630,7 +13064,8 @@
           }
         },
         "required": [
-          "email",
+          "token",
+          "password",
           "firstName",
           "lastName"
         ]
@@ -13847,6 +14282,192 @@
         "required": [
           "body",
           "clientMessageId"
+        ]
+      },
+      "RaiseDisputeDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Half the bags arrived wet"
+          },
+          "quantityAffected": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 2,
+            "description": "Units affected, at most the order's quantity"
+          }
+        },
+        "required": [
+          "reason",
+          "quantityAffected"
+        ]
+      },
+      "DisputeStatus": {
+        "type": "string",
+        "enum": [
+          "OPEN",
+          "RESOLVED"
+        ]
+      },
+      "DisputePhotoDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "Presigned; expires in 15 min"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "createdAt"
+        ]
+      },
+      "DisputeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DisputeStatus"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "quantityAffected": {
+            "type": "integer",
+            "example": 2
+          },
+          "refundPercent": {
+            "type": "string",
+            "nullable": true,
+            "example": "30.00",
+            "description": "Set on resolve; 0.00 means solved without a refund"
+          },
+          "resolutionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "photos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DisputePhotoDto"
+            }
+          },
+          "refunds": {
+            "description": "Oldest first; a re-issue after a failure adds one",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RefundDto"
+            }
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "orderNumber",
+          "status",
+          "reason",
+          "quantityAffected",
+          "refundPercent",
+          "resolutionNote",
+          "resolvedAt",
+          "photos",
+          "refunds",
+          "createdAt"
+        ]
+      },
+      "DisputeResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DisputeDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "DisputeListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DisputeDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "ResolveDisputeDto": {
+        "type": "object",
+        "properties": {
+          "refundPercent": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "example": 30,
+            "description": "Percent of what the buyer paid for the order to refund, up to 2 dp. 0 means solved without a refund; the farmer and agent are paid the rest."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 1000,
+            "example": "Two bags were spoiled; refunding their share"
+          }
+        },
+        "required": [
+          "refundPercent",
+          "note"
         ]
       },
       "ErrorDetailDto": {

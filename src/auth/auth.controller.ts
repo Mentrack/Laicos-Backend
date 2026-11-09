@@ -26,7 +26,6 @@ import {
 } from '../common/upload-pipes';
 import { AuthService } from './auth.service';
 import { AllowPendingApplication } from './decorators/allow-pending-application.decorator';
-import { AllowPendingPasswordChange } from './decorators/allow-pending-password-change.decorator';
 import { AllowSuspendedFarmer } from './decorators/allow-suspended-farmer.decorator';
 import { Auth } from './decorators/auth.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -185,10 +184,9 @@ export class AuthController {
   @ApiOperation({
     summary: 'Change the signed-in user’s password',
     description:
-      'Signs the user out of every session; they log in again with the new password. Clears mustChangePassword.',
+      'Signs the user out of every session; they log in again with the new password.',
   })
   @Auth()
-  @AllowPendingPasswordChange()
   @ApiOkResponse({ type: MessageResponseDto })
   async changePassword(
     @CurrentUser() user: User,
@@ -202,11 +200,10 @@ export class AuthController {
   @ApiOperation({
     summary: 'Log out of every session',
     description:
-      'Revokes every refresh token for the user: all devices are signed out and ID tokens already issued stop working at once. Allowed while a password change is pending.',
+      'Revokes every refresh token for the user: all devices are signed out and ID tokens already issued stop working at once.',
   })
   @HttpCode(HttpStatus.OK)
   @Auth()
-  @AllowPendingPasswordChange()
   @AllowPendingApplication()
   @ApiOkResponse({ type: MessageResponseDto })
   async logout(@CurrentUser() user: User) {
@@ -218,10 +215,9 @@ export class AuthController {
   @ApiOperation({
     summary: 'Get the signed-in user',
     description:
-      'Read fresh on every call. Allowed while a password change is pending, and while the farmer is suspended, so the client can check mustChangePassword and who is signed in.',
+      'Read fresh on every call. Allowed while the farmer is suspended, so the client can check who is signed in.',
   })
   @Auth()
-  @AllowPendingPasswordChange()
   @AllowPendingApplication()
   @AllowSuspendedFarmer()
   @ApiEnvelope(UserDto)

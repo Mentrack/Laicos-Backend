@@ -20,17 +20,22 @@ describe('FarmerInviteService', () => {
 
   function sent() {
     const [[to, email]] = mail.send.mock.calls as [
-      [string, { subject: string; text: string }],
+      [string, { subject: string; html: string; text: string }],
     ];
     return { to, ...email };
   }
 
-  it('emails the temporary password and the login link', async () => {
-    await service.sendInvite(user, 'Tmp-Pass_123');
+  it('emails a set-password link on the webapp', async () => {
+    await service.sendInvite(
+      user,
+      'https://laicos.firebaseapp.com/__/auth/action?oobCode=abc',
+    );
     const email = sent();
     expect(email.to).toBe('ada@example.com');
-    expect(email.text).toContain('Tmp-Pass_123');
-    expect(email.text).toContain('https://app.laicos.ng/login');
+    expect(email.html).toContain(
+      'https://app.laicos.ng/reset-password?oobCode=abc',
+    );
+    expect(email.text).not.toMatch(/temporary password/i);
   });
 
   it('tells someone who already signs in that they have full access', async () => {

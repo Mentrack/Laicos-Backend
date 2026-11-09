@@ -57,6 +57,6 @@ import { RefundService } from './refund.service';
     PaystackEventsService,
     PaystackEventsProcessor,
   ],
-  exports: [CheckoutConfig],
+  exports: [CheckoutConfig, RefundService],
 })
 export class PaymentModule {}

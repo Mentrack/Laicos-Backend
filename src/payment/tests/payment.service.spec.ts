@@ -17,6 +17,7 @@ import type {
 } from '../../paystack/paystack.client';
 import type { PaystackConfig } from '../../paystack/paystack.config';
 import { PaystackError } from '../../paystack/paystack-error';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PaymentService } from '../payment.service';
 import type { RefundService } from '../refund.service';
@@ -81,7 +82,7 @@ describe('PaymentService', () => {
       create: jest.fn(),
       update: jest.fn(),
     },
-    order: { updateMany: jest.fn() },
+    order: { updateMany: jest.fn(), findMany: jest.fn() },
   };
   let transactionOptions: unknown;
   const buyerModel = { findUnique: jest.fn() };
@@ -106,17 +107,21 @@ describe('PaymentService', () => {
   };
   const refunds = { createAutomatic: jest.fn(), submit: jest.fn() };
   const fx = { effectiveRate: jest.fn() };
+  const notification = { notify: jest.fn(), dispatch: jest.fn() };
   const service = new PaymentService(
     database as unknown as PrismaService,
     paystack as unknown as PaystackClient,
     { callbackUrl: 'https://app.laicos.test/cb' } as PaystackConfig,
     fx as unknown as FxService,
     refunds as unknown as RefundService,
+    notification as unknown as NotificationService,
   );
 
   beforeEach(() => {
     jest.resetAllMocks();
     buyerModel.findUnique.mockResolvedValue(buyerProfile('buyer-1'));
+    tx.order.findMany.mockResolvedValue([]);
+    notification.notify.mockResolvedValue([]);
     tx.checkout.findFirst.mockResolvedValue(checkout());
     tx.payment.findUnique.mockResolvedValue(null);
     tx.payment.create.mockImplementation(
@@ -307,6 +312,86 @@ describe('PaymentService', () => {
         id: 'refund-1',
         reason: 'x',
       });
+      tx.order.findMany.mockResolvedValue([
+        {
+          id: 'order-1',
+          orderNumber: 'ORD-000001',
+          produceName: 'Maize',
+          farm: {
+            owner: { userId: 'farmer-user-1' },
+            cluster: { agent: { userId: 'agent-user-1' } },
+          },
+        },
+        {
+          id: 'order-2',
+          orderNumber: 'ORD-000002',
+          produceName: 'Yam',
+          farm: { owner: { userId: 'farmer-user-2' }, cluster: null },
+        },
+      ]);
+      notification.notify.mockImplementation(
+        (input: { type: string; userIds: string[] }) =>
+          Promise.resolve(input.userIds.map((id) => `delivery-${id}`)),
+      );
+    });
+
+    it('notifies each order’s farm owner and cluster agent in the transaction, then dispatches', async () => {
+      const order: string[] = [];
+      notification.notify.mockImplementation((input: { userIds: string[] }) => {
+        order.push('notify');
+        return Promise.resolve(input.userIds.map((id) => `delivery-${id}`));
+      });
+      notification.dispatch.mockImplementation(() => {
+        order.push('dispatch');
+        return Promise.resolve();
+      });
+      await apply();
+      expect(tx.order.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { checkoutId } }),
+      );
+      expect(notification.notify).toHaveBeenCalledTimes(2);
+      expect(notification.notify).toHaveBeenCalledWith(
+        {
+          userIds: ['farmer-user-1', 'agent-user-1'],
+          type: 'ORDER_RECEIVED',
+          params: { orderId: 'order-1', produceName: 'Maize' },
+        },
+        tx,
+      );
+      expect(notification.notify).toHaveBeenCalledWith(
+        {
+          userIds: ['farmer-user-2'],
+          type: 'ORDER_RECEIVED',
+          params: { orderId: 'order-2', produceName: 'Yam' },
+        },
+        tx,
+      );
+      expect(notification.dispatch).toHaveBeenCalledWith([
+        'delivery-farmer-user-1',
+        'delivery-agent-user-1',
+        'delivery-farmer-user-2',
+      ]);
+      expect(order).toEqual(['notify', 'notify', 'dispatch']);
+    });
+
+    it('does not notify for an orphaned payment or a repeat', async () => {
+      tx.payment.findUniqueOrThrow.mockResolvedValue({
+        ...payment(),
+        checkout: checkout({ status: CheckoutStatus.EXPIRED }),
+      });
+      await apply();
+      tx.payment.findUniqueOrThrow.mockResolvedValue({
+        ...payment({ status: PaymentStatus.SUCCEEDED }),
+        checkout: checkout({ status: CheckoutStatus.PAID }),
+      });
+      await apply();
+      expect(notification.notify).not.toHaveBeenCalled();
+      expect(notification.dispatch.mock.calls.flat(2)).toEqual([]);
+    });
+
+    it('does not notify when the charge failed', async () => {
+      await apply({ status: 'failed' });
+      expect(notification.notify).not.toHaveBeenCalled();
     });
 
     it('pays the checkout and releases its orders to the farmers', async () => {

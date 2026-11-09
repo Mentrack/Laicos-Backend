@@ -2,32 +2,30 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { InviteAdminDto } from '../dto';
 
-const body = {
-  email: '  New@Laicos.test ',
-  firstName: 'Ngozi',
-  lastName: 'Adeyemi',
-  phoneNumber: '+2348012345678',
-};
-
 describe('InviteAdminDto', () => {
-  it('lowercases the email and keeps an optional phone', async () => {
-    const dto = plainToInstance(InviteAdminDto, body);
+  it('lowercases the email and needs nothing else', async () => {
+    const dto = plainToInstance(InviteAdminDto, {
+      email: '  New@Laicos.test ',
+    });
     expect(await validate(dto)).toHaveLength(0);
     expect(dto.email).toBe('new@laicos.test');
   });
 
-  it('accepts a missing phone number', async () => {
+  it('refuses a malformed email', async () => {
+    const dto = plainToInstance(InviteAdminDto, { email: 'nope' });
+    const [error] = await validate(dto);
+    expect(error?.property).toBe('email');
+  });
+
+  it('rejects a name field', async () => {
     const dto = plainToInstance(InviteAdminDto, {
       email: 'new@laicos.test',
       firstName: 'Ngozi',
-      lastName: 'Adeyemi',
     });
-    expect(await validate(dto)).toHaveLength(0);
-  });
-
-  it('refuses a blank name', async () => {
-    const dto = plainToInstance(InviteAdminDto, { ...body, firstName: '' });
-    const [error] = await validate(dto);
+    const [error] = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
     expect(error?.property).toBe('firstName');
   });
 });

@@ -20,6 +20,8 @@ function row(overrides: Partial<ConversationRow> = {}): ConversationRow {
     order: {
       orderNumber: 'ORD-000123',
       status: OrderStatus.PENDING,
+      fulfilledAt: null,
+      dispute: null,
       produceName: 'Cassava',
       quantity: 5,
       type: ProduceType.LOCAL,
@@ -47,7 +49,7 @@ function row(overrides: Partial<ConversationRow> = {}): ConversationRow {
 
 describe('formatConversation', () => {
   it('shows the agent to the buyer', () => {
-    expect(formatConversation(row(), 'buyer-1', 2)).toMatchObject({
+    expect(formatConversation(row(), 'buyer-1', 2, 24)).toMatchObject({
       orderNumber: 'ORD-000123',
       unit: 'tonnes',
       isClosed: false,
@@ -59,15 +61,17 @@ describe('formatConversation', () => {
 
   it('shows the buyer to the agent', () => {
     expect(
-      formatConversation(row(), 'agent-user-1', 0).counterpart.userId,
+      formatConversation(row(), 'agent-user-1', 0, 24).counterpart.userId,
     ).toBe('buyer-user-1');
   });
 
   it.each([OrderStatus.FULFILLED, OrderStatus.CANCELLED])(
     'marks a %s order closed',
     (status) => {
-      const closed = row({ order: { ...row().order, status } });
-      expect(formatConversation(closed, 'buyer-1', 0).isClosed).toBe(true);
+      const closed = row({
+        order: { ...row().order, status, fulfilledAt: new Date('2020-01-01') },
+      });
+      expect(formatConversation(closed, 'buyer-1', 0, 24).isClosed).toBe(true);
     },
   );
 
@@ -81,7 +85,7 @@ describe('formatConversation', () => {
       createdAt: created,
     };
     expect(
-      formatConversation(row({ messages: [message] }), 'buyer-1', 0)
+      formatConversation(row({ messages: [message] }), 'buyer-1', 0, 24)
         .lastMessage,
     ).toEqual(message);
   });

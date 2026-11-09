@@ -12,7 +12,7 @@ export class CreateRefundDto {
   @ApiPropertyOptional({
     format: 'uuid',
     description:
-      "A CANCELLED order on this payment: refunds its price plus its share of the service fee. Omit to refund the payment's remaining balance.",
+      "A CANCELLED order on this payment: refunds its price, its agent commission and its share of the service fee. Omit to refund the payment's remaining balance.",
   })
   @IsOptional()
   @IsUUID()

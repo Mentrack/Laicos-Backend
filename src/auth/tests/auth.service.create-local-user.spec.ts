@@ -38,13 +38,11 @@ describe('AuthService.createLocalUser', () => {
     await service.createLocalUser({
       ...input,
       role: Role.ADMIN,
-      mustChangePassword: true,
     });
 
     expect(user.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         role: Role.ADMIN,
-        mustChangePassword: true,
         admin: { create: {} },
         farmer: undefined,
         agent: undefined,

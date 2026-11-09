@@ -13,10 +13,12 @@ import {
   type Order,
   type User,
 } from '../generated/client';
+import { AuditService } from '../src/audit/audit.service';
 import { FirebaseService } from '../src/auth/firebase/firebase.service';
 import { ChatGateway } from '../src/conversation/chat.gateway';
 import { ConversationService } from '../src/conversation/conversation.service';
 import type { MessageDto } from '../src/conversation/dto';
+import { PayoutConfig } from '../src/payout/payout.config';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Runs against the docker compose Postgres and Redis; test/e2e-guard.ts
@@ -39,6 +41,8 @@ async function startInstance() {
     imports: [ConfigModule.forRoot({ isGlobal: true })],
     providers: [
       PrismaService,
+      AuditService,
+      PayoutConfig,
       ConversationService,
       ChatGateway,
       { provide: FirebaseService, useValue: firebase },
@@ -82,6 +86,8 @@ describe('Conversations (real Postgres + Redis)', () => {
   const userIds: string[] = [];
   const orderIds: string[] = [];
   let buyer: User;
+  // Orders and conversations key on the Buyer profile, not the user.
+  let buyerId: string;
   let agentUser: User;
   let stateId: string;
   let lgaId: string;
@@ -112,9 +118,10 @@ describe('Conversations (real Postgres + Redis)', () => {
       data: {
         produceId,
         farmId,
-        buyerId: buyer.id,
+        buyerId,
         quantity: 5,
         totalPrice: '500.00',
+        agentCommission: '0.00',
         status,
         produceName: 'Cassava',
         type: ProduceType.LOCAL,
@@ -140,6 +147,7 @@ describe('Conversations (real Postgres + Redis)', () => {
     stateId = state.id;
     lgaId = lga.id;
     buyer = await user(Role.BUYER);
+    ({ id: buyerId } = await db.buyer.create({ data: { userId: buyer.id } }));
     agentUser = await user(Role.EXTENSION_AGENT, { activatedAt: new Date() });
     const agent = await db.agent.create({
       data: { userId: agentUser.id, isVerified: true, cluster: { create: {} } },

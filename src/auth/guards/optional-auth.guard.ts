@@ -6,7 +6,6 @@ import { FirebaseService } from '../firebase/firebase.service';
 import { ActivationGuard } from './activation.guard';
 import { FarmerStandingGuard } from './farmer-standing.guard';
 import { FirebaseAuthGuard } from './firebase-auth.guard';
-import { PasswordChangeGuard } from './password-change.guard';
 import { RequireLocalUserGuard } from './require-local-user.guard';
 
 interface SyncOrAsyncGuard {
@@ -32,7 +31,6 @@ export class OptionalAuthGuard implements CanActivate {
       new RequireLocalUserGuard(database),
       new ActivationGuard(database, reflector),
       new FarmerStandingGuard(database, reflector),
-      new PasswordChangeGuard(reflector),
     ];
   }
 

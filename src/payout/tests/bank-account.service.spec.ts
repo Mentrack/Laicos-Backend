@@ -1,5 +1,5 @@
 import { HttpException } from '@nestjs/common';
-import { Role, type Agent, type User } from '../../../generated/client';
+import { Prisma, Role, type Agent, type User } from '../../../generated/client';
 import type { PaystackClient } from '../../paystack/paystack.client';
 import { PaystackError } from '../../paystack/paystack-error';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -20,7 +20,11 @@ async function errorBody(promise: Promise<unknown>) {
 describe('BankAccountService', () => {
   const database = {
     farmer: { findUnique: jest.fn(), findFirst: jest.fn() },
-    farmerBankAccount: { findUnique: jest.fn(), upsert: jest.fn() },
+    bankAccount: {
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      create: jest.fn(),
+    },
   };
   const paystack = {
     listBanks: jest.fn(),
@@ -36,16 +40,27 @@ describe('BankAccountService', () => {
       database as unknown as PrismaService,
       paystack as unknown as PaystackClient,
     );
-    database.farmer.findUnique.mockResolvedValue({ id: 'farmer-1' });
-    database.farmer.findFirst.mockResolvedValue({ id: 'farmer-1' });
+    database.farmer.findUnique.mockResolvedValue({
+      id: 'farmer-1',
+      userId: 'farmer-user-1',
+    });
+    database.farmer.findFirst.mockResolvedValue({
+      id: 'farmer-1',
+      userId: 'farmer-user-1',
+    });
     paystack.listBanks.mockResolvedValue([{ name: 'GTBank', code: '058' }]);
     paystack.resolveAccount.mockResolvedValue({ accountName: 'ADA OKAFOR' });
     paystack.createTransferRecipient.mockResolvedValue({
       recipientCode: 'RCP_abc',
     });
-    database.farmerBankAccount.upsert.mockImplementation(
+    database.bankAccount.upsert.mockImplementation(
       ({ create }: { create: Record<string, unknown> }) =>
         Promise.resolve({ ...create, updatedAt: new Date() }),
+    );
+    database.bankAccount.findUnique.mockResolvedValue(null);
+    database.bankAccount.create.mockImplementation(
+      ({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ ...data, updatedAt: new Date() }),
     );
   });
 
@@ -75,7 +90,7 @@ describe('BankAccountService', () => {
       accountNumber: '0123456789',
       bankCode: '058',
     });
-    const [{ where, create, update }] = database.farmerBankAccount.upsert.mock
+    const [{ where, create, update }] = database.bankAccount.upsert.mock
       .calls[0] as [
       {
         where: unknown;
@@ -83,7 +98,7 @@ describe('BankAccountService', () => {
         update: unknown;
       },
     ];
-    expect(where).toEqual({ farmerId: 'farmer-1' });
+    expect(where).toEqual({ userId: farmerUser.id });
     expect(create.setById).toBe(farmerUser.id);
     expect(create.payoutsHeldUntil.getTime()).toBeGreaterThanOrEqual(
       before + DAY,
@@ -98,6 +113,7 @@ describe('BankAccountService', () => {
 
   it('lets an agent set the account of a farmer in their cluster', async () => {
     await service.setForFarmer(agent, agentUser, 'farmer-1', dto);
+    expect(database.bankAccount.create).toHaveBeenCalledTimes(1);
     expect(database.farmer.findFirst).toHaveBeenCalledWith({
       where: {
         id: 'farmer-1',
@@ -127,7 +143,7 @@ describe('BankAccountService', () => {
     await expect(
       errorBody(service.setMine(farmerUser, dto)),
     ).resolves.toMatchObject({ code: 'BANK_ACCOUNT_UNRESOLVED' });
-    expect(database.farmerBankAccount.upsert).not.toHaveBeenCalled();
+    expect(database.bankAccount.upsert).not.toHaveBeenCalled();
   });
 
   it('answers 409 when Paystack is down while resolving', async () => {
@@ -156,9 +172,62 @@ describe('BankAccountService', () => {
   });
 
   it('404s a farmer with no account yet', async () => {
-    database.farmerBankAccount.findUnique.mockResolvedValue(null);
+    database.bankAccount.findUnique.mockResolvedValue(null);
     await expect(
       errorBody(service.findMine(farmerUser)),
     ).resolves.toMatchObject({ code: 'BANK_ACCOUNT_NOT_FOUND' });
+  });
+
+  it('creates the account an agent sets for a farmer, held for 24h', async () => {
+    const before = Date.now();
+    await service.setForFarmer(agent, agentUser, 'farmer-1', dto);
+    const [{ data }] = database.bankAccount.create.mock.calls[0] as [
+      { data: { userId: string; setById: string; payoutsHeldUntil: Date } },
+    ];
+    expect(data.userId).toBe('farmer-user-1');
+    expect(data.setById).toBe(agentUser.id);
+    expect(data.payoutsHeldUntil.getTime()).toBeGreaterThanOrEqual(
+      before + DAY,
+    );
+    expect(database.bankAccount.upsert).not.toHaveBeenCalled();
+  });
+
+  it('locks a farmer account that already exists against the agent', async () => {
+    database.bankAccount.findUnique.mockResolvedValue({ id: 'acct-1' });
+    await expect(
+      errorBody(service.setForFarmer(agent, agentUser, 'farmer-1', dto)),
+    ).resolves.toMatchObject({ code: 'BANK_ACCOUNT_LOCKED' });
+    expect(paystack.resolveAccount).not.toHaveBeenCalled();
+    expect(database.bankAccount.create).not.toHaveBeenCalled();
+  });
+
+  it('maps losing a concurrent create to BANK_ACCOUNT_LOCKED', async () => {
+    database.bankAccount.create.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('unique', {
+        code: 'P2002',
+        clientVersion: 'test',
+      }),
+    );
+    await expect(
+      errorBody(service.setForFarmer(agent, agentUser, 'farmer-1', dto)),
+    ).resolves.toMatchObject({ code: 'BANK_ACCOUNT_LOCKED' });
+  });
+
+  it("upserts an agent's own account on their user id", async () => {
+    await service.setMine(agentUser, dto);
+    const [{ where, create }] = database.bankAccount.upsert.mock.calls[0] as [
+      { where: unknown; create: { userId: string } },
+    ];
+    expect(where).toEqual({ userId: agentUser.id });
+    expect(create.userId).toBe(agentUser.id);
+  });
+
+  it('404s an agent with no account yet', async () => {
+    await expect(errorBody(service.findMine(agentUser))).resolves.toMatchObject(
+      { code: 'BANK_ACCOUNT_NOT_FOUND' },
+    );
+    expect(database.bankAccount.findUnique).toHaveBeenCalledWith({
+      where: { userId: agentUser.id },
+    });
   });
 });

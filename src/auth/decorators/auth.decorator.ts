@@ -5,7 +5,6 @@ import { ActivationGuard } from '../guards/activation.guard';
 import { FarmerStandingGuard } from '../guards/farmer-standing.guard';
 import { FirebaseAuthGuard } from '../guards/firebase-auth.guard';
 import { OptionalAuthGuard } from '../guards/optional-auth.guard';
-import { PasswordChangeGuard } from '../guards/password-change.guard';
 import { RequireLocalUserGuard } from '../guards/require-local-user.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from './roles.decorator';
@@ -19,7 +18,6 @@ export const Auth = (...roles: Role[]) =>
       RequireLocalUserGuard,
       ActivationGuard,
       FarmerStandingGuard,
-      PasswordChangeGuard,
       RolesGuard,
     ),
     Roles(roles),

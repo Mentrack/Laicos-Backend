@@ -17,10 +17,7 @@ import {
 } from '../../generated/client';
 import { AuditService } from '../audit/audit.service';
 import { CreateCheckoutDto } from '../cart/dto';
-import {
-  CHECKOUT_INCLUDE,
-  formatCheckout,
-} from '../cart/formatters/checkout.formatter';
+import { formatCheckout } from '../cart/formatters/checkout.formatter';
 import {
   createCheckout,
   findReplay,

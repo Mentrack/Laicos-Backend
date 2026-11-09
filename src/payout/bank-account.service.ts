@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Agent, User } from '../../generated/client';
-import { requireFarmer } from '../farm/utils/require-farmer';
+import { isUniqueViolation } from '../common/prisma-errors';
 import { PaystackClient, type Bank } from '../paystack/paystack.client';
 import {
   isDefiniteRejection,
@@ -40,9 +41,8 @@ export class BankAccountService {
   }
 
   async findMine(user: User): Promise<BankAccountDto> {
-    const farmer = await requireFarmer(this.database, user);
-    const account = await this.database.farmerBankAccount.findUnique({
-      where: { farmerId: farmer.id },
+    const account = await this.database.bankAccount.findUnique({
+      where: { userId: user.id },
     });
     if (!account) {
       throw new NotFoundException({
@@ -54,8 +54,7 @@ export class BankAccountService {
   }
 
   async setMine(user: User, dto: SetBankAccountDto): Promise<BankAccountDto> {
-    const farmer = await requireFarmer(this.database, user);
-    return this.set(farmer.id, user, dto);
+    return this.set(user.id, user, dto, 'upsert');
   }
 
   async setForFarmer(
@@ -77,10 +76,31 @@ export class BankAccountService {
         code: 'FARMER_NOT_FOUND',
       });
     }
-    return this.set(farmer.id, user, dto);
+    // Payouts are automatic, so there is no admin approval step. This rule is
+    // what stops an agent redirecting a farmer's money: an agent may only set
+    // the account during onboarding, and only the farmer changes it after.
+    const existing = await this.database.bankAccount.findUnique({
+      where: { userId: farmer.userId },
+    });
+    if (existing) {
+      throw this.locked();
+    }
+    return this.set(farmer.userId, user, dto, 'create');
   }
 
-  private async set(farmerId: string, setBy: User, dto: SetBankAccountDto) {
+  private locked() {
+    return new ConflictException({
+      message: "This farmer's bank account can only be changed by the farmer",
+      code: 'BANK_ACCOUNT_LOCKED',
+    });
+  }
+
+  private async set(
+    userId: string,
+    setBy: User,
+    dto: SetBankAccountDto,
+    mode: 'upsert' | 'create',
+  ) {
     const bank = (await this.listBanks()).find(
       ({ code }) => code === dto.bankCode,
     );
@@ -107,12 +127,23 @@ export class BankAccountService {
       setById: setBy.id,
       payoutsHeldUntil: new Date(Date.now() + CHANGE_HOLD_MS),
     };
-    const account = await this.database.farmerBankAccount.upsert({
-      where: { farmerId },
-      create: { farmerId, ...data },
-      update: data,
-    });
-    return formatBankAccount(account);
+    if (mode === 'upsert') {
+      const account = await this.database.bankAccount.upsert({
+        where: { userId },
+        create: { userId, ...data },
+        update: data,
+      });
+      return formatBankAccount(account);
+    }
+    try {
+      const account = await this.database.bankAccount.create({
+        data: { userId, ...data },
+      });
+      return formatBankAccount(account);
+    } catch (error) {
+      // Lost a race with the farmer or another agent request.
+      throw isUniqueViolation(error) ? this.locked() : error;
+    }
   }
 
   private async resolve(dto: SetBankAccountDto): Promise<string> {

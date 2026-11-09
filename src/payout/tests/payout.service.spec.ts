@@ -1,8 +1,8 @@
-import { ConfigService } from '@nestjs/config';
 import {
   AuditActorType,
   AuditCategory,
   AuditResource,
+  PayeeRole,
   PayoutStatus,
   Prisma,
   Role,
@@ -11,14 +11,14 @@ import {
 import { AuditService } from '../../audit/audit.service';
 import type { PaystackClient } from '../../paystack/paystack.client';
 import { PaystackError } from '../../paystack/paystack-error';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { PayoutConfig } from '../payout.config';
 import { PayoutService } from '../payout.service';
 
-const admin = { id: 'admin-1', role: Role.ADMIN } as User;
+const agentUser = { id: 'user-g', role: Role.EXTENSION_AGENT } as User;
 const d = (value: string) => new Prisma.Decimal(value);
 const FARMER_A = '00000000-0000-4000-8000-00000000000a';
-const FARMER_B = '00000000-0000-4000-8000-00000000000b';
+const userOf = (farmerId: string) => `user-${farmerId.slice(-1)}`;
 
 function account(overrides: Record<string, unknown> = {}) {
   return {
@@ -34,13 +34,17 @@ function payoutRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'payout-a',
     reference: 'PO-000001',
-    farmerId: FARMER_A,
+    payeeId: userOf(FARMER_A),
+    payeeRole: PayeeRole.FARMER,
+    payee: { farmer: { id: FARMER_A }, agent: null },
     amount: d('9000'),
     status: PayoutStatus.PENDING,
     transferCode: null,
     failureReason: null,
     paidAt: null,
+    approvedById: null,
     createdAt: new Date(),
+    updatedAt: new Date(),
     items: [],
     ...account(),
     ...overrides,
@@ -50,23 +54,28 @@ function payoutRow(overrides: Record<string, unknown> = {}) {
 describe('PayoutService', () => {
   const tx = {
     $executeRaw: jest.fn(),
-    farmer: { findUnique: jest.fn() },
-    order: { findMany: jest.fn() },
-    payout: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    payout: { findUnique: jest.fn(), update: jest.fn() },
     payoutItem: { updateMany: jest.fn() },
   };
   const database = {
-    payout: { update: jest.fn(), updateMany: jest.fn(), findMany: jest.fn() },
+    payout: {
+      update: jest.fn(),
+      updateMany: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+      aggregate: jest.fn(),
+    },
     payoutItem: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   };
   const paystack = { bulkTransfer: jest.fn() };
   const audit = { record: jest.fn() };
+  const notification = { notify: jest.fn(), dispatch: jest.fn() };
   const service = new PayoutService(
     database as unknown as PrismaService,
     paystack as unknown as PaystackClient,
-    new PayoutConfig(new ConfigService({})),
     audit as unknown as AuditService,
+    notification as unknown as NotificationService,
   );
 
   beforeEach(() => {
@@ -75,23 +84,6 @@ describe('PayoutService', () => {
       typeof work === 'function'
         ? (work as (client: typeof tx) => Promise<unknown>)(tx)
         : Promise.all(work as Promise<unknown>[]),
-    );
-    tx.farmer.findUnique.mockImplementation(
-      ({ where }: { where: { id: string } }) =>
-        Promise.resolve({ id: where.id, bankAccount: account() }),
-    );
-    tx.order.findMany.mockResolvedValue([
-      { id: 'order-1', totalPrice: d('4000') },
-      { id: 'order-2', totalPrice: d('5000') },
-    ]);
-    tx.payout.create.mockImplementation(
-      ({ data }: { data: { farmerId: string } }) =>
-        Promise.resolve(
-          payoutRow({
-            id: `payout-${data.farmerId.slice(-1)}`,
-            farmerId: data.farmerId,
-          }),
-        ),
     );
     database.payout.update.mockImplementation(
       ({
@@ -107,31 +99,18 @@ describe('PayoutService', () => {
     ]);
   });
 
-  describe('approve', () => {
-    it('creates one payout per farmer for all their eligible orders, then transfers', async () => {
-      const result = await service.approve(admin, { farmerIds: [FARMER_A] });
-      expect(tx.$executeRaw).toHaveBeenCalledWith(
-        expect.anything(),
-        `payout:farmer:${FARMER_A}`,
-      );
-      expect(tx.payout.create).toHaveBeenCalledWith({
-        data: {
-          farmerId: FARMER_A,
-          amount: d('9000'),
-          bankName: 'GTBank',
-          accountNumber: '0123456789',
-          accountName: 'ADA OKAFOR',
-          recipientCode: 'RCP_a',
-          approvedById: admin.id,
-          items: {
-            create: [
-              { orderId: 'order-1', amount: d('4000') },
-              { orderId: 'order-2', amount: d('5000') },
-            ],
-          },
-        },
-        include: { items: true },
-      });
+  describe('send', () => {
+    const pending = [
+      payoutRow(),
+      payoutRow({
+        id: 'payout-b',
+        reference: 'PO-000002',
+        recipientCode: 'RCP_b',
+      }),
+    ];
+
+    it('transfers in one bulk call and stores the transfer codes', async () => {
+      const sent = await service.send([pending[0]]);
       expect(paystack.bulkTransfer).toHaveBeenCalledWith([
         {
           amount: 900_000,
@@ -145,33 +124,11 @@ describe('PayoutService', () => {
         data: { transferCode: 'TRF_a' },
         include: { items: true },
       });
-      expect(result.skippedFarmerIds).toEqual([]);
-      expect(result.payouts[0]).toMatchObject({
-        reference: 'PO-000001',
-        amount: '9000.00',
-        accountNumber: '******6789',
-      });
-    });
-
-    it('skips farmers with nothing eligible or no account', async () => {
-      tx.farmer.findUnique.mockImplementation(
-        ({ where }: { where: { id: string } }) =>
-          Promise.resolve(
-            where.id === FARMER_B ? { id: FARMER_B, bankAccount: null } : null,
-          ),
-      );
-      const result = await service.approve(admin, {
-        farmerIds: [FARMER_B, FARMER_A],
-      });
-      expect(result.skippedFarmerIds).toEqual([FARMER_A, FARMER_B]);
-      expect(paystack.bulkTransfer).not.toHaveBeenCalled();
+      expect(sent[0]).toMatchObject({ transferCode: 'TRF_a' });
     });
 
     it('leaves payouts Paystack did not acknowledge pending without a code', async () => {
-      paystack.bulkTransfer.mockResolvedValue([
-        { reference: 'payout-a', transferCode: 'TRF_a' },
-      ]);
-      await service.approve(admin, { farmerIds: [FARMER_A, FARMER_B] });
+      await service.send(pending);
       expect(database.payout.update).toHaveBeenCalledWith({
         where: { id: 'payout-b' },
         data: { transferCode: null },
@@ -186,7 +143,7 @@ describe('PayoutService', () => {
       database.payout.findMany.mockResolvedValue([
         payoutRow({ status: PayoutStatus.FAILED }),
       ]);
-      const result = await service.approve(admin, { farmerIds: [FARMER_A] });
+      const sent = await service.send([pending[0]]);
       expect(database.payout.updateMany).toHaveBeenCalledWith({
         where: { id: { in: ['payout-a'] }, status: PayoutStatus.PENDING },
         data: {
@@ -198,30 +155,132 @@ describe('PayoutService', () => {
         where: { payoutId: { in: ['payout-a'] }, status: PayoutStatus.PENDING },
         data: { status: PayoutStatus.FAILED },
       });
-      expect(result.payouts[0].status).toBe(PayoutStatus.FAILED);
+      expect(sent[0].status).toBe(PayoutStatus.FAILED);
+    });
+
+    describe.each([
+      ['Paystack unreachable', null],
+      ['Request timeout', 408],
+      ['Server error', 502],
+    ] as const)(
+      'when the bulk outcome is unknown (%s)',
+      (message, httpStatus) => {
+        it('leaves the payouts pending so a retry cannot pay twice', async () => {
+          paystack.bulkTransfer.mockRejectedValue(
+            new PaystackError(message, httpStatus),
+          );
+          const sent = await service.send([pending[0]]);
+          expect(database.payout.updateMany).not.toHaveBeenCalled();
+          expect(database.payoutItem.updateMany).not.toHaveBeenCalled();
+          expect(sent[0].status).toBe(PayoutStatus.PENDING);
+        });
+      },
+    );
+  });
+
+  describe('findMine', () => {
+    it("lists only the caller's SUCCEEDED payouts, farmer or agent", async () => {
+      database.payout.findMany.mockResolvedValue([]);
+      database.payout.count.mockResolvedValue(0);
+      await service.findMine(agentUser, {});
+      const where = {
+        payeeId: agentUser.id,
+        status: PayoutStatus.SUCCEEDED,
+      };
+      expect(database.payout.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where }),
+      );
+      expect(database.payout.count).toHaveBeenCalledWith({ where });
     });
   });
 
-  describe.each([
-    ['Paystack unreachable', null],
-    ['Request timeout', 408],
-    ['Server error', 502],
-  ] as const)(
-    'when the bulk outcome is unknown (%s)',
-    (message, httpStatus) => {
-      it('leaves the payouts pending so a retry cannot pay twice', async () => {
-        paystack.bulkTransfer.mockRejectedValue(
-          new PaystackError(message, httpStatus),
-        );
-        const result = await service.approve(admin, { farmerIds: [FARMER_A] });
-        expect(database.payout.updateMany).not.toHaveBeenCalled();
-        expect(database.payoutItem.updateMany).not.toHaveBeenCalled();
-        expect(result.payouts[0].status).toBe(PayoutStatus.PENDING);
+  describe('findAll', () => {
+    it('filters by status and payee role', async () => {
+      database.payout.findMany.mockResolvedValue([]);
+      database.payout.count.mockResolvedValue(0);
+      await service.findAll({
+        status: PayoutStatus.FAILED,
+        payeeRole: PayeeRole.AGENT,
       });
-    },
-  );
+      expect(database.payout.count).toHaveBeenCalledWith({
+        where: { status: PayoutStatus.FAILED, payeeRole: PayeeRole.AGENT },
+      });
+    });
+  });
+
+  describe('summary', () => {
+    it("sums the caller's SUCCEEDED payouts", async () => {
+      database.payout.aggregate.mockResolvedValue({
+        _sum: { amount: d('9235.50') },
+      });
+      await expect(service.summary(agentUser)).resolves.toEqual({
+        totalEarnings: '9235.50',
+      });
+      expect(database.payout.aggregate).toHaveBeenCalledWith({
+        where: { payeeId: agentUser.id, status: PayoutStatus.SUCCEEDED },
+        _sum: { amount: true },
+      });
+    });
+
+    it('reports zero before anything is paid', async () => {
+      database.payout.aggregate.mockResolvedValue({ _sum: { amount: null } });
+      await expect(service.summary(agentUser)).resolves.toEqual({
+        totalEarnings: '0.00',
+      });
+    });
+  });
 
   describe('applyTransferResult', () => {
+    beforeEach(() => {
+      notification.notify.mockResolvedValue(['delivery-1']);
+    });
+
+    it('tells the payee a success landed, dispatching after commit', async () => {
+      tx.payout.findUnique.mockResolvedValue(payoutRow());
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'success',
+        reason: null,
+      });
+      expect(notification.notify).toHaveBeenCalledWith(
+        {
+          userIds: [userOf(FARMER_A)],
+          type: 'PAYOUT_PAID',
+          params: {
+            payoutId: 'payout-a',
+            reference: 'PO-000001',
+            amount: '9000.00',
+          },
+        },
+        tx,
+      );
+      expect(notification.dispatch).toHaveBeenCalledWith(['delivery-1']);
+    });
+
+    it('does not notify on a repeated success, failure or reversal', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({ status: PayoutStatus.SUCCEEDED }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'success',
+        reason: null,
+      });
+      tx.payout.findUnique.mockResolvedValue(payoutRow());
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'failed',
+        reason: 'x',
+      });
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'reversed',
+        reason: 'x',
+      });
+      expect(notification.notify).not.toHaveBeenCalled();
+      expect(notification.dispatch.mock.calls.flat(2)).toEqual([]);
+    });
+
     it.each([
       ['success', PayoutStatus.SUCCEEDED],
       ['failed', PayoutStatus.FAILED],
@@ -292,7 +351,7 @@ describe('PayoutService', () => {
           amount: d('1200.00'),
           bankName: 'GTBank',
           reference: 'PO-000001',
-          farmerId: FARMER_A,
+          payee: { farmer: { id: FARMER_A }, agent: null },
         }),
       );
       await service.applyTransferResult({
@@ -312,6 +371,48 @@ describe('PayoutService', () => {
         resource: AuditResource.PAYOUT,
         resourceId: 'payout-a',
       });
+    });
+
+    it('records an agent payee as the extension agent', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({
+          payeeId: agentUser.id,
+          payeeRole: PayeeRole.AGENT,
+          payee: { farmer: null, agent: { id: 'agent-1' } },
+        }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'success',
+        reason: null,
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          actorType: AuditActorType.EXTENSION_AGENT,
+          farmerId: null,
+          agentId: 'agent-1',
+        }),
+      );
+    });
+
+    it('records a payee whose profile is gone as the system', async () => {
+      tx.payout.findUnique.mockResolvedValue(
+        payoutRow({ payee: { farmer: null, agent: null } }),
+      );
+      await service.applyTransferResult({
+        reference: 'payout-a',
+        outcome: 'reversed',
+        reason: null,
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          actorType: AuditActorType.SYSTEM,
+          farmerId: null,
+          agentId: null,
+        }),
+      );
     });
 
     it('a second success writes nothing', async () => {
@@ -344,7 +445,7 @@ describe('PayoutService', () => {
         payoutRow({
           status: PayoutStatus.SUCCEEDED,
           reference: 'PO-000001',
-          farmerId: FARMER_A,
+          payee: { farmer: { id: FARMER_A }, agent: null },
         }),
       );
       await service.applyTransferResult({
@@ -380,7 +481,7 @@ describe('PayoutService', () => {
           amount: d('1200.00'),
           bankName: 'GTBank',
           reference: 'PO-000001',
-          farmerId: FARMER_A,
+          payee: { farmer: { id: FARMER_A }, agent: null },
         }),
       );
       await service.applyTransferResult({

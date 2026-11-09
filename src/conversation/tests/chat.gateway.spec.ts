@@ -20,7 +20,6 @@ const buyer = {
   role: Role.BUYER,
   isVerified: true,
   activatedAt: null,
-  mustChangePassword: false,
 } as User;
 
 describe('ChatGateway', () => {
@@ -121,11 +120,6 @@ describe('ChatGateway', () => {
       'a buyer with an unverified email',
       { ...buyer, isVerified: false },
       'EMAIL_NOT_VERIFIED',
-    ],
-    [
-      'a user who must change password',
-      { ...buyer, mustChangePassword: true },
-      'PASSWORD_CHANGE_REQUIRED',
     ],
     [
       'a farmer',

@@ -49,12 +49,3 @@ export function assertActivated(
     throw emailNotVerifiedError();
   }
 }
-
-// A distinct code: the client routes it to the change-password screen rather
-// than treating it as a role error.
-export function passwordChangeRequiredError(): ForbiddenException {
-  return new ForbiddenException({
-    message: 'Change your password to continue',
-    code: 'PASSWORD_CHANGE_REQUIRED',
-  });
-}

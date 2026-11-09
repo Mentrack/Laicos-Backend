@@ -5,6 +5,7 @@ import { addDays, lagosToday, toDateColumn } from '../../common/dates';
 import { percentOf } from '../../common/money';
 import type { OrderLine } from '../../order/utils/reservation';
 import type { CheckoutConfig } from '../../payment/checkout-config';
+import { commissionFor } from '../../payment/utils/order-share';
 import {
   CHECKOUT_INCLUDE,
   type CheckoutRow,
@@ -80,7 +81,8 @@ export async function resolveDelivery(
 }
 
 /**
- * Prices the reserved lines plus delivery and the service fee and places them awaiting payment.
+ * Prices the reserved lines plus delivery, the service fee and the agent
+ * commission and places them awaiting payment.
  * The lines must come from rows the caller has just reserved (and so
  * locked), so a farmer's price edit can't slip in after the check.
  */
@@ -95,7 +97,18 @@ export async function createCheckout(
     new Prisma.Decimal(0),
   );
   const serviceFee = percentOf(subtotal, config.serviceFeePercent);
-  const totalPrice = subtotal.add(config.deliveryFee).add(serviceFee);
+  // Per line, so the checkout's figure is exactly the sum of its orders'.
+  const commissions = draft.lines.map((line) =>
+    commissionFor(line.totalPrice, config.agentCommissionPercent),
+  );
+  const agentCommission = commissions.reduce(
+    (sum, commission) => sum.add(commission),
+    new Prisma.Decimal(0),
+  );
+  const totalPrice = subtotal
+    .add(config.deliveryFee)
+    .add(serviceFee)
+    .add(agentCommission);
   if (!totalPrice.equals(draft.expectedTotal)) {
     throw new ConflictException({
       message: 'Prices in your cart have changed',
@@ -110,6 +123,7 @@ export async function createCheckout(
       subtotal,
       deliveryFee: config.deliveryFee,
       serviceFee,
+      agentCommission,
       totalPrice,
       expiresAt: new Date(now.getTime() + config.holdMinutes * 60_000),
       ...(draft.sourcingRequestId
@@ -117,9 +131,10 @@ export async function createCheckout(
         : {}),
       ...draft.delivery,
       orders: {
-        create: draft.lines.map((line) => ({
+        create: draft.lines.map((line, index) => ({
           ...line,
           buyerId: draft.buyerId,
+          agentCommission: commissions[index],
           status: OrderStatus.AWAITING_PAYMENT,
         })),
       },

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PayoutStatus } from '../../../generated/client';
+import { PayeeRole, PayoutStatus } from '../../../generated/client';
 
 export class PayoutItemDto {
   @ApiProperty({ format: 'uuid' })
@@ -16,8 +16,14 @@ export class PayoutDto {
   @ApiProperty({ example: 'PO-000123' })
   reference: string;
 
-  @ApiProperty({ format: 'uuid', description: 'Farmer.id' })
-  farmerId: string;
+  @ApiProperty({
+    format: 'uuid',
+    description: 'User.id of the farmer or agent paid',
+  })
+  payeeId: string;
+
+  @ApiProperty({ enum: PayeeRole, enumName: 'PayeeRole' })
+  payeeRole: PayeeRole;
 
   @ApiProperty({ type: String, example: '9000.00', description: 'NGN' })
   amount: string;
@@ -45,16 +51,4 @@ export class PayoutDto {
 
   @ApiProperty({ type: [PayoutItemDto] })
   items: PayoutItemDto[];
-}
-
-export class PayoutBatchDto {
-  @ApiProperty({ type: [PayoutDto] })
-  payouts: PayoutDto[];
-
-  @ApiProperty({
-    type: [String],
-    format: 'uuid',
-    description: 'Farmers with nothing eligible (or no bank account) right now',
-  })
-  skippedFarmerIds: string[];
 }

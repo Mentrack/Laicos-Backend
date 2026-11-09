@@ -1153,7 +1153,6 @@ async function upsertUser(
     agreedToTerms: true,
     isVerified: firebaseUser.emailVerified,
     activatedAt: access.activatedAt,
-    mustChangePassword: false,
   };
   return prisma.user.upsert({
     where: { email: user.email },
@@ -1405,6 +1404,7 @@ async function seedProduce(
       buyerId: mustGet(buyerIds, order.buyer),
       quantity: order.quantity,
       totalPrice: new Prisma.Decimal(produce.pricePerUnit).mul(order.quantity),
+      agentCommission: new Prisma.Decimal(0),
       status: order.status,
       produceName: produce.name,
       type: produce.type,
@@ -1562,7 +1562,6 @@ async function main() {
 
   try {
     // Buyers and the admin use a password; activatedAt doesn't apply to them.
-    // The seeded admin is not on a temporary password.
     const passwordOnly = { password, activatedAt: null };
     const adminUser = await upsertUser(
       prisma,

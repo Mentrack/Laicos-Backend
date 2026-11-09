@@ -14,6 +14,8 @@ export const CONVERSATION_INCLUDE = {
     select: {
       orderNumber: true,
       status: true,
+      fulfilledAt: true,
+      dispute: { select: { status: true } },
       produceName: true,
       quantity: true,
       type: true,
@@ -44,6 +46,7 @@ export function formatConversation(
   row: ConversationRow,
   viewerId: string,
   unreadCount: number,
+  holdHours: number,
 ): ConversationDto {
   const counterpart =
     viewerId === row.agentUserId ? row.buyer.user : row.agentUser;
@@ -57,7 +60,7 @@ export function formatConversation(
     quantity: row.order.quantity,
     unit: row.order.produce.unit,
     type: row.order.type,
-    isClosed: isClosed(row.order.status),
+    isClosed: isClosed(row.order, holdHours, new Date()),
     counterpart: {
       userId: counterpart.id,
       firstName: counterpart.firstName,

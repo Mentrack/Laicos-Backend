@@ -24,6 +24,7 @@ const run = randomUUID().slice(0, 8);
 describe('Checkout concurrency (real Postgres)', () => {
   const db = new PrismaService(new ConfigService());
   const service = new CheckoutService(db, testCheckoutConfig());
+  const userIds: string[] = [];
   const buyerIds: string[] = [];
   let farmerUser: User;
   let state: State;
@@ -44,10 +45,14 @@ describe('Checkout concurrency (real Postgres)', () => {
     });
   }
 
+  // Cart, address, checkout and order rows key on the Buyer profile, not the
+  // user, so a buyer carries both ids.
   async function buyer() {
     const created = await user(Role.BUYER);
-    buyerIds.push(created.id);
-    return created;
+    userIds.push(created.id);
+    const profile = await db.buyer.create({ data: { userId: created.id } });
+    buyerIds.push(profile.id);
+    return { ...created, buyerId: profile.id };
   }
 
   function produce(stock: number) {
@@ -125,7 +130,7 @@ describe('Checkout concurrency (real Postgres)', () => {
     await db.address.deleteMany({ where: { buyerId: { in: buyerIds } } });
     await db.farm.delete({ where: { id: farm.id } });
     await db.user.deleteMany({
-      where: { id: { in: [...buyerIds, farmerUser.id] } },
+      where: { id: { in: [...userIds, farmerUser.id] } },
     });
     await db.lga.delete({ where: { id: lga.id } });
     await db.state.delete({ where: { id: state.id } });
@@ -135,9 +140,12 @@ describe('Checkout concurrency (real Postgres)', () => {
   it('lets exactly one of two buyers take the last units', async () => {
     const listing = await produce(10);
     const [a, b] = await Promise.all([buyer(), buyer()]);
-    await addToCart(a.id, listing.id, 10);
-    await addToCart(b.id, listing.id, 10);
-    const [bodyA, bodyB] = [await body(a.id, 1000), await body(b.id, 1000)];
+    await addToCart(a.buyerId, listing.id, 10);
+    await addToCart(b.buyerId, listing.id, 10);
+    const [bodyA, bodyB] = [
+      await body(a.buyerId, 1000),
+      await body(b.buyerId, 1000),
+    ];
 
     const results = await Promise.allSettled([
       service.checkout(a, randomUUID(), bodyA),
@@ -161,9 +169,9 @@ describe('Checkout concurrency (real Postgres)', () => {
   it('creates one checkout when the same request arrives twice at once', async () => {
     const listing = await produce(10);
     const a = await buyer();
-    await addToCart(a.id, listing.id, 5);
+    await addToCart(a.buyerId, listing.id, 5);
     const key = randomUUID();
-    const request = await body(a.id, 500);
+    const request = await body(a.buyerId, 500);
 
     const [first, second] = await Promise.all([
       service.checkout(a, key, request),
@@ -171,9 +179,9 @@ describe('Checkout concurrency (real Postgres)', () => {
     ]);
 
     expect(second.id).toBe(first.id);
-    await expect(db.checkout.count({ where: { buyerId: a.id } })).resolves.toBe(
-      1,
-    );
+    await expect(
+      db.checkout.count({ where: { buyerId: a.buyerId } }),
+    ).resolves.toBe(1);
     const after = await db.produce.findUniqueOrThrow({
       where: { id: listing.id },
     });
@@ -183,11 +191,14 @@ describe('Checkout concurrency (real Postgres)', () => {
   it('checks out overlapping carts added in opposite order without deadlock', async () => {
     const [x, y] = [await produce(10), await produce(10)];
     const [a, b] = await Promise.all([buyer(), buyer()]);
-    await addToCart(a.id, x.id, 1);
-    await addToCart(a.id, y.id, 1);
-    await addToCart(b.id, y.id, 1);
-    await addToCart(b.id, x.id, 1);
-    const [bodyA, bodyB] = [await body(a.id, 200), await body(b.id, 200)];
+    await addToCart(a.buyerId, x.id, 1);
+    await addToCart(a.buyerId, y.id, 1);
+    await addToCart(b.buyerId, y.id, 1);
+    await addToCart(b.buyerId, x.id, 1);
+    const [bodyA, bodyB] = [
+      await body(a.buyerId, 200),
+      await body(b.buyerId, 200),
+    ];
 
     const results = await Promise.allSettled([
       service.checkout(a, randomUUID(), bodyA),

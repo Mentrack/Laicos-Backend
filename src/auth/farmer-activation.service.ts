@@ -3,7 +3,6 @@ import { Role } from '../../generated/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { FarmerInviteService } from './farmer-invite.service';
 import { FirebaseService } from './firebase/firebase.service';
-import { temporaryPassword } from './utils/temporary-password';
 
 /**
  * Gives a farmer access once their first farm is verified, and tells them
@@ -30,32 +29,30 @@ export class FarmerActivationService {
     }
     try {
       // Google and anyone who chose a password at signup keep it. An
-      // onboarded farmer has neither provider, so they get a temporary one.
+      // onboarded farmer has neither provider, so they get a link to set one.
       const account = await this.firebase.auth.getUser(user.firebaseUid);
       const hasSignIn = account.providerData.some(
         (provider) =>
           provider.providerId === 'google.com' ||
           provider.providerId === 'password',
       );
-      const password = hasSignIn ? null : temporaryPassword();
-      // Claimed before touching Firebase, so two farms approved at once
-      // can't each set (and send) a different password.
+      // Claimed first, so two farms approved at once can't each send a link.
       const { count } = await this.database.user.updateMany({
         where: { id: userId, role: Role.FARMER, activatedAt: null },
-        data: {
-          activatedAt: new Date(),
-          mustChangePassword: Boolean(password),
-        },
+        data: { activatedAt: new Date() },
       });
       if (!count) {
         return;
       }
-      if (password) {
-        await this.setPassword(userId, user.firebaseUid, password);
+      const resetLink = hasSignIn
+        ? null
+        : await this.firebase.generatePasswordResetLink(user.email);
+      if (!hasSignIn && !resetLink) {
+        throw new Error(`No set-password link for farmer ${userId}`);
       }
       // A failed email keeps the activation: the farmer can still get in
       // through forgot-password, which works once they are active.
-      await this.invites.sendInvite(user, password);
+      await this.invites.sendInvite(user, resetLink);
     } catch (error) {
       this.logger.error(
         `Failed to activate farmer ${userId}`,
@@ -81,23 +78,6 @@ export class FarmerActivationService {
         `Failed to notify farmer ${userId} of a rejection`,
         error instanceof Error ? error.stack : String(error),
       );
-    }
-  }
-
-  /** Undoes the claim on failure, leaving the farmer as they were. */
-  private async setPassword(
-    userId: string,
-    firebaseUid: string,
-    password: string,
-  ): Promise<void> {
-    try {
-      await this.firebase.auth.updateUser(firebaseUid, { password });
-    } catch (error) {
-      await this.database.user.update({
-        where: { id: userId },
-        data: { activatedAt: null, mustChangePassword: false },
-      });
-      throw error;
     }
   }
 }

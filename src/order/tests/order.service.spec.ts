@@ -5,6 +5,7 @@ import {
   AuditResource,
   FarmVerificationStatus,
   OrderStatus,
+  PayoutStatus,
   Prisma,
   ProduceStatus,
   ProduceType,
@@ -67,8 +68,10 @@ describe('OrderService', () => {
   };
   let transactionOptions: unknown;
   const buyerModel = { findUnique: jest.fn() };
+  const payout = { aggregate: jest.fn() };
   const database = {
     buyer: buyerModel,
+    payout,
     ...tx,
     // A plain function, not jest.fn, so resetAllMocks keeps it. Array form
     // for batched reads; callback form runs against the same mocks.
@@ -137,6 +140,7 @@ describe('OrderService', () => {
       subtotal: new Prisma.Decimal('0'),
       deliveryFee: new Prisma.Decimal('3500'),
       serviceFee: new Prisma.Decimal('0'),
+      agentCommission: new Prisma.Decimal('0.00'),
       totalPrice: new Prisma.Decimal('3500'),
       expiresAt: new Date(),
       paidAt: null,
@@ -349,18 +353,18 @@ describe('OrderService', () => {
       NOT: { status: OrderStatus.AWAITING_PAYMENT },
     };
 
-    it('sums fulfilled orders and counts active ones', async () => {
-      order.aggregate.mockResolvedValue({
-        _sum: { totalPrice: new Prisma.Decimal('450000') },
+    it('reports money actually paid out, and counts active orders', async () => {
+      payout.aggregate.mockResolvedValue({
+        _sum: { amount: new Prisma.Decimal('450000') },
       });
       order.count.mockResolvedValue(3);
       await expect(service.summary(farmer)).resolves.toEqual({
         totalEarnings: '450000.00',
         activeOrders: 3,
       });
-      expect(order.aggregate).toHaveBeenCalledWith({
-        where: { ...scope, status: OrderStatus.FULFILLED },
-        _sum: { totalPrice: true },
+      expect(payout.aggregate).toHaveBeenCalledWith({
+        where: { payeeId: farmer.id, status: PayoutStatus.SUCCEEDED },
+        _sum: { amount: true },
       });
       expect(order.count).toHaveBeenCalledWith({
         where: {
@@ -378,8 +382,8 @@ describe('OrderService', () => {
       });
     });
 
-    it('reports zero earnings when nothing is fulfilled', async () => {
-      order.aggregate.mockResolvedValue({ _sum: { totalPrice: null } });
+    it('reports zero earnings before anything is paid out', async () => {
+      payout.aggregate.mockResolvedValue({ _sum: { amount: null } });
       order.count.mockResolvedValue(0);
       await expect(service.summary(farmer)).resolves.toEqual({
         totalEarnings: '0.00',
@@ -775,6 +779,57 @@ describe('OrderService', () => {
       produce.findUniqueOrThrow.mockResolvedValue(published);
       await service.confirm(admin, orderId);
       expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmReceived', () => {
+    const shipped = { ...pending, status: OrderStatus.SHIPPED };
+
+    it('fulfils a shipped order and records the buyer', async () => {
+      order.findFirst.mockResolvedValue(shipped);
+      await service.confirmReceived(buyer, orderId);
+      expect(order.update).toHaveBeenCalledWith({
+        where: {
+          id: orderId,
+          buyerId: shipped.buyerId,
+          status: OrderStatus.SHIPPED,
+        },
+        data: { status: OrderStatus.FULFILLED, fulfilledAt: expect.any(Date) },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          actorType: AuditActorType.BUYER,
+          category: AuditCategory.ORDER,
+          title: 'Order ORD-000001 received',
+          resourceId: orderId,
+        }),
+      );
+    });
+
+    it('409s ORDER_NOT_SHIPPED for any other status', async () => {
+      order.findFirst.mockResolvedValue(pending);
+      await expect(
+        service.confirmReceived(buyer, orderId),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'ORDER_NOT_SHIPPED' }),
+      });
+      expect(order.update).not.toHaveBeenCalled();
+    });
+
+    it("404s another buyer's order", async () => {
+      order.findFirst.mockResolvedValue(null);
+      await expect(
+        service.confirmReceived(buyer, orderId),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('maps a concurrent change to 409', async () => {
+      order.findFirst.mockResolvedValue(shipped);
+      order.update.mockRejectedValue(prismaError('P2025'));
+      await expect(
+        service.confirmReceived(buyer, orderId),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 

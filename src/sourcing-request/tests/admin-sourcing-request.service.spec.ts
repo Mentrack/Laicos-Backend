@@ -104,6 +104,7 @@ function placedCheckout() {
     subtotal: new Prisma.Decimal('1000.00'),
     deliveryFee: new Prisma.Decimal('3500.00'),
     serviceFee: new Prisma.Decimal('0.00'),
+    agentCommission: new Prisma.Decimal('0.00'),
     totalPrice: new Prisma.Decimal('4500.00'),
     expiresAt: new Date('2026-10-16T12:00:00.000Z'),
     paidAt: null,

@@ -29,13 +29,13 @@ describe('HttpExceptionFilter', () => {
   it('uses a code the exception names over the status default', () => {
     const { body } = run(
       new ForbiddenException({
-        message: 'Change your password to continue',
-        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'Verify your email to continue',
+        code: 'EMAIL_NOT_VERIFIED',
       }),
     );
     expect(body).toEqual({
-      message: 'Change your password to continue',
-      error: { code: 'PASSWORD_CHANGE_REQUIRED', statusCode: 403 },
+      message: 'Verify your email to continue',
+      error: { code: 'EMAIL_NOT_VERIFIED', statusCode: 403 },
     });
   });
 
