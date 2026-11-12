@@ -1,6 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { AcceptAdminInviteDto } from '../dto';
+import { AcceptInviteDto } from '../dto';
 
 const valid = {
   token: 'raw-token',
@@ -9,9 +9,9 @@ const valid = {
   lastName: 'Adeyemi',
 };
 
-describe('AcceptAdminInviteDto', () => {
+describe('AcceptInviteDto', () => {
   it('accepts a complete body', async () => {
-    const dto = plainToInstance(AcceptAdminInviteDto, valid);
+    const dto = plainToInstance(AcceptInviteDto, valid);
     expect(await validate(dto)).toHaveLength(0);
   });
 
@@ -19,7 +19,7 @@ describe('AcceptAdminInviteDto', () => {
     'rejects a missing %s',
     async (key) => {
       const { [key]: _omitted, ...body } = valid;
-      const dto = plainToInstance(AcceptAdminInviteDto, body);
+      const dto = plainToInstance(AcceptInviteDto, body);
       const errors = await validate(dto);
       expect(errors.map((error) => error.property)).toEqual([key]);
     },

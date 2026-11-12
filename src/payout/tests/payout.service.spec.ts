@@ -361,6 +361,7 @@ describe('PayoutService', () => {
       });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: userOf(FARMER_A),
         farmerId: FARMER_A,
         agentId: null,
         farmId: null,
@@ -390,6 +391,7 @@ describe('PayoutService', () => {
         tx,
         expect.objectContaining({
           actorType: AuditActorType.EXTENSION_AGENT,
+          actorUserId: agentUser.id,
           farmerId: null,
           agentId: 'agent-1',
         }),
@@ -409,6 +411,7 @@ describe('PayoutService', () => {
         tx,
         expect.objectContaining({
           actorType: AuditActorType.SYSTEM,
+          actorUserId: null,
           farmerId: null,
           agentId: null,
         }),

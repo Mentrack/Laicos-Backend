@@ -28,6 +28,7 @@ import {
   providerUnavailable,
 } from '../paystack/paystack-error';
 import { NotificationService } from '../notifications/notification.service';
+import { orderAuditEvent } from '../order/utils/order-audit';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   recordLinkedAudit,
@@ -258,17 +259,39 @@ export class PaymentService {
           where: { id: payment.checkoutId },
           data: { status: CheckoutStatus.PAID, paidAt },
         });
+        const unpaid = {
+          checkoutId: payment.checkoutId,
+          status: OrderStatus.AWAITING_PAYMENT,
+        };
+        const paidOrders = await tx.order.findMany({
+          where: unpaid,
+          select: { id: true, orderNumber: true, farmId: true },
+        });
         await tx.order.updateMany({
-          where: {
-            checkoutId: payment.checkoutId,
-            status: OrderStatus.AWAITING_PAYMENT,
-          },
+          where: unpaid,
           data: { status: OrderStatus.PENDING },
         });
+        const buyer = await tx.buyer.findUniqueOrThrow({
+          where: { id: payment.checkout.buyerId },
+          select: { userId: true },
+        });
+        const payer = appliedBy
+          ? { type: AuditActorType.ADMIN, userId: appliedBy.id }
+          : { type: AuditActorType.BUYER, userId: buyer.userId };
+        if (paidOrders.length > 0) {
+          await tx.auditEvent.createMany({
+            data: paidOrders.map((order) =>
+              orderAuditEvent(order, payer, 'paid', payment.reference, {
+                sourcingRequestId: payment.checkout.sourcingRequestId,
+              }),
+            ),
+          });
+        }
         if (payment.checkout.sourcingRequestId) {
           await syncSourcingRequest(tx, payment.checkout.sourcingRequestId);
           await recordLinkedAudit(tx, {
             actorType: AuditActorType.BUYER,
+            actorUserId: buyer.userId,
             farmerId: null,
             agentId: null,
             farmId: null,

@@ -12,6 +12,7 @@ import type { Namespace, Socket } from 'socket.io';
 import { Role } from '../../generated/client';
 import { FirebaseService } from '../auth/firebase/firebase.service';
 import {
+  assertAccountInGoodStanding,
   assertActivated,
   requireLocalUser,
   verifySessionToken,
@@ -100,6 +101,7 @@ export class ChatGateway
     if (!CHAT_ROLES.includes(user.role)) {
       throw new ForbiddenException('Insufficient role');
     }
+    await assertAccountInGoodStanding(this.database, user);
     await socket.join(userRoom(user.id));
     // An open socket is never re-authenticated, so it lives no longer than its
     // token; the client reconnects with a fresh one and catches up with ?after.

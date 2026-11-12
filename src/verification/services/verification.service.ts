@@ -297,6 +297,7 @@ export class VerificationService {
       [
         {
           actorType: AuditActorType.EXTENSION_AGENT,
+          actorUserId: agent.userId,
           farmerId: null,
           agentId: agent.id,
           farmId,
@@ -526,6 +527,7 @@ export class VerificationService {
   ) {
     await this.audit.record(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
+      actorUserId: agent.userId,
       farmerId: null,
       agentId: agent.id,
       farmId,

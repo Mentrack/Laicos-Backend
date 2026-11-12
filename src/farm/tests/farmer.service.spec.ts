@@ -134,6 +134,7 @@ describe('FarmerService', () => {
     await service.updateMine(user, { idType: IdType.NIN, idNumber: '99' });
     expect(audit.record).toHaveBeenCalledWith(tx, {
       actorType: AuditActorType.FARMER,
+      actorUserId: 'user-1',
       farmerId: row.id,
       agentId: null,
       farmId: null,
@@ -152,6 +153,7 @@ describe('FarmerService', () => {
     await service.uploadIdDocument(user, pdf);
     expect(audit.record).toHaveBeenCalledWith(tx, {
       actorType: AuditActorType.FARMER,
+      actorUserId: 'user-1',
       farmerId: row.id,
       agentId: null,
       farmId: null,

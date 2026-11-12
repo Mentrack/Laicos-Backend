@@ -1,4 +1,10 @@
-import type { Buyer, Lga, State } from '../../../generated/client';
+import {
+  BuyerType,
+  type Buyer,
+  type Lga,
+  type State,
+} from '../../../generated/client';
+import { fullName } from '../../common/names';
 import type { BuyerDto, BuyerProfileDto } from '../dto';
 
 type BuyerWithLocation = Buyer & {
@@ -25,4 +31,15 @@ export function toBuyerProfileDto(buyer: BuyerWithLocation): BuyerProfileDto {
     createdAt: buyer.createdAt,
     updatedAt: buyer.updatedAt,
   };
+}
+
+export function buyerDisplayName(buyer: {
+  buyerType: BuyerType;
+  legalName: string | null;
+  user: { firstName: string; lastName: string };
+}): string {
+  if (buyer.buyerType === BuyerType.COMPANY && buyer.legalName) {
+    return buyer.legalName;
+  }
+  return fullName(buyer.user);
 }

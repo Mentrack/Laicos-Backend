@@ -58,6 +58,7 @@ describe('FarmDocumentsService', () => {
   );
   const idRow: AuditWrite = {
     actorType: AuditActorType.FARMER,
+    actorUserId: 'user-1',
     farmerId: 'farmer-1',
     agentId: null,
     farmId: null,
@@ -70,6 +71,7 @@ describe('FarmDocumentsService', () => {
   };
   const ownershipRow: AuditWrite = {
     actorType: AuditActorType.FARMER,
+    actorUserId: 'user-1',
     farmerId: 'farmer-1',
     agentId: null,
     farmId: 'farm-1',

@@ -2,7 +2,7 @@ import { applyDecorators, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth } from '@nestjs/swagger';
 import type { Role } from '../../../generated/client';
 import { ActivationGuard } from '../guards/activation.guard';
-import { FarmerStandingGuard } from '../guards/farmer-standing.guard';
+import { AccountStandingGuard } from '../guards/account-standing.guard';
 import { FirebaseAuthGuard } from '../guards/firebase-auth.guard';
 import { OptionalAuthGuard } from '../guards/optional-auth.guard';
 import { RequireLocalUserGuard } from '../guards/require-local-user.guard';
@@ -17,7 +17,7 @@ export const Auth = (...roles: Role[]) =>
       FirebaseAuthGuard,
       RequireLocalUserGuard,
       ActivationGuard,
-      FarmerStandingGuard,
+      AccountStandingGuard,
       RolesGuard,
     ),
     Roles(roles),

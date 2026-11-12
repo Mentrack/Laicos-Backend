@@ -3,8 +3,13 @@ const lagosDate = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Africa/Lagos',
 });
 
+/** The Africa/Lagos calendar date of an instant, as YYYY-MM-DD. */
+export function lagosDay(instant: Date): string {
+  return lagosDate.format(instant);
+}
+
 export function lagosToday(now: Date = new Date()): string {
-  return lagosDate.format(now);
+  return lagosDay(now);
 }
 
 export function addDays(date: string, days: number): string {
@@ -21,4 +26,14 @@ export function toDateColumn(date: string): Date {
 // A @db.Date column comes back as UTC midnight; the calendar date is its ISO prefix.
 export function fromDateColumn(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+// Lagos is UTC+1 all year, so a WAT day starts at 23:00 UTC the day before.
+const LAGOS_OFFSET_HOURS = 1;
+
+/** The instant a YYYY-MM-DD calendar day starts in Africa/Lagos. */
+export function lagosDayStart(date: string): Date {
+  const start = toDateColumn(date);
+  start.setUTCHours(-LAGOS_OFFSET_HOURS);
+  return start;
 }

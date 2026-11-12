@@ -1,26 +1,24 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AdminInvite, Prisma, Role, User } from '../../../generated/client';
+import { Invite, Prisma, Role, User } from '../../../generated/client';
 import { AuthService } from '../../auth/auth.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import {
-  ADMIN_INVITE_TTL_DAYS,
-  AdminInviteService,
-} from '../admin-invite.service';
-import { AdminInviteStatus } from '../dto';
+import { INVITE_TTL_DAYS, InviteService } from '../invite.service';
+import { InviteStatus } from '../dto';
 
 const NOW = new Date('2026-11-09T12:00:00.000Z');
-const WEEK = ADMIN_INVITE_TTL_DAYS * 24 * 60 * 60 * 1000;
+const WEEK = INVITE_TTL_DAYS * 24 * 60 * 60 * 1000;
 const inviter = { id: 'user-1', role: Role.ADMIN } as User;
 const email = 'new@laicos.test';
 
-function invite(overrides: Partial<AdminInvite> = {}): AdminInvite {
+function invite(overrides: Partial<Invite> = {}): Invite {
   return {
     id: 'invite-1',
     email,
     tokenHash: 'a'.repeat(64),
     expiresAt: new Date(NOW.getTime() + WEEK),
+    role: Role.ADMIN,
     invitedById: inviter.id,
     acceptedAt: null,
     userId: null,
@@ -37,12 +35,12 @@ function uniqueViolation() {
   });
 }
 
-describe('AdminInviteService', () => {
+describe('InviteService', () => {
   const database = {
     user: { findUnique: jest.fn() },
-    adminInvite: {
+    invite: {
       create: jest.fn(),
-      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       findMany: jest.fn(),
       count: jest.fn(),
@@ -53,7 +51,7 @@ describe('AdminInviteService', () => {
   const config = {
     getOrThrow: jest.fn().mockReturnValue('https://app.laicos.ng'),
   };
-  const service = new AdminInviteService(
+  const service = new InviteService(
     database as unknown as PrismaService,
     {} as AuthService,
     mail as unknown as MailService,
@@ -65,7 +63,7 @@ describe('AdminInviteService', () => {
     jest.useFakeTimers().setSystemTime(NOW);
     config.getOrThrow.mockReturnValue('https://app.laicos.ng');
     database.user.findUnique.mockResolvedValue(null);
-    database.adminInvite.create.mockResolvedValue(invite());
+    database.invite.create.mockResolvedValue(invite());
     mail.send.mockResolvedValue(undefined);
   });
 
@@ -75,12 +73,13 @@ describe('AdminInviteService', () => {
 
   describe('invite', () => {
     it('creates a pending invite and emails the link', async () => {
-      const result = await service.invite(inviter, { email });
+      const result = await service.invite(inviter, email, Role.ADMIN);
 
-      expect(database.adminInvite.create).toHaveBeenCalledWith({
+      expect(database.invite.create).toHaveBeenCalledWith({
         data: {
           email,
           tokenHash: expect.stringMatching(/^[0-9a-f]{64}$/) as string,
+          role: Role.ADMIN,
           invitedById: inviter.id,
           expiresAt: new Date(NOW.getTime() + WEEK),
         },
@@ -106,21 +105,43 @@ describe('AdminInviteService', () => {
     it('rejects an email that already has an account', async () => {
       database.user.findUnique.mockResolvedValue({ id: 'user-9' });
 
-      await expect(service.invite(inviter, { email })).rejects.toThrow(
+      await expect(service.invite(inviter, email, Role.ADMIN)).rejects.toThrow(
         new ConflictException('Account already registered'),
       );
-      expect(database.adminInvite.create).not.toHaveBeenCalled();
+      expect(database.invite.create).not.toHaveBeenCalled();
     });
 
-    it('rejects an email with a pending invite', async () => {
-      database.adminInvite.create.mockRejectedValue(uniqueViolation());
+    it('409s on a pending invite with the role-neutral message', async () => {
+      database.invite.create.mockRejectedValue(uniqueViolation());
 
-      const error = await service
-        .invite(inviter, { email })
-        .catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(ConflictException);
-      expect((error as ConflictException).message).toContain('Resend');
+      await expect(
+        service.invite(inviter, email, Role.EXTENSION_AGENT),
+      ).rejects.toThrow(
+        new ConflictException('This email already has a pending invite'),
+      );
       expect(mail.send).not.toHaveBeenCalled();
+    });
+
+    it('stores the given role', async () => {
+      await service.invite(inviter, email, Role.EXTENSION_AGENT);
+
+      expect(database.invite.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          role: Role.EXTENSION_AGENT,
+        }) as object,
+      });
+    });
+
+    it('emails an agent link for EXTENSION_AGENT', async () => {
+      await service.invite(inviter, email, Role.EXTENSION_AGENT);
+
+      const [, rendered] = mail.send.mock.calls[0] as [
+        string,
+        { html: string },
+      ];
+      expect(rendered.html).toContain(
+        'https://app.laicos.ng/agent-invite?token=',
+      );
     });
 
     it('keeps the invite when the email fails', async () => {
@@ -129,7 +150,9 @@ describe('AdminInviteService', () => {
         .spyOn(service['logger'], 'error')
         .mockImplementation(() => undefined);
 
-      await expect(service.invite(inviter, { email })).resolves.toMatchObject({
+      await expect(
+        service.invite(inviter, email, Role.ADMIN),
+      ).resolves.toMatchObject({
         id: 'invite-1',
       });
       expect(logged).toHaveBeenCalled();
@@ -138,22 +161,25 @@ describe('AdminInviteService', () => {
 
   describe('findAll', () => {
     it.each([
-      [AdminInviteStatus.PENDING, { acceptedAt: null }],
-      [AdminInviteStatus.ACCEPTED, { acceptedAt: { not: null } }],
-      [undefined, {}],
-    ])('filters %s', async (status, where) => {
-      database.adminInvite.findMany.mockResolvedValue([invite()]);
-      database.adminInvite.count.mockResolvedValue(21);
+      [InviteStatus.PENDING, { role: Role.ADMIN, acceptedAt: null }],
+      [InviteStatus.ACCEPTED, { role: Role.ADMIN, acceptedAt: { not: null } }],
+      [undefined, { role: Role.ADMIN }],
+    ])('filters %s by role', async (status, where) => {
+      database.invite.findMany.mockResolvedValue([invite()]);
+      database.invite.count.mockResolvedValue(21);
 
-      const result = await service.findAll({ page: 2, perPage: 10, status });
+      const result = await service.findAll(
+        { page: 2, perPage: 10, status },
+        Role.ADMIN,
+      );
 
-      expect(database.adminInvite.findMany).toHaveBeenCalledWith({
+      expect(database.invite.findMany).toHaveBeenCalledWith({
         where,
         orderBy: { createdAt: 'desc' },
         skip: 10,
         take: 10,
       });
-      expect(database.adminInvite.count).toHaveBeenCalledWith({ where });
+      expect(database.invite.count).toHaveBeenCalledWith({ where });
       expect(result.metaData).toEqual({
         page: 2,
         perPage: 10,
@@ -169,17 +195,17 @@ describe('AdminInviteService', () => {
     const cutoff = new Date(NOW.getTime() - GRACE);
 
     beforeEach(() => {
-      database.adminInvite.updateMany.mockResolvedValue({ count: 1 });
-      database.adminInvite.findUniqueOrThrow.mockResolvedValue(invite());
+      database.invite.updateMany.mockResolvedValue({ count: 1 });
+      database.invite.findUniqueOrThrow.mockResolvedValue(invite());
     });
 
     it('replaces the token hash and emails the new link', async () => {
       const stored = invite();
-      database.adminInvite.findUnique.mockResolvedValue(stored);
+      database.invite.findFirst.mockResolvedValue(stored);
 
-      await service.resend(stored.id);
+      await service.resend(stored.id, Role.ADMIN);
 
-      const [args] = database.adminInvite.updateMany.mock.calls[0] as [
+      const [args] = database.invite.updateMany.mock.calls[0] as [
         {
           where: unknown;
           data: { tokenHash: string; expiresAt: Date; acceptedAt: null };
@@ -198,11 +224,11 @@ describe('AdminInviteService', () => {
 
     it('recovers a stuck claim older than the grace period', async () => {
       const stored = invite({ acceptedAt: new Date(cutoff.getTime() - 1) });
-      database.adminInvite.findUnique.mockResolvedValue(stored);
+      database.invite.findFirst.mockResolvedValue(stored);
 
-      await service.resend(stored.id);
+      await service.resend(stored.id, Role.ADMIN);
 
-      const [args] = database.adminInvite.updateMany.mock.calls[0] as [
+      const [args] = database.invite.updateMany.mock.calls[0] as [
         { data: { tokenHash: string; expiresAt: Date; acceptedAt: null } },
       ];
       expect(args.data.acceptedAt).toBeNull();
@@ -212,53 +238,64 @@ describe('AdminInviteService', () => {
     });
 
     it('404s an unknown invite', async () => {
-      database.adminInvite.findUnique.mockResolvedValue(null);
+      database.invite.findFirst.mockResolvedValue(null);
 
-      await expect(service.resend('nope')).rejects.toBeInstanceOf(
+      await expect(service.resend('nope', Role.ADMIN)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
 
+    it('404s for an invite of the other role', async () => {
+      database.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.resend('invite-1', Role.EXTENSION_AGENT),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(database.invite.findFirst).toHaveBeenCalledWith({
+        where: { id: 'invite-1', role: Role.EXTENSION_AGENT },
+      });
+    });
+
     it('409s an accepted invite', async () => {
-      database.adminInvite.findUnique.mockResolvedValue(
+      database.invite.findFirst.mockResolvedValue(
         invite({ acceptedAt: NOW, userId: 'user-2' }),
       );
 
-      await expect(service.resend('invite-1')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+      await expect(
+        service.resend('invite-1', Role.ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(database.invite.updateMany).not.toHaveBeenCalled();
     });
 
     it('409s a claim inside the grace period', async () => {
-      database.adminInvite.findUnique.mockResolvedValue(
+      database.invite.findFirst.mockResolvedValue(
         invite({ acceptedAt: new Date(NOW.getTime() - 60_000) }),
       );
 
-      await expect(service.resend('invite-1')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+      await expect(
+        service.resend('invite-1', Role.ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(database.invite.updateMany).not.toHaveBeenCalled();
     });
 
     it('409s when an accept wins the race', async () => {
-      database.adminInvite.findUnique.mockResolvedValue(invite());
-      database.adminInvite.updateMany.mockResolvedValue({ count: 0 });
+      database.invite.findFirst.mockResolvedValue(invite());
+      database.invite.updateMany.mockResolvedValue({ count: 0 });
 
-      await expect(service.resend('invite-1')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
+      await expect(
+        service.resend('invite-1', Role.ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
       expect(mail.send).not.toHaveBeenCalled();
     });
 
     it('409s when the email now has an account', async () => {
-      database.adminInvite.findUnique.mockResolvedValue(invite());
+      database.invite.findFirst.mockResolvedValue(invite());
       database.user.findUnique.mockResolvedValue({ id: 'user-9' });
 
-      await expect(service.resend('invite-1')).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+      await expect(
+        service.resend('invite-1', Role.ADMIN),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(database.invite.updateMany).not.toHaveBeenCalled();
     });
   });
 });

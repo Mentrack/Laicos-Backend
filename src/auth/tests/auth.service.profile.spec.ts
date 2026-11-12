@@ -74,6 +74,7 @@ describe('AuthService profile', () => {
     });
     expect(audit.record).toHaveBeenCalledWith(tx, {
       actorType: AuditActorType.FARMER,
+      actorUserId: 'user-1',
       farmerId: 'farmer-1',
       agentId: null,
       farmId: null,
@@ -97,6 +98,7 @@ describe('AuthService profile', () => {
     });
     expect(audit.record).toHaveBeenCalledWith(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
+      actorUserId: 'user-1',
       farmerId: null,
       agentId: 'agent-1',
       farmId: null,

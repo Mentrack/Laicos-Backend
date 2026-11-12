@@ -26,7 +26,7 @@ import {
 } from '../common/upload-pipes';
 import { AuthService } from './auth.service';
 import { AllowPendingApplication } from './decorators/allow-pending-application.decorator';
-import { AllowSuspendedFarmer } from './decorators/allow-suspended-farmer.decorator';
+import { AllowSuspended } from './decorators/allow-suspended.decorator';
 import { Auth } from './decorators/auth.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import {
@@ -205,6 +205,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Auth()
   @AllowPendingApplication()
+  @AllowSuspended()
   @ApiOkResponse({ type: MessageResponseDto })
   async logout(@CurrentUser() user: User) {
     await this.auth.logout(user);
@@ -215,11 +216,11 @@ export class AuthController {
   @ApiOperation({
     summary: 'Get the signed-in user',
     description:
-      'Read fresh on every call. Allowed while the farmer is suspended, so the client can check who is signed in.',
+      'Read fresh on every call. Allowed while the account is suspended, so the client can check who is signed in.',
   })
   @Auth()
   @AllowPendingApplication()
-  @AllowSuspendedFarmer()
+  @AllowSuspended()
   @ApiEnvelope(UserDto)
   async getCurrentUser(@CurrentUser() user: User) {
     const data = await this.auth.getCurrentUser(user);

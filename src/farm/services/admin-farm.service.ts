@@ -11,10 +11,19 @@ import {
   ProduceStatus,
   VerificationTaskStatus,
 } from '../../../generated/client';
-import { paginationMeta, resolvePagination } from '../../common/pagination';
+import {
+  type PaginationMetaDto,
+  type PaginationQueryDto,
+  paginationMeta,
+  resolvePagination,
+} from '../../common/pagination';
 import { OPEN_PAID_ORDER_STATUSES } from '../../order/utils/open-paid';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import {
+  formatVerificationFindings,
+  VERIFICATION_CHECKS_INCLUDE,
+} from '../../verification/formatters/findings.formatter';
 import type {
   AdminFarmAgentDto,
   AdminFarmAssignedAgentDto,
@@ -75,6 +84,7 @@ const DETAIL_INCLUDE = {
     select: {
       id: true,
       name: true,
+      clusterCode: true,
       _count: { select: { farms: true } },
       agent: { select: CLUSTER_AGENT_SELECT },
     },
@@ -82,6 +92,7 @@ const DETAIL_INCLUDE = {
   verifications: {
     orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
     include: {
+      ...VERIFICATION_CHECKS_INCLUDE,
       evidence: { orderBy: { createdAt: 'asc' as const } },
       agent: { select: AGENT_SELECT },
     },
@@ -104,9 +115,19 @@ export class AdminFarmService {
     private readonly storage: StorageService,
   ) {}
 
-  async findAll(query: AdminFarmQueryDto) {
+  findAll(query: AdminFarmQueryDto) {
+    return this.list(whereFor(query), query);
+  }
+
+  findInCluster(clusterId: string, query: PaginationQueryDto) {
+    return this.list({ clusterId }, query);
+  }
+
+  private async list(
+    where: Prisma.FarmWhereInput,
+    query: PaginationQueryDto,
+  ): Promise<{ data: AdminFarmRowDto[]; metaData: PaginationMetaDto }> {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const where = whereFor(query);
     const [farms, total] = await this.database.$transaction([
       this.database.farm.findMany({
         where,
@@ -289,6 +310,7 @@ export class AdminFarmService {
       status: round.status,
       createdAt: round.createdAt,
       decidedAt: round.decidedAt,
+      ...formatVerificationFindings(round),
       note: roundNote(round),
       evidenceStatus: round.evidenceStatus,
       informationRequestNote: round.informationRequestNote ?? null,
@@ -402,6 +424,7 @@ function toCluster(
   return {
     id: cluster.id,
     name: cluster.name,
+    clusterCode: cluster.clusterCode,
     farmCount: cluster._count.farms,
   };
 }

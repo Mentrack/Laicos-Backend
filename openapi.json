@@ -520,7 +520,7 @@
     },
     "/auth/me": {
       "get": {
-        "description": "Read fresh on every call. Allowed while the farmer is suspended, so the client can check who is signed in.",
+        "description": "Read fresh on every call. Allowed while the account is suspended, so the client can check who is signed in.",
         "operationId": "AuthController_getCurrentUser",
         "parameters": [],
         "responses": {
@@ -1027,6 +1027,14 @@
                       "chiefConfirmation": {
                         "type": "string",
                         "format": "binary"
+                      },
+                      "professionalCertificate": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "bankStatement": {
+                        "type": "string",
+                        "format": "binary"
                       }
                     }
                   }
@@ -1085,6 +1093,14 @@
                         "format": "binary"
                       },
                       "chiefConfirmation": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "professionalCertificate": {
+                        "type": "string",
+                        "format": "binary"
+                      },
+                      "bankStatement": {
                         "type": "string",
                         "format": "binary"
                       }
@@ -3102,6 +3118,43 @@
         ]
       }
     },
+    "/admin/farms/{farmId}/produce/summary": {
+      "get": {
+        "description": "{farmId} is Farm.id. The same cards as GET /admin/produce/summary, counted for that farm. participatingFarms and activeClusters are 0 or 1. 404 when the farm does not exist.",
+        "operationId": "AdminFarmProduceController_summary",
+        "parameters": [
+          {
+            "name": "farmId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminProduceSummaryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count a farm’s produce",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
     "/orders": {
       "post": {
         "description": "Buyers only. Places one line as its own checkout, AWAITING_PAYMENT, without touching the cart; pay it with POST /checkouts/{id}/payments before expiresAt. 409 CART_PRICE_CHANGED when the item plus the delivery fee, the service fee and the agent commission no longer total expectedTotal. 404 for listings the buyer cannot see, including those on unverified farms. Retrying with the same Idempotency-Key returns the original checkout.",
@@ -3155,6 +3208,15 @@
         "parameters": [
           {
             "name": "produceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "farmId",
             "required": false,
             "in": "query",
             "schema": {
@@ -3231,6 +3293,15 @@
         "parameters": [
           {
             "name": "produceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "farmId",
             "required": false,
             "in": "query",
             "schema": {
@@ -3651,6 +3722,404 @@
           }
         ],
         "summary": "Cancel an order",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/admin/orders/counts": {
+      "get": {
+        "description": "The numbers on the tab strip. Takes the list filters (status, produceId, search, from, to) but not tab, page or sort, so each tab shows how many rows it would list.",
+        "operationId": "AdminOrderController_counts",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/OrderStatus"
+            }
+          },
+          {
+            "name": "produceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Matches the order number, produce name, farm code, buyer code, buyer company name or buyer first or last name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "First day to include, as a Lagos (WAT) calendar date",
+            "schema": {
+              "example": "2026-10-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Last day to include, as a Lagos (WAT) calendar date",
+            "schema": {
+              "example": "2026-10-31",
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "desc",
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderCountsResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count orders per tab",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/admin/orders/export": {
+      "get": {
+        "description": "Every order matching the list filters (status, produceId, search, from, to, tab, sort), without pagination.",
+        "operationId": "AdminOrderController_exportCsv",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/OrderStatus"
+            }
+          },
+          {
+            "name": "produceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Matches the order number, produce name, farm code, buyer code, buyer company name or buyer first or last name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "First day to include, as a Lagos (WAT) calendar date",
+            "schema": {
+              "example": "2026-10-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Last day to include, as a Lagos (WAT) calendar date",
+            "schema": {
+              "example": "2026-10-31",
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "desc",
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "tab",
+            "required": false,
+            "in": "query",
+            "description": "ACTIVE is PENDING to SHIPPED, DELIVERED is FULFILLED, ISSUES is orders with a dispute. Combined with status by AND.",
+            "schema": {
+              "$ref": "#/components/schemas/AdminOrderTab"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export orders as CSV",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/admin/orders": {
+      "get": {
+        "description": "One row per order, newest first unless sort=asc. tab narrows by status group and is ANDed with status. from and to are Lagos calendar dates, both inclusive; 400 when from is after to.",
+        "operationId": "AdminOrderController_findAll",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/OrderStatus"
+            }
+          },
+          {
+            "name": "produceId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Matches the order number, produce name, farm code, buyer code, buyer company name or buyer first or last name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "First day to include, as a Lagos (WAT) calendar date",
+            "schema": {
+              "example": "2026-10-01",
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Last day to include, as a Lagos (WAT) calendar date",
+            "schema": {
+              "example": "2026-10-31",
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "default": "desc",
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "name": "tab",
+            "required": false,
+            "in": "query",
+            "description": "ACTIVE is PENDING to SHIPPED, DELIVERED is FULFILLED, ISSUES is orders with a dispute. Combined with status by AND.",
+            "schema": {
+              "$ref": "#/components/schemas/AdminOrderTab"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List orders",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/admin/orders/{id}/timeline": {
+      "get": {
+        "description": "Newest first. 404 when the order is missing.",
+        "operationId": "AdminOrderController_timeline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditEventListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the audit timeline of an order",
+        "tags": [
+          "Orders"
+        ]
+      }
+    },
+    "/admin/orders/{id}": {
+      "get": {
+        "description": "The order with its buyer, farm, payment, buyer request and dispute. 404 when it is missing.",
+        "operationId": "AdminOrderController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOrderDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get an order",
         "tags": [
           "Orders"
         ]
@@ -5087,7 +5556,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InviteAdminDto"
+                "$ref": "#/components/schemas/InviteByEmailDto"
               }
             }
           }
@@ -5098,7 +5567,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminInviteResponseDto"
+                  "$ref": "#/components/schemas/InviteResponseDto"
                 }
               }
             }
@@ -5159,7 +5628,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminInviteListResponseDto"
+                  "$ref": "#/components/schemas/InviteListResponseDto"
                 }
               }
             }
@@ -5186,7 +5655,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AcceptAdminInviteDto"
+                "$ref": "#/components/schemas/AcceptInviteDto"
               }
             }
           }
@@ -5229,7 +5698,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminInviteResponseDto"
+                  "$ref": "#/components/schemas/InviteResponseDto"
                 }
               }
             }
@@ -5553,6 +6022,647 @@
         ]
       }
     },
+    "/admin/agents": {
+      "get": {
+        "description": "Every registered extension agent, newest first. Status: ONBOARDING has not completed the application (id and agentId are null), PENDING awaits approval, VERIFIED is approved, REJECTED is rejected. search is case-insensitive; every whitespace-separated term must match first name, last name, email or agent code. stateId and lgaId match the agent, or the application while onboarding. Filters AND together.",
+        "operationId": "AdminAgentController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "stateId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "lgaId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Every whitespace-separated term must match first name, last name, email or agent code",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/AgentVerificationStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentListItemListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List agents",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/summary": {
+      "get": {
+        "description": "Counts verified agents, their clusters, the farms in them and their open sourcing requests. stateId and lgaId match the agent's own State and LGA. earliestRequiredDate is the earliest required date among the open requests, overdue ones included, or null when there are none.",
+        "operationId": "AdminAgentController_summary",
+        "parameters": [
+          {
+            "name": "stateId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "lgaId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentSummaryResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Summarise agents",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/pending": {
+      "get": {
+        "description": "Extension agents who completed their application and are neither verified nor rejected, oldest first.",
+        "operationId": "AdminAgentController_findPending",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAgentListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List agents awaiting approval",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/pending/count": {
+      "get": {
+        "description": "The same agents as GET /admin/agents/pending.",
+        "operationId": "AdminAgentController_countPending",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count agents awaiting approval",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/invites": {
+      "post": {
+        "description": "Emails a link, valid for 7 days, where they choose their name and password. 409 when the email is registered or already has a pending invite.",
+        "operationId": "AdminAgentController_invite",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteByEmailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Invite an agent",
+        "tags": [
+          "Agents"
+        ]
+      },
+      "get": {
+        "operationId": "AdminAgentController_findInvites",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "ACCEPTED"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List agent invites",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/invites/{id}/resend": {
+      "post": {
+        "description": "Issues a new link and invalidates the old one. 409 when the invite was accepted or the email now has an account.",
+        "operationId": "AdminAgentController_resend",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Resend an agent invite",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/{id}": {
+      "get": {
+        "description": "{id} is Agent.id. What the agent submitted on their application, with document links that expire in 15 minutes, and their verification status. 404 when the agent does not exist.",
+        "operationId": "AdminAgentController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get an agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/{id}/farms": {
+      "get": {
+        "description": "{id} is Agent.id. The farms in the agent's cluster, newest first; an empty page when the agent has no cluster. Rows are the same as GET /admin/farms. 404 when the agent does not exist.",
+        "operationId": "AdminAgentController_findFarms",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFarmRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List an agent's farms",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/{id}/approve": {
+      "post": {
+        "description": "Verifies and activates a PENDING agent, so they get full access and farm verification work in their LGA, and emails them. 409 when the agent is already verified or rejected. 404 when the agent does not exist. A failed email does not undo the approval.",
+        "operationId": "AdminAgentController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Approve an agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/{id}/reject": {
+      "post": {
+        "description": "Rejects a PENDING agent with a reason and emails them the reason. Final: the agent stays locked out and cannot resubmit. 409 when the agent is already verified or rejected. 404 when the agent does not exist.",
+        "operationId": "AdminAgentController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject an agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/{id}/suspend": {
+      "post": {
+        "description": "Suspends a VERIFIED agent with a reason, until the optional end date or until unsuspended, and emails them. A suspended agent is locked out of the app. 400 when until is not in the future. 409 when the agent is already suspended or is not verified. 404 when the agent does not exist. A failed email does not undo the suspension.",
+        "operationId": "AdminAgentController_suspend",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspendAgentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Suspend an agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/admin/agents/{id}/unsuspend": {
+      "post": {
+        "description": "Lifts a current suspension and emails the agent that their account is active again. 409 when the agent is not suspended. 404 when the agent does not exist. A failed email does not undo it.",
+        "operationId": "AdminAgentController_unsuspend",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAgentDetailResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Unsuspend an agent",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
+    "/agents/invites/accept": {
+      "post": {
+        "description": "Creates the agent account for the invited email and signs it in with the email already verified; they complete their application next. 400 INVITE_INVALID when the link is unknown or already used, 400 INVITE_EXPIRED when it has expired, 409 when the email already has an account.",
+        "operationId": "AgentInviteController_accept",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptInviteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthSessionResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Accept an agent invite",
+        "tags": [
+          "Agents"
+        ]
+      }
+    },
     "/buyers/me": {
       "get": {
         "description": "Includes my public code and home location, if I have set one.",
@@ -5649,6 +6759,34 @@
           }
         ],
         "summary": "Get a buyer's public profile",
+        "tags": [
+          "Buyers"
+        ]
+      }
+    },
+    "/admin/buyers/count": {
+      "get": {
+        "description": "Every buyer on the platform, person and company.",
+        "operationId": "AdminBuyerController_count",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Count buyers",
         "tags": [
           "Buyers"
         ]
@@ -6760,6 +7898,51 @@
           "resourceId"
         ]
       },
+      "AuditActorType": {
+        "type": "string",
+        "enum": [
+          "FARMER",
+          "EXTENSION_AGENT",
+          "ADMIN",
+          "BUYER",
+          "SYSTEM"
+        ]
+      },
+      "Role": {
+        "type": "string",
+        "enum": [
+          "FARMER",
+          "BUYER",
+          "EXTENSION_AGENT",
+          "RIDER",
+          "ADMIN"
+        ]
+      },
+      "AuditEventActorDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Jane Okafor"
+          },
+          "role": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "role"
+        ]
+      },
       "AuditEventDto": {
         "type": "object",
         "properties": {
@@ -6794,6 +7977,22 @@
                 "$ref": "#/components/schemas/AuditEventActionDto"
               }
             ]
+          },
+          "actorType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditActorType"
+              }
+            ]
+          },
+          "actor": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AuditEventActorDto"
+              }
+            ]
           }
         },
         "required": [
@@ -6802,7 +8001,9 @@
           "category",
           "title",
           "summary",
-          "action"
+          "action",
+          "actorType",
+          "actor"
         ]
       },
       "PaginationMetaDto": {
@@ -6969,16 +8170,6 @@
         "required": [
           "email",
           "code"
-        ]
-      },
-      "Role": {
-        "type": "string",
-        "enum": [
-          "FARMER",
-          "BUYER",
-          "EXTENSION_AGENT",
-          "RIDER",
-          "ADMIN"
         ]
       },
       "ApplicationStatus": {
@@ -7788,6 +8979,21 @@
             "type": "string",
             "nullable": true,
             "description": "Presigned URL of the chief’s confirmation; expires in 15 min"
+          },
+          "organisation": {
+            "type": "string",
+            "nullable": true,
+            "description": "Agents only"
+          },
+          "professionalCertificateUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Agents only. Presigned URL of the professional certificate; expires in 15 min"
+          },
+          "bankStatementUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Agents only. Presigned URL of the bank statement; expires in 15 min"
           }
         },
         "required": [
@@ -7807,7 +9013,10 @@
           "isExporting",
           "referralAgentId",
           "ownershipDocumentUrl",
-          "chiefConfirmationUrl"
+          "chiefConfirmationUrl",
+          "organisation",
+          "professionalCertificateUrl",
+          "bankStatementUrl"
         ]
       },
       "ApplicationResponseDto": {
@@ -7888,6 +9097,12 @@
           "referralAgentId": {
             "type": "string",
             "format": "uuid"
+          },
+          "organisation": {
+            "type": "string",
+            "maxLength": 120,
+            "example": "Kano State Extension Office",
+            "description": "Extension agents only"
           }
         }
       },
@@ -8791,6 +10006,11 @@
             "example": "Dawakin Kudu Hub",
             "description": "Set when the agent sets their LGA"
           },
+          "clusterCode": {
+            "type": "string",
+            "example": "CL-000018",
+            "description": "Public cluster code"
+          },
           "farmCount": {
             "type": "integer",
             "description": "Farms currently in the cluster"
@@ -8799,6 +10019,7 @@
         "required": [
           "id",
           "name",
+          "clusterCode",
           "farmCount"
         ]
       },
@@ -8884,6 +10105,43 @@
           "url",
           "createdAt",
           "verificationId"
+        ]
+      },
+      "CheckResult": {
+        "type": "string",
+        "enum": [
+          "VERIFIED",
+          "ISSUE",
+          "UNABLE",
+          "NOT_APPLICABLE"
+        ]
+      },
+      "VerificationCheckDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationCheckKey"
+              }
+            ]
+          },
+          "result": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CheckResult"
+              }
+            ]
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "key",
+          "result",
+          "note"
         ]
       },
       "VerificationTaskStatus": {
@@ -9015,6 +10273,58 @@
       "AdminFarmVerificationDto": {
         "type": "object",
         "properties": {
+          "locationMatches": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "discrepancyLat": {
+            "type": "number",
+            "nullable": true,
+            "example": 8.1234
+          },
+          "discrepancyLng": {
+            "type": "number",
+            "nullable": true,
+            "example": 4.2567
+          },
+          "discrepancyNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "identityNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "measuredSize": {
+            "type": "number",
+            "nullable": true,
+            "example": 4.8,
+            "description": "Measured on site, in the farm’s unit"
+          },
+          "estimatedYield": {
+            "type": "number",
+            "nullable": true,
+            "example": 12
+          },
+          "estimatedYieldUnit": {
+            "type": "string",
+            "nullable": true,
+            "example": "tonnes"
+          },
+          "generalNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "rejectionReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerificationCheckDto"
+            }
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -9078,6 +10388,17 @@
           }
         },
         "required": [
+          "locationMatches",
+          "discrepancyLat",
+          "discrepancyLng",
+          "discrepancyNote",
+          "identityNote",
+          "measuredSize",
+          "estimatedYield",
+          "estimatedYieldUnit",
+          "generalNote",
+          "rejectionReason",
+          "checks",
           "id",
           "status",
           "createdAt",
@@ -9667,43 +10988,6 @@
           "farmer"
         ]
       },
-      "CheckResult": {
-        "type": "string",
-        "enum": [
-          "VERIFIED",
-          "ISSUE",
-          "UNABLE",
-          "NOT_APPLICABLE"
-        ]
-      },
-      "VerificationCheckDto": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VerificationCheckKey"
-              }
-            ]
-          },
-          "result": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/CheckResult"
-              }
-            ]
-          },
-          "note": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "required": [
-          "key",
-          "result",
-          "note"
-        ]
-      },
       "VerificationEvidenceDto": {
         "type": "object",
         "properties": {
@@ -9836,6 +11120,12 @@
             "type": "string",
             "nullable": true
           },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerificationCheckDto"
+            }
+          },
           "informationRequestNote": {
             "type": "string",
             "nullable": true,
@@ -9845,12 +11135,6 @@
             "format": "date-time",
             "type": "string",
             "nullable": true
-          },
-          "checks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VerificationCheckDto"
-            }
           },
           "locationEvidenceUrl": {
             "type": "string",
@@ -9908,9 +11192,9 @@
           "estimatedYieldUnit",
           "generalNote",
           "rejectionReason",
+          "checks",
           "informationRequestNote",
           "informationRequestedAt",
-          "checks",
           "locationEvidenceUrl",
           "productionEvidenceUrl",
           "farmPlotSketchUrl",
@@ -11450,6 +12734,736 @@
           "reason"
         ]
       },
+      "AdminOrderCountsDto": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "number",
+            "example": 120
+          },
+          "active": {
+            "type": "number",
+            "example": 40
+          },
+          "delivered": {
+            "type": "number",
+            "example": 70
+          },
+          "cancelled": {
+            "type": "number",
+            "example": 8
+          },
+          "issues": {
+            "type": "number",
+            "example": 2,
+            "description": "Orders with a dispute"
+          }
+        },
+        "required": [
+          "all",
+          "active",
+          "delivered",
+          "cancelled",
+          "issues"
+        ]
+      },
+      "AdminOrderCountsResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminOrderCountsDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "AdminOrderTab": {
+        "type": "string",
+        "enum": [
+          "ALL",
+          "ACTIVE",
+          "DELIVERED",
+          "CANCELLED",
+          "ISSUES"
+        ]
+      },
+      "AdminOrderProduceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "Premium Sesame Seeds"
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ]
+      },
+      "AdminOrderBuyerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "example": "BYR-000001"
+          },
+          "name": {
+            "type": "string",
+            "example": "Acme Foods Ltd",
+            "description": "Company name for company buyers, else the buyer name"
+          }
+        },
+        "required": [
+          "id",
+          "buyerId",
+          "name"
+        ]
+      },
+      "AdminOrderFarmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000001"
+          },
+          "name": {
+            "type": "string",
+            "example": "Green Acres"
+          },
+          "clusterCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "CL-000001",
+            "description": "Null when the farm is not in a cluster"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "name",
+          "clusterCode"
+        ]
+      },
+      "AdminOrderSourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000001"
+          }
+        },
+        "required": [
+          "id",
+          "requestNumber"
+        ]
+      },
+      "DisputeStatus": {
+        "type": "string",
+        "enum": [
+          "OPEN",
+          "RESOLVED"
+        ]
+      },
+      "AdminOrderDisputeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DisputeStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status"
+        ]
+      },
+      "AdminOrderRowDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrderStatus"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "example": 50
+          },
+          "unit": {
+            "type": "string",
+            "example": "kg",
+            "description": "Unit of the produce"
+          },
+          "produce": {
+            "$ref": "#/components/schemas/AdminOrderProduceDto"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/AdminOrderBuyerDto"
+          },
+          "farm": {
+            "$ref": "#/components/schemas/AdminOrderFarmDto"
+          },
+          "sourcingRequest": {
+            "nullable": true,
+            "description": "Null when the order was not placed from a sourcing request",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderSourcingRequestDto"
+              }
+            ]
+          },
+          "totalPrice": {
+            "type": "string",
+            "example": "17525.00"
+          },
+          "dispute": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderDisputeDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "orderNumber",
+          "createdAt",
+          "status",
+          "quantity",
+          "unit",
+          "produce",
+          "buyer",
+          "farm",
+          "sourcingRequest",
+          "totalPrice",
+          "dispute"
+        ]
+      },
+      "AdminOrderRowListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminOrderRowDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "AdminOrderDetailOrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string",
+            "example": "ORD-000123"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrderStatus"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "integer",
+            "example": 50
+          },
+          "unit": {
+            "type": "string",
+            "example": "kg",
+            "description": "Unit of the produce"
+          },
+          "produceName": {
+            "type": "string",
+            "example": "Premium Sesame Seeds"
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceType"
+              }
+            ]
+          },
+          "totalPrice": {
+            "type": "string",
+            "example": "17525.00"
+          },
+          "agentCommission": {
+            "type": "string",
+            "example": "875.00"
+          },
+          "cancellationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "fulfilledAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "orderNumber",
+          "createdAt",
+          "status",
+          "quantity",
+          "unit",
+          "produceName",
+          "type",
+          "totalPrice",
+          "agentCommission",
+          "cancellationReason",
+          "fulfilledAt"
+        ]
+      },
+      "AdminOrderDetailBuyerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string",
+            "example": "BYR-000001"
+          },
+          "name": {
+            "type": "string",
+            "example": "Acme Foods Ltd",
+            "description": "Company name for company buyers, else the buyer name"
+          },
+          "buyerType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BuyerType"
+              }
+            ]
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true,
+            "description": "The buyer's contact phone, else the user's phone"
+          },
+          "deliveryDestination": {
+            "type": "string",
+            "nullable": true,
+            "example": "Warehouse, 4 Marina Road, Lagos Island, Lagos",
+            "description": "The checkout's delivery address snapshot. Null for orders placed before checkouts existed."
+          }
+        },
+        "required": [
+          "id",
+          "buyerId",
+          "name",
+          "buyerType",
+          "contactPhone",
+          "deliveryDestination"
+        ]
+      },
+      "AdminOrderDetailFarmDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000001"
+          },
+          "name": {
+            "type": "string",
+            "example": "Green Acres"
+          },
+          "clusterCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "CL-000001",
+            "description": "Null when the farm is not in a cluster"
+          },
+          "lga": {
+            "type": "string",
+            "example": "Ikeja"
+          },
+          "state": {
+            "type": "string",
+            "example": "Lagos"
+          },
+          "verificationStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmVerificationStatus"
+              }
+            ]
+          },
+          "verifiedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "When the latest approved verification round was decided"
+          }
+        },
+        "required": [
+          "id",
+          "farmCode",
+          "name",
+          "clusterCode",
+          "lga",
+          "state",
+          "verificationStatus",
+          "verifiedAt"
+        ]
+      },
+      "PaymentProvider": {
+        "type": "string",
+        "enum": [
+          "STUB",
+          "PAYSTACK"
+        ]
+      },
+      "AdminOrderPaymentAttemptDto": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string",
+            "example": "PAY-000123"
+          },
+          "provider": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentProvider"
+              }
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "nullable": true,
+            "example": "card"
+          },
+          "amount": {
+            "type": "string",
+            "example": "17525.00"
+          },
+          "currency": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Currency"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reference",
+          "provider",
+          "channel",
+          "amount",
+          "currency"
+        ]
+      },
+      "AdminOrderPaymentDto": {
+        "type": "object",
+        "properties": {
+          "checkoutNumber": {
+            "type": "string",
+            "example": "CHK-000123"
+          },
+          "checkoutStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CheckoutStatus"
+              }
+            ]
+          },
+          "total": {
+            "type": "string",
+            "example": "17525.00"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "paidAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "payment": {
+            "nullable": true,
+            "description": "The succeeded payment, null until the checkout is paid",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPaymentAttemptDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "checkoutNumber",
+          "checkoutStatus",
+          "total",
+          "expiresAt",
+          "paidAt",
+          "payment"
+        ]
+      },
+      "SourcingUnit": {
+        "type": "string",
+        "enum": [
+          "KG",
+          "TONNES",
+          "BAGS",
+          "CRATES",
+          "BASKETS",
+          "LITRES",
+          "PIECES"
+        ]
+      },
+      "AdminOrderDetailSourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000001"
+          },
+          "produceName": {
+            "type": "string",
+            "example": "Sesame"
+          },
+          "quantity": {
+            "type": "number",
+            "example": 500
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "farmsAllocated": {
+            "type": "number",
+            "example": 3,
+            "description": "Distinct farms in the allocation"
+          },
+          "confirmedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the checkout was created"
+          }
+        },
+        "required": [
+          "id",
+          "requestNumber",
+          "produceName",
+          "quantity",
+          "unit",
+          "farmsAllocated",
+          "confirmedAt"
+        ]
+      },
+      "AdminOrderDetailDisputeDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DisputeStatus"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "quantityAffected": {
+            "type": "integer",
+            "example": 5
+          },
+          "raisedBy": {
+            "type": "string",
+            "example": "Ada Obi"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "refundPercent": {
+            "type": "string",
+            "nullable": true,
+            "example": "50.00"
+          },
+          "resolutionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolvedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "reason",
+          "quantityAffected",
+          "raisedBy",
+          "createdAt",
+          "refundPercent",
+          "resolutionNote",
+          "resolvedAt"
+        ]
+      },
+      "AdminOrderDetailDto": {
+        "type": "object",
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/AdminOrderDetailOrderDto"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/AdminOrderDetailBuyerDto"
+          },
+          "farm": {
+            "$ref": "#/components/schemas/AdminOrderDetailFarmDto"
+          },
+          "payment": {
+            "nullable": true,
+            "description": "Null for orders placed before checkouts existed",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderPaymentDto"
+              }
+            ]
+          },
+          "sourcingRequest": {
+            "nullable": true,
+            "description": "Null when the order was not placed from a sourcing request",
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderDetailSourcingRequestDto"
+              }
+            ]
+          },
+          "dispute": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOrderDetailDisputeDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "order",
+          "buyer",
+          "farm",
+          "payment",
+          "sourcingRequest",
+          "dispute"
+        ]
+      },
+      "AdminOrderDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminOrderDetailDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "InitiatePaymentDto": {
         "type": "object",
         "properties": {
@@ -12329,18 +14343,6 @@
           "deliveryDate"
         ]
       },
-      "SourcingUnit": {
-        "type": "string",
-        "enum": [
-          "KG",
-          "TONNES",
-          "BAGS",
-          "CRATES",
-          "BASKETS",
-          "LITRES",
-          "PIECES"
-        ]
-      },
       "QualityGrade": {
         "type": "string",
         "enum": [
@@ -12954,7 +14956,7 @@
           "data"
         ]
       },
-      "InviteAdminDto": {
+      "InviteByEmailDto": {
         "type": "object",
         "properties": {
           "email": {
@@ -12966,7 +14968,7 @@
           "email"
         ]
       },
-      "AdminInviteDto": {
+      "InviteDto": {
         "type": "object",
         "properties": {
           "id": {
@@ -12999,7 +15001,7 @@
           "createdAt"
         ]
       },
-      "AdminInviteResponseDto": {
+      "InviteResponseDto": {
         "type": "object",
         "properties": {
           "message": {
@@ -13007,7 +15009,7 @@
             "example": "OK"
           },
           "data": {
-            "$ref": "#/components/schemas/AdminInviteDto"
+            "$ref": "#/components/schemas/InviteDto"
           }
         },
         "required": [
@@ -13015,7 +15017,7 @@
           "data"
         ]
       },
-      "AdminInviteListResponseDto": {
+      "InviteListResponseDto": {
         "type": "object",
         "properties": {
           "message": {
@@ -13025,7 +15027,7 @@
           "data": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/AdminInviteDto"
+              "$ref": "#/components/schemas/InviteDto"
             }
           },
           "metaData": {
@@ -13038,7 +15040,7 @@
           "metaData"
         ]
       },
-      "AcceptAdminInviteDto": {
+      "AcceptInviteDto": {
         "type": "object",
         "properties": {
           "token": {
@@ -13082,6 +15084,11 @@
             "nullable": true,
             "example": "Gwagwalada Hub"
           },
+          "clusterCode": {
+            "type": "string",
+            "example": "CL-000018",
+            "description": "Public cluster code"
+          },
           "farmCount": {
             "type": "number",
             "example": 12
@@ -13090,6 +15097,7 @@
         "required": [
           "id",
           "name",
+          "clusterCode",
           "farmCount"
         ]
       },
@@ -13613,6 +15621,574 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "AgentVerificationStatus": {
+        "type": "string",
+        "enum": [
+          "ONBOARDING",
+          "PENDING",
+          "VERIFIED",
+          "SUSPENDED",
+          "REJECTED"
+        ]
+      },
+      "AdminAgentListItemDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Agent.id for GET /admin/agents/{id}; null while onboarding"
+          },
+          "agentId": {
+            "type": "string",
+            "nullable": true,
+            "example": "AG-000044",
+            "description": "Public agent code; null while onboarding"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Halima"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Bello"
+          },
+          "email": {
+            "type": "string",
+            "example": "halima@example.com"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "+2348012345678"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StateDto"
+              }
+            ]
+          },
+          "lga": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LgaDto"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentVerificationStatus"
+              }
+            ]
+          },
+          "assignedFarms": {
+            "type": "number",
+            "example": 12,
+            "description": "Farms in the agent's clusters"
+          },
+          "activeClusters": {
+            "type": "number",
+            "example": 1
+          },
+          "pendingRequests": {
+            "type": "number",
+            "example": 3,
+            "description": "Assigned sourcing requests not completed or closed"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "userId",
+          "id",
+          "agentId",
+          "firstName",
+          "lastName",
+          "email",
+          "phoneNumber",
+          "avatarUrl",
+          "state",
+          "lga",
+          "status",
+          "assignedFarms",
+          "activeClusters",
+          "pendingRequests",
+          "createdAt"
+        ]
+      },
+      "AdminAgentListItemListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminAgentListItemDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "AdminAgentSummaryDto": {
+        "type": "object",
+        "properties": {
+          "activeAgents": {
+            "type": "number",
+            "example": 18,
+            "description": "Verified agents"
+          },
+          "activeClusters": {
+            "type": "number",
+            "example": 18
+          },
+          "assignedFarms": {
+            "type": "number",
+            "example": 142,
+            "description": "Farms in those clusters"
+          },
+          "pendingRequests": {
+            "type": "number",
+            "example": 12,
+            "description": "Sourcing requests assigned to them, not completed or closed"
+          },
+          "earliestRequiredDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "Earliest required date among those requests, overdue ones included"
+          }
+        },
+        "required": [
+          "activeAgents",
+          "activeClusters",
+          "assignedFarms",
+          "pendingRequests",
+          "earliestRequiredDate"
+        ]
+      },
+      "AdminAgentSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminAgentSummaryDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "PendingAgentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string",
+            "example": "AG-000044",
+            "description": "Public agent code"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Musa"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Bello"
+          },
+          "email": {
+            "type": "string",
+            "example": "musa@example.com"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "+2348012345678"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StateDto"
+              }
+            ]
+          },
+          "lga": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LgaDto"
+              }
+            ]
+          },
+          "submittedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the agent completed their application"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "firstName",
+          "lastName",
+          "email",
+          "phoneNumber",
+          "avatarUrl",
+          "state",
+          "lga",
+          "submittedAt"
+        ]
+      },
+      "PendingAgentListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PendingAgentDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "CountDto": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "example": 12
+          }
+        },
+        "required": [
+          "total"
+        ]
+      },
+      "CountResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CountDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "VerificationMixDto": {
+        "type": "object",
+        "properties": {
+          "verified": {
+            "type": "number",
+            "example": 3
+          },
+          "pending": {
+            "type": "number",
+            "example": 1
+          },
+          "rejected": {
+            "type": "number",
+            "example": 0
+          },
+          "suspended": {
+            "type": "number",
+            "example": 0
+          }
+        },
+        "required": [
+          "verified",
+          "pending",
+          "rejected",
+          "suspended"
+        ]
+      },
+      "AdminAgentDetailDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string",
+            "example": "AG-000044",
+            "description": "Public agent code"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Musa"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Bello"
+          },
+          "email": {
+            "type": "string",
+            "example": "musa@example.com"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "+2348012345678"
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StateDto"
+              }
+            ]
+          },
+          "lga": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LgaDto"
+              }
+            ]
+          },
+          "submittedAt": {
+            "format": "date-time",
+            "type": "string",
+            "description": "When the agent completed their application"
+          },
+          "idType": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "12345678901"
+          },
+          "idDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the uploaded ID document; expires in 15 min"
+          },
+          "organisation": {
+            "type": "string",
+            "nullable": true
+          },
+          "professionalCertificateUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL; expires in 15 min"
+          },
+          "bankStatementUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL; expires in 15 min"
+          },
+          "documentsUploaded": {
+            "type": "number",
+            "example": 2,
+            "description": "Of ID document, professional certificate, bank statement"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentVerificationStatus"
+              }
+            ]
+          },
+          "verifiedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "rejectedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "rejectionReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "suspendedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Null unless currently suspended"
+          },
+          "suspendedUntil": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "Null when open-ended or not currently suspended"
+          },
+          "suspensionReason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null unless currently suspended"
+          },
+          "lastActivityAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true,
+            "description": "The agent's own latest recorded action, or null"
+          },
+          "verificationMix": {
+            "description": "Farms in the cluster by verification status",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VerificationMixDto"
+              }
+            ]
+          },
+          "cluster": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClusterSummaryDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "firstName",
+          "lastName",
+          "email",
+          "phoneNumber",
+          "avatarUrl",
+          "state",
+          "lga",
+          "submittedAt",
+          "idType",
+          "idNumber",
+          "idDocumentUrl",
+          "organisation",
+          "professionalCertificateUrl",
+          "bankStatementUrl",
+          "documentsUploaded",
+          "status",
+          "verifiedAt",
+          "rejectedAt",
+          "rejectionReason",
+          "suspendedAt",
+          "suspendedUntil",
+          "suspensionReason",
+          "lastActivityAt",
+          "verificationMix",
+          "cluster"
+        ]
+      },
+      "AdminAgentDetailResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AdminAgentDetailDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "RejectAgentDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "The ID document is unreadable"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "SuspendAgentDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Repeated missed farm visits"
+          },
+          "until": {
+            "format": "date-time",
+            "type": "string",
+            "description": "Must be in the future. Omit to suspend until further notice."
+          }
+        },
+        "required": [
+          "reason"
         ]
       },
       "BuyerProfileDto": {
@@ -14302,13 +16878,6 @@
         "required": [
           "reason",
           "quantityAffected"
-        ]
-      },
-      "DisputeStatus": {
-        "type": "string",
-        "enum": [
-          "OPEN",
-          "RESOLVED"
         ]
       },
       "DisputePhotoDto": {

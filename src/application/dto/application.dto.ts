@@ -67,4 +67,23 @@ export class ApplicationDto {
     description: 'Presigned URL of the chief’s confirmation; expires in 15 min',
   })
   chiefConfirmationUrl: string | null;
+
+  @ApiProperty({ type: String, nullable: true, description: 'Agents only' })
+  organisation: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Agents only. Presigned URL of the professional certificate; expires in 15 min',
+  })
+  professionalCertificateUrl: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Agents only. Presigned URL of the bank statement; expires in 15 min',
+  })
+  bankStatementUrl: string | null;
 }

@@ -45,32 +45,59 @@ function paragraph(html: string): string {
   return `<p style="margin:0 0 14px;line-height:1.5">${html}</p>`;
 }
 
-export function adminInviteEmail(input: {
-  acceptUrl: string;
-  expiresAt: Date;
-}): RenderedEmail {
-  const title = 'You’re invited to be a LAICOS admin';
-  const expires = input.expiresAt.toLocaleDateString('en-GB', {
+function lagosDate(date: Date): string {
+  return date.toLocaleDateString('en-GB', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
     timeZone: 'Africa/Lagos',
   });
-  const intro =
-    'An admin invited you to help run LAICOS. Set up your account to choose your name and password.';
-  const expiry = `This link expires on ${expires}.`;
+}
+
+export function adminInviteEmail(input: {
+  acceptUrl: string;
+  expiresAt: Date;
+}): RenderedEmail {
+  return inviteEmail({
+    ...input,
+    roleName: 'admin',
+    intro:
+      'An admin invited you to help run LAICOS. Set up your account to choose your name and password.',
+  });
+}
+
+export function agentInviteEmail(input: {
+  acceptUrl: string;
+  expiresAt: Date;
+}): RenderedEmail {
+  return inviteEmail({
+    ...input,
+    roleName: 'extension agent',
+    intro:
+      'An admin invited you to join LAICOS as an extension agent. Set up your account to choose your name and password, then complete your application.',
+  });
+}
+
+function inviteEmail(input: {
+  acceptUrl: string;
+  expiresAt: Date;
+  roleName: string;
+  intro: string;
+}): RenderedEmail {
+  const title = `You’re invited to be a LAICOS ${input.roleName}`;
+  const expiry = `This link expires on ${lagosDate(input.expiresAt)}.`;
   return {
-    subject: "You're invited to be a LAICOS admin",
+    subject: `You're invited to be a LAICOS ${input.roleName}`,
     html: layout(
       title,
       [
-        paragraph(intro),
+        paragraph(input.intro),
         button('Set up your account', input.acceptUrl),
         paragraph(expiry),
       ].join('\n'),
     ),
     text: [
-      intro,
+      input.intro,
       '',
       `Set up your account: ${input.acceptUrl}`,
       '',
@@ -182,6 +209,97 @@ export function farmRejectedEmail(input: {
       input.reason,
       '',
       'Our team will be in touch about what happens next.',
+    ].join('\n'),
+  };
+}
+
+export function agentRejectedEmail(input: {
+  firstName: string;
+  reason: string;
+}): RenderedEmail {
+  const title = 'We couldn’t approve your application';
+  return {
+    subject: title,
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(
+          'We reviewed your extension agent application and couldn’t approve it. The reason:',
+        ),
+        `<blockquote style="margin:0 0 14px;padding:12px 16px;border-left:4px solid ${BRAND};background:#f4f6f5;border-radius:8px">${escapeHtml(input.reason)}</blockquote>`,
+        paragraph('Our team will be in touch about what happens next.'),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      'We reviewed your extension agent application and couldn’t approve it. The reason:',
+      '',
+      input.reason,
+      '',
+      'Our team will be in touch about what happens next.',
+    ].join('\n'),
+  };
+}
+
+export function agentSuspendedEmail(input: {
+  firstName: string;
+  reason: string;
+  until: Date | null;
+}): RenderedEmail {
+  const title = 'Your account has been suspended';
+  const duration = input.until
+    ? `Your suspension lasts until ${lagosDate(input.until)}.`
+    : 'Your suspension lasts until further notice.';
+  const intro =
+    'Your LAICOS extension agent account has been suspended. The reason:';
+  return {
+    subject: 'Your LAICOS account has been suspended',
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(intro),
+        `<blockquote style="margin:0 0 14px;padding:12px 16px;border-left:4px solid ${BRAND};background:#f4f6f5;border-radius:8px">${escapeHtml(input.reason)}</blockquote>`,
+        paragraph(duration),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      intro,
+      '',
+      input.reason,
+      '',
+      duration,
+    ].join('\n'),
+  };
+}
+
+export function agentReinstatedEmail(input: {
+  firstName: string;
+  loginUrl: string;
+}): RenderedEmail {
+  const title = 'Your account is active again';
+  const intro =
+    'Your suspension has been lifted, and your LAICOS account is active again.';
+  return {
+    subject: 'Your LAICOS account is active again',
+    html: layout(
+      title,
+      [
+        paragraph(`Hi ${escapeHtml(input.firstName)},`),
+        paragraph(intro),
+        button('Log in', input.loginUrl),
+      ].join('\n'),
+    ),
+    text: [
+      `Hi ${input.firstName},`,
+      '',
+      intro,
+      '',
+      `Log in: ${input.loginUrl}`,
     ].join('\n'),
   };
 }

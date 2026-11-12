@@ -1,8 +1,15 @@
 import {
   OrderStatus,
+  Prisma,
   SourcingRequestStatus,
   SourcingUnit,
 } from '../../../generated/client';
+
+export const OPEN_SOURCING_REQUEST = {
+  status: {
+    notIn: [SourcingRequestStatus.COMPLETED, SourcingRequestStatus.CLOSED],
+  },
+} satisfies Prisma.SourcingRequestWhereInput;
 
 const UNIT_WORD: Record<SourcingUnit, string | null> = {
   [SourcingUnit.KG]: 'kg',

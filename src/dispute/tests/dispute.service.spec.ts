@@ -187,11 +187,13 @@ describe('DisputeService', () => {
         tx,
         expect.objectContaining({
           actorType: AuditActorType.BUYER,
+          actorUserId: buyerUser.id,
           farmId: 'farm-1',
           category: AuditCategory.DISPUTE,
           title: 'Dispute raised',
           resource: AuditResource.DISPUTE,
           resourceId: 'dispute-1',
+          orderId: 'order-1',
         }),
       );
     });
@@ -419,12 +421,48 @@ describe('DisputeService', () => {
         tx,
         expect.objectContaining({
           actorType: AuditActorType.ADMIN,
+          actorUserId: adminUser.id,
           farmId: 'farm-1',
           category: AuditCategory.DISPUTE,
           title: 'Dispute resolved',
           resource: AuditResource.DISPUTE,
           resourceId: 'dispute-1',
+          orderId: 'order-1',
         }),
+      );
+    });
+
+    it('records the order fulfilled on its timeline when resolution ends it', async () => {
+      await service.resolve(adminUser, 'dispute-1', {
+        refundPercent: 0,
+        note: 'n',
+      });
+
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          actorType: AuditActorType.ADMIN,
+          actorUserId: adminUser.id,
+          category: AuditCategory.ORDER,
+          title: 'Order ORD-000001 fulfilled',
+          resource: AuditResource.ORDER,
+          resourceId: 'order-1',
+          orderId: 'order-1',
+        }),
+      );
+    });
+
+    it('records no fulfilment for an order already fulfilled', async () => {
+      tx.order.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.resolve(adminUser, 'dispute-1', {
+        refundPercent: 0,
+        note: 'n',
+      });
+
+      expect(audit.record).not.toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ title: 'Order ORD-000001 fulfilled' }),
       );
     });
 

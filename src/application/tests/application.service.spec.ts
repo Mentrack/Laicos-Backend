@@ -42,6 +42,9 @@ function draft(over: Partial<Application> = {}): Application {
     referralAgentId: null,
     ownershipDocumentKey: null,
     chiefConfirmationKey: null,
+    organisation: null,
+    professionalCertificateKey: null,
+    bankStatementKey: null,
     completedAt: null,
     createdAt: new Date('2026-11-02'),
     updatedAt: new Date('2026-11-02'),
@@ -157,5 +160,100 @@ describe('ApplicationService', () => {
       'ada@example.com',
       expect.objectContaining({ subject: 'Your form is pending review' }),
     );
+  });
+
+  it('stores the organisation and the two agent documents, replacing old files', async () => {
+    const row = draft({
+      professionalCertificateKey: 'old-cert',
+      bankStatementKey: 'old-bank',
+    });
+    application.findUnique.mockResolvedValue(row);
+    application.update.mockImplementation(
+      ({ data }: { data: Partial<Application> }) =>
+        Promise.resolve({ ...row, ...data }),
+    );
+    storage.uploadPrivateFile.mockImplementation((prefix: string) =>
+      Promise.resolve(`${prefix}/file.pdf`),
+    );
+    storage.presignedUrlOrNull.mockImplementation((key: string | null) =>
+      Promise.resolve(key && `https://signed/${key}`),
+    );
+    const file = {
+      buffer: Buffer.from('%PDF'),
+      mimetype: 'application/pdf',
+      originalname: 'file.pdf',
+      size: 4,
+    };
+
+    const result = await service.save(
+      { ...user, role: Role.EXTENSION_AGENT },
+      { organisation: 'Kano State Extension Office' },
+      { professionalCertificate: file, bankStatement: file },
+    );
+
+    expect(application.update).toHaveBeenCalledWith({
+      where: { id: 'app-1' },
+      data: expect.objectContaining({
+        organisation: 'Kano State Extension Office',
+        professionalCertificateKey:
+          'applications/app-1/professional-certificate/file.pdf',
+        bankStatementKey: 'applications/app-1/bank-statement/file.pdf',
+      }),
+    });
+    expect(storage.deletePrivate).toHaveBeenCalledWith(
+      expect.arrayContaining(['old-cert', 'old-bank']),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        organisation: 'Kano State Extension Office',
+        professionalCertificateUrl:
+          'https://signed/applications/app-1/professional-certificate/file.pdf',
+        bankStatementUrl:
+          'https://signed/applications/app-1/bank-statement/file.pdf',
+      }),
+    );
+  });
+
+  it('copies the organisation and agent documents onto the new agent', async () => {
+    const agentUser = { ...user, role: Role.EXTENSION_AGENT };
+    const row = draft({
+      phoneNumber: '+2348012345678',
+      agreedToTerms: true,
+      idType: 'NIN',
+      idNumber: '123',
+      idDocumentKey: 'id',
+      stateId: 'state-1',
+      lgaId: 'lga-1',
+      organisation: 'Kano State Extension Office',
+      professionalCertificateKey: 'cert',
+      bankStatementKey: 'bank',
+    });
+    application.findUnique.mockResolvedValue(row);
+    application.update.mockResolvedValue(row);
+    application.updateMany.mockResolvedValue({ count: 1 });
+    application.findUniqueOrThrow.mockResolvedValue({
+      ...row,
+      status: ApplicationStatus.COMPLETED,
+    });
+    const agentCreate = jest
+      .fn()
+      .mockResolvedValue({ id: 'agent-1', agentId: 'AG-000001' });
+    database.$transaction = (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        ...database,
+        agent: { create: agentCreate },
+        user: { update: jest.fn() },
+      });
+    locations.requireLga.mockResolvedValue({ name: 'Nassarawa' });
+
+    await service.complete(agentUser, {}, {});
+
+    expect(agentCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        organisation: 'Kano State Extension Office',
+        professionalCertificateKey: 'cert',
+        bankStatementKey: 'bank',
+      }),
+    });
   });
 });

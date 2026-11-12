@@ -85,6 +85,7 @@ export async function recordLinkedAudit(
   tx: Prisma.TransactionClient,
   event: {
     actorType: AuditActorType;
+    actorUserId: string | null;
     farmerId: string | null;
     agentId: string | null;
     farmId: string | null;
@@ -95,6 +96,7 @@ export async function recordLinkedAudit(
     resource: AuditResource | null;
     resourceId: string | null;
     sourcingRequestId: string;
+    orderId?: string | null;
   },
 ): Promise<void> {
   await tx.auditEvent.create({ data: event });

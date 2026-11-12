@@ -1,5 +1,9 @@
 import {
   adminInviteEmail,
+  agentInviteEmail,
+  agentReinstatedEmail,
+  agentRejectedEmail,
+  agentSuspendedEmail,
   farmRejectedEmail,
   accountVerifiedEmail,
   applicationPendingEmail,
@@ -39,6 +43,19 @@ describe('email templates', () => {
     expect(email.html).toContain('Set up your account');
   });
 
+  it('invites an extension agent with a link and the expiry date', () => {
+    const acceptUrl = 'https://app.laicos.ng/agent-invite?token=abc';
+    const email = agentInviteEmail({
+      acceptUrl,
+      expiresAt: new Date('2026-11-16T12:00:00.000Z'),
+    });
+    expect(email.subject).toBe("You're invited to be a LAICOS extension agent");
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain(acceptUrl);
+      expect(body).toContain('16 November 2026');
+    }
+  });
+
   it('tells someone who already has a password that they have full access', () => {
     const email = accountVerifiedEmail({ firstName: 'Ada', loginUrl });
     expect(email.text).toContain('You have been verified and have full access');
@@ -61,6 +78,53 @@ describe('email templates', () => {
     expect(email.subject).toContain('Green Acres');
     expect(email.text).toContain('No farm at the address');
     expect(email.html).toContain('No farm at the address');
+  });
+
+  it('tells a rejected agent the reason, escaped in html', () => {
+    const email = agentRejectedEmail({
+      firstName: 'Musa',
+      reason: 'ID <b>unreadable</b>',
+    });
+    expect(email.subject).toBe('We couldn’t approve your application');
+    expect(email.text).toContain('ID <b>unreadable</b>');
+    expect(email.html).toContain('ID &lt;b&gt;unreadable&lt;/b&gt;');
+    expect(email.html).toContain('Musa');
+  });
+
+  it('tells a suspended agent the escaped reason and the end date', () => {
+    const email = agentSuspendedEmail({
+      firstName: 'Musa',
+      reason: 'Repeated <b>late</b> visits',
+      until: new Date('2026-12-01T09:00:00Z'),
+    });
+    expect(email.subject).toBe('Your LAICOS account has been suspended');
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain('1 December 2026');
+    }
+    expect(email.text).toContain('Repeated <b>late</b> visits');
+    expect(email.html).toContain('Repeated &lt;b&gt;late&lt;/b&gt; visits');
+    expect(email.html).not.toContain('<b>late</b>');
+    expect(email.html).toContain('Musa');
+  });
+
+  it('says a suspension without an end date lasts until further notice', () => {
+    const email = agentSuspendedEmail({
+      firstName: 'Musa',
+      reason: 'Under investigation',
+      until: null,
+    });
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain('until further notice');
+    }
+  });
+
+  it('tells a reinstated agent their account is active and links to log in', () => {
+    const email = agentReinstatedEmail({ firstName: 'Musa', loginUrl });
+    expect(email.subject).toBe('Your LAICOS account is active again');
+    for (const body of [email.html, email.text]) {
+      expect(body).toContain(loginUrl);
+    }
+    expect(email.html).toContain('Musa');
   });
 
   it('links to the reset page', () => {

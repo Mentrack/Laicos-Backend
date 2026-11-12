@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import {
   FarmVerificationStatus,
   Prisma,
@@ -199,6 +200,104 @@ describe('AdminProduceService', () => {
     expect(age).toBeLessThan(7 * 24 * 60 * 60 * 1000 + 5_000);
     const [sql] = database.$queryRaw.mock.calls[0] as [TemplateStringsArray];
     expect(sql.join(' ')).toContain(`lower(btrim(unit)) = 'kg'`);
+  });
+
+  describe('summaryForFarm', () => {
+    const farmId = '6f1c1c3e-2b8e-4a55-9d0e-3b6b1f0c9a11';
+
+    // Prisma.sql fragments nest as Sql objects inside the tagged-template values.
+    function flattenQuery(call: unknown[]) {
+      const [strings, ...parts] = call as [TemplateStringsArray, ...unknown[]];
+      const text: string[] = [...strings];
+      const values: unknown[] = [];
+      const walk = (part: unknown) => {
+        if (part instanceof Prisma.Sql) {
+          text.push(...part.strings);
+          part.values.forEach(walk);
+        } else {
+          values.push(part);
+        }
+      };
+      parts.forEach(walk);
+      return { sql: text.join(' '), values };
+    }
+
+    it('counts one farm’s product cards', async () => {
+      farm.findUnique.mockResolvedValue({ id: farmId });
+      produce.count.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
+      produce.groupBy
+        .mockResolvedValueOnce([
+          { status: ProduceStatus.PUBLISHED, _count: { _all: 1 } },
+          { status: ProduceStatus.DRAFT, _count: { _all: 1 } },
+        ])
+        .mockResolvedValueOnce([{ category: 'GRAINS', _count: { _all: 2 } }])
+        .mockResolvedValueOnce([{ farmId }]);
+      database.$queryRaw.mockResolvedValue([{ sum: 500 }]);
+      cluster.count.mockResolvedValue(1);
+
+      await expect(service.summaryForFarm(farmId)).resolves.toEqual({
+        totalProducts: 2,
+        categoryCount: 1,
+        participatingFarms: 1,
+        activeListings: 1,
+        inactiveListings: 1,
+        availableStockKg: 500,
+        activeClusters: 1,
+        recentListings: 1,
+      });
+      expect(produce.count).toHaveBeenNthCalledWith(1, { where: { farmId } });
+      expect(produce.groupBy).toHaveBeenCalledWith({
+        by: ['category'],
+        where: { category: { not: null }, farmId },
+        _count: { _all: true },
+      });
+      expect(cluster.count).toHaveBeenCalledWith({
+        where: { farms: { some: { id: farmId, produce: { some: {} } } } },
+      });
+      const { sql, values } = flattenQuery(database.$queryRaw.mock.calls[0]);
+      expect(sql).toContain('"farmId"');
+      expect(values).toContain(farmId);
+    });
+
+    it('binds no farm in the platform summary’s raw query', async () => {
+      database.$queryRaw.mockResolvedValue([{ sum: 0 }]);
+      produce.groupBy.mockResolvedValue([]);
+      cluster.count.mockResolvedValue(0);
+
+      await service.summary();
+
+      const { sql, values } = flattenQuery(database.$queryRaw.mock.calls[0]);
+      expect(sql).not.toContain('"farmId"');
+      expect(values).toEqual([]);
+    });
+
+    it('returns zeros for a farm with no listings', async () => {
+      farm.findUnique.mockResolvedValue({ id: farmId });
+      produce.count.mockResolvedValue(0);
+      produce.groupBy.mockResolvedValue([]);
+      database.$queryRaw.mockResolvedValue([{ sum: 0 }]);
+      cluster.count.mockResolvedValue(0);
+
+      await expect(service.summaryForFarm(farmId)).resolves.toEqual({
+        totalProducts: 0,
+        categoryCount: 0,
+        participatingFarms: 0,
+        activeListings: 0,
+        inactiveListings: 0,
+        availableStockKg: 0,
+        activeClusters: 0,
+        recentListings: 0,
+      });
+    });
+
+    it('404s the summary for a missing farm', async () => {
+      farm.findUnique.mockResolvedValue(null);
+
+      await expect(service.summaryForFarm(farmId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(produce.count).not.toHaveBeenCalled();
+    });
   });
 
   it('disables a listing that has no open paid order', async () => {

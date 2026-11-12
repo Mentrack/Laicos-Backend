@@ -23,6 +23,6 @@ import { FarmerService } from './services/farmer.service';
   ],
   // Agent onboarding still registers farmers here. Applications complete
   // a farm through FarmService.
-  exports: [FarmerRegistrationService, FarmService],
+  exports: [AdminFarmService, FarmerRegistrationService, FarmService],
 })
 export class FarmModule {}

@@ -87,6 +87,7 @@ export class AgentService {
       cluster: {
         id: agent.cluster.id,
         name: agent.cluster.name,
+        clusterCode: agent.cluster.clusterCode,
         farmCount: agent.cluster._count.farms,
       },
     };
@@ -122,6 +123,7 @@ export class AgentService {
       if (summary) {
         await this.audit.record(tx, {
           actorType: AuditActorType.EXTENSION_AGENT,
+          actorUserId: user.id,
           farmerId: null,
           agentId: agent.id,
           farmId: null,
@@ -152,6 +154,7 @@ export class AgentService {
           });
           await this.audit.record(tx, {
             actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: user.id,
             farmerId: null,
             agentId: agent.id,
             farmId: null,

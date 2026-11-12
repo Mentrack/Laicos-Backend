@@ -240,6 +240,9 @@ export class AdminAssignmentDto {
 
   @ApiProperty({ type: String, nullable: true })
   clusterName: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: 'CL-000018' })
+  clusterCode: string | null;
 }
 
 export class AdminSourcingOrderDto {

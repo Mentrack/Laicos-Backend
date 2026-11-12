@@ -16,7 +16,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
 import { HandoverService } from '../handover.service';
 
-const agent = { id: 'agent-1', isVerified: true } as Agent;
+const agent = {
+  id: 'agent-1',
+  userId: 'agent-user-1',
+  isVerified: true,
+} as Agent;
 const orderId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
 const notFound = () =>
   new Prisma.PrismaClientKnownRequestError('boom', {
@@ -99,6 +103,7 @@ describe('HandoverService', () => {
   );
   const handoverAudit = (title: string) => ({
     actorType: AuditActorType.EXTENSION_AGENT,
+    actorUserId: 'agent-user-1',
     farmerId: null,
     agentId: agent.id,
     farmId: 'farm-1',
@@ -109,6 +114,7 @@ describe('HandoverService', () => {
     resource: AuditResource.ORDER,
     resourceId: orderId,
     sourcingRequestId: null,
+    orderId,
   });
   const image: StorageUploadFile = {
     buffer: Buffer.from([0xff, 0xd8, 0xff, 0]),

@@ -14,7 +14,7 @@ import {
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { User } from '../../generated/client';
 import { AllowPendingApplication } from '../auth/decorators/allow-pending-application.decorator';
-import { AllowSuspendedFarmer } from '../auth/decorators/allow-suspended-farmer.decorator';
+import { AllowSuspended } from '../auth/decorators/allow-suspended.decorator';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApiEnvelope, MessageResponseDto } from '../common/dto/envelope';
@@ -76,7 +76,7 @@ export class NotificationController {
   @HttpCode(HttpStatus.OK)
   @Auth()
   @AllowPendingApplication()
-  @AllowSuspendedFarmer()
+  @AllowSuspended()
   @ApiOkResponse({ type: MessageResponseDto })
   async registerDevice(
     @CurrentUser() user: User,
@@ -94,7 +94,7 @@ export class NotificationController {
   })
   @Auth()
   @AllowPendingApplication()
-  @AllowSuspendedFarmer()
+  @AllowSuspended()
   @ApiOkResponse({ type: MessageResponseDto })
   async unregisterDevice(
     @CurrentUser() user: User,

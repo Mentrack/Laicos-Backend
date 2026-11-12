@@ -1,9 +1,11 @@
 import { ConflictException, HttpException } from '@nestjs/common';
 import {
+  AuditActorType,
   CheckoutStatus,
   FarmVerificationStatus,
   Prisma,
   ProduceStatus,
+  OrderStatus,
   ProduceType,
   Role,
   type User,
@@ -104,6 +106,7 @@ describe('CheckoutService', () => {
     },
     order: { findMany: jest.fn(), updateMany: jest.fn() },
     payment: { updateMany: jest.fn() },
+    auditEvent: { createMany: jest.fn() },
     address: { findFirst: jest.fn() },
     cartItem: { findMany: jest.fn(), deleteMany: jest.fn() },
     produce: {
@@ -445,6 +448,40 @@ describe('CheckoutService', () => {
         }),
       );
       expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
+    });
+
+    it('records each cancelled order against the buyer', async () => {
+      tx.checkout.findFirst.mockResolvedValue(checkoutRow());
+      tx.order.findMany.mockResolvedValue([
+        {
+          id: 'order-1',
+          orderNumber: 'ORD-000001',
+          farmId: 'farm-1',
+          produceId: 'produce-1',
+          quantity: 2,
+          status: OrderStatus.AWAITING_PAYMENT,
+        },
+      ]);
+      tx.produce.update.mockResolvedValue({
+        id: 'produce-1',
+        status: ProduceStatus.PUBLISHED,
+        actualQuantity: 10,
+        floatingQuantity: 10,
+      });
+      tx.checkout.update.mockResolvedValue(
+        checkoutRow({ status: CheckoutStatus.CANCELLED }),
+      );
+      await service.cancel(buyer, checkoutId);
+      expect(tx.auditEvent.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            actorType: AuditActorType.BUYER,
+            actorUserId: buyer.id,
+            orderId: 'order-1',
+            title: 'Order ORD-000001 cancelled',
+          }),
+        ],
+      });
     });
 
     it('asks the buyer to retry when the transaction times out', async () => {

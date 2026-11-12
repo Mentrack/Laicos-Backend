@@ -116,6 +116,7 @@ describe('ProduceService', () => {
       await service.create(user, dto, imageFile);
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: 'user-1',
         farmerId: 'farmer-1',
         agentId: null,
         farmId,
@@ -357,6 +358,7 @@ describe('ProduceService', () => {
       await service.update(user, produceId, { name: 'New' });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: 'user-1',
         farmerId: 'farmer-1',
         agentId: null,
         farmId,
@@ -477,6 +479,7 @@ describe('ProduceService', () => {
       await service.remove(user, produceId);
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: 'user-1',
         farmerId: 'farmer-1',
         agentId: null,
         farmId,

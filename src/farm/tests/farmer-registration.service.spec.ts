@@ -106,6 +106,7 @@ describe('FarmerRegistrationService', () => {
     farm: { ...farm, referralAgentId: 'agent-1' },
     documents: { idDocument: pdf, ownershipDocument: pdf },
     preferredAgentId: 'agent-1',
+    agentUserId: 'agent-user-1',
   };
 
   beforeEach(() => {
@@ -159,8 +160,28 @@ describe('FarmerRegistrationService', () => {
       tx,
       expect.objectContaining({
         actorType: AuditActorType.EXTENSION_AGENT,
+        actorUserId: 'agent-user-1',
         category: AuditCategory.ONBOARDING,
         resource: AuditResource.FARM,
+      }),
+    );
+  });
+
+  it('records every registration row as the onboarding agent', async () => {
+    await service.register(input);
+    expect(audit.record).toHaveBeenCalledTimes(5);
+    for (const [, event] of audit.record.mock.calls as [unknown, object][]) {
+      expect(event).toMatchObject({
+        actorType: AuditActorType.EXTENSION_AGENT,
+        actorUserId: 'agent-user-1',
+      });
+    }
+    expect(audit.record).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({
+        title: 'Account created',
+        farmerId: 'farmer-1',
+        agentId: null,
       }),
     );
   });

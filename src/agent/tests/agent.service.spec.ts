@@ -44,7 +44,12 @@ function row(overrides: Record<string, unknown> = {}) {
     idDocumentKey: null,
     isVerified: false,
     verifiedAt: null,
-    cluster: { id: 'cluster-1', name: 'Gwagwalada Hub', _count: { farms: 3 } },
+    cluster: {
+      id: 'cluster-1',
+      name: 'Gwagwalada Hub',
+      clusterCode: 'CL-000001',
+      _count: { farms: 3 },
+    },
     ...overrides,
   };
 }
@@ -98,7 +103,12 @@ describe('AgentService', () => {
       agentId: 'AG-000044',
       isVerified: false,
       lga: { name: 'Gwagwalada' },
-      cluster: { id: 'cluster-1', name: 'Gwagwalada Hub', farmCount: 3 },
+      cluster: {
+        id: 'cluster-1',
+        name: 'Gwagwalada Hub',
+        clusterCode: 'CL-000001',
+        farmCount: 3,
+      },
       idDocumentUrl: null,
     });
   });
@@ -147,6 +157,7 @@ describe('AgentService', () => {
       await service.updateMine(user, { stateId: 'state-1', lgaId: 'lga-2' });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.EXTENSION_AGENT,
+        actorUserId: 'user-1',
         farmerId: null,
         agentId: 'agent-1',
         farmId: null,
@@ -163,6 +174,7 @@ describe('AgentService', () => {
       await service.updateMine(user, { idType: IdType.NIN });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.EXTENSION_AGENT,
+        actorUserId: 'user-1',
         farmerId: null,
         agentId: 'agent-1',
         farmId: null,
@@ -182,6 +194,7 @@ describe('AgentService', () => {
       });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.EXTENSION_AGENT,
+        actorUserId: 'user-1',
         farmerId: null,
         agentId: 'agent-1',
         farmId: null,
@@ -208,6 +221,7 @@ describe('AgentService', () => {
     await service.uploadIdDocument(user, pdf);
     expect(audit.record).toHaveBeenCalledWith(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
+      actorUserId: 'user-1',
       farmerId: null,
       agentId: 'agent-1',
       farmId: null,

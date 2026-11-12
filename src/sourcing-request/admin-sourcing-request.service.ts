@@ -7,15 +7,16 @@ import {
   AuditActorType,
   AuditCategory,
   AuditResource,
-  BuyerType,
   CheckoutStatus,
   FarmVerificationStatus,
   Prisma,
   ProduceStatus,
   SourcingRequestStatus,
   type SourcingUnit,
+  type User,
 } from '../../generated/client';
 import { AuditService } from '../audit/audit.service';
+import { buyerDisplayName } from '../buyer/formatters/buyer.formatter';
 import { CreateCheckoutDto } from '../cart/dto';
 import { formatCheckout } from '../cart/formatters/checkout.formatter';
 import {
@@ -25,6 +26,7 @@ import {
 } from '../cart/utils/place-checkout';
 import { advisoryLock } from '../common/advisory-lock';
 import { fromDateColumn } from '../common/dates';
+import { fullName } from '../common/names';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { orderLine, tryReserveProduce } from '../order/utils/reservation';
 import { CheckoutConfig } from '../payment/checkout-config';
@@ -120,7 +122,7 @@ export class AdminSourcingRequestService {
       data: rows.map((row) => ({
         id: row.id,
         requestNumber: row.requestNumber,
-        buyerName: displayName(row.buyer),
+        buyerName: buyerDisplayName(row.buyer),
         produceName: row.produceName,
         quantity: row.quantity,
         unit: row.unit,
@@ -189,7 +191,7 @@ export class AdminSourcingRequestService {
         id: request.buyer.id,
         buyerId: request.buyer.buyerId,
         buyerType: request.buyer.buyerType,
-        displayName: displayName(request.buyer),
+        displayName: buyerDisplayName(request.buyer),
         phoneNumber: request.buyer.user.phoneNumber,
         state: request.buyer.state?.name ?? null,
         lga: request.buyer.lga?.name ?? null,
@@ -206,6 +208,7 @@ export class AdminSourcingRequestService {
             agentCode: request.assignedAgent.agentId,
             name: fullName(request.assignedAgent.user),
             clusterName: request.assignedAgent.cluster?.name ?? null,
+            clusterCode: request.assignedAgent.cluster?.clusterCode ?? null,
           }
         : null,
       allocations: request.allocations.map((row) =>
@@ -276,7 +279,7 @@ export class AdminSourcingRequestService {
       .map((produce) => allocationRow(produce));
   }
 
-  async assign(id: string, dto: AssignAgentDto) {
+  async assign(admin: User, id: string, dto: AssignAgentDto) {
     await busyAsConflict(() =>
       this.database.$transaction(async (tx) => {
         await advisoryLock(tx, `sourcing:${id}`);
@@ -320,6 +323,7 @@ export class AdminSourcingRequestService {
         if (changed) {
           await this.audit.record(tx, {
             actorType: AuditActorType.ADMIN,
+            actorUserId: admin.id,
             farmerId: null,
             agentId: agent.id,
             farmId: null,
@@ -339,7 +343,7 @@ export class AdminSourcingRequestService {
     return this.findOne(id);
   }
 
-  async save(id: string, dto: SaveAllocationsDto) {
+  async save(admin: User, id: string, dto: SaveAllocationsDto) {
     await busyAsConflict(() =>
       this.database.$transaction(async (tx) => {
         await advisoryLock(tx, `sourcing:${id}`);
@@ -383,6 +387,7 @@ export class AdminSourcingRequestService {
         if (!sameGroup(current, next)) {
           await this.audit.record(tx, {
             actorType: AuditActorType.ADMIN,
+            actorUserId: admin.id,
             farmerId: null,
             agentId: request.assignedAgentId,
             farmId: null,
@@ -408,7 +413,12 @@ export class AdminSourcingRequestService {
     return this.findOne(id);
   }
 
-  confirm(id: string, idempotencyKey: string, dto: CreateCheckoutDto) {
+  confirm(
+    admin: User,
+    id: string,
+    idempotencyKey: string,
+    dto: CreateCheckoutDto,
+  ) {
     return busyAsConflict(() =>
       this.database.$transaction(async (tx) => {
         await advisoryLock(tx, `sourcing:${id}`);
@@ -506,11 +516,13 @@ export class AdminSourcingRequestService {
             delivery,
             expectedTotal: dto.expectedTotal,
             sourcingRequestId: id,
+            placedBy: { type: AuditActorType.ADMIN, userId: admin.id },
           },
           this.config,
         );
         await this.audit.record(tx, {
           actorType: AuditActorType.ADMIN,
+          actorUserId: admin.id,
           farmerId: null,
           agentId: request.assignedAgentId,
           farmId: null,
@@ -528,7 +540,7 @@ export class AdminSourcingRequestService {
     );
   }
 
-  async escalate(id: string) {
+  async escalate(admin: User, id: string) {
     await this.database.$transaction(async (tx) => {
       const request = await this.requireRequest(id, tx);
       if (
@@ -546,6 +558,7 @@ export class AdminSourcingRequestService {
       });
       await this.audit.record(tx, {
         actorType: AuditActorType.ADMIN,
+        actorUserId: admin.id,
         farmerId: null,
         agentId: request.assignedAgentId,
         farmId: null,
@@ -561,7 +574,7 @@ export class AdminSourcingRequestService {
     return this.findOne(id);
   }
 
-  async close(id: string, dto: CloseSourcingRequestDto) {
+  async close(admin: User, id: string, dto: CloseSourcingRequestDto) {
     await busyAsConflict(() =>
       this.database.$transaction(async (tx) => {
         await advisoryLock(tx, `sourcing:${id}`);
@@ -597,11 +610,13 @@ export class AdminSourcingRequestService {
             awaiting.id,
             CheckoutStatus.CANCELLED,
             dto.reason,
+            { type: AuditActorType.ADMIN, userId: admin.id },
           );
         }
         await syncSourcingRequest(tx, id);
         await this.audit.record(tx, {
           actorType: AuditActorType.ADMIN,
+          actorUserId: admin.id,
           farmerId: null,
           agentId: request.assignedAgentId,
           farmId: null,
@@ -722,21 +737,6 @@ const DETAIL_INCLUDE = {
     },
   },
 } satisfies Prisma.SourcingRequestInclude;
-
-function displayName(buyer: {
-  buyerType: BuyerType;
-  legalName: string | null;
-  user: { firstName: string; lastName: string };
-}): string {
-  if (buyer.buyerType === BuyerType.COMPANY && buyer.legalName) {
-    return buyer.legalName;
-  }
-  return fullName(buyer.user);
-}
-
-function fullName(user: { firstName: string; lastName: string }): string {
-  return `${user.firstName} ${user.lastName}`.trim();
-}
 
 function paidOrders(
   checkouts: {

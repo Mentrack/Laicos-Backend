@@ -15,6 +15,7 @@ import {
   assertBuyerKind,
   type CompanyField,
 } from './utils/buyer-kind';
+import type { CountDto } from '../common/dto/count.dto';
 import { LocationService } from '../location/location.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { BuyerDto, BuyerProfileDto, UpdateBuyerDto } from './dto';
@@ -74,6 +75,10 @@ export class BuyerService {
       throw new NotFoundException('Buyer profile not found');
     }
     return toBuyerDto(buyer);
+  }
+
+  async count(): Promise<CountDto> {
+    return { total: await this.database.buyer.count() };
   }
 }
 

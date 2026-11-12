@@ -46,6 +46,8 @@ export interface FarmerRegistration {
   >;
   documents: FarmDocumentUploads;
   preferredAgentId?: string;
+  /** The onboarding agent's User.id: the actor on every row written here. */
+  agentUserId: string;
 }
 
 /**
@@ -112,7 +114,8 @@ export class FarmerRegistrationService {
         );
         const fullName = `${input.user.firstName} ${input.user.lastName}`;
         await this.audit.record(tx, {
-          actorType: AuditActorType.FARMER,
+          actorType: AuditActorType.EXTENSION_AGENT,
+          actorUserId: input.agentUserId,
           farmerId: farmer.id,
           agentId: null,
           farmId: null,
@@ -124,7 +127,8 @@ export class FarmerRegistrationService {
           resourceId: farmer.id,
         });
         await this.audit.record(tx, {
-          actorType: AuditActorType.FARMER,
+          actorType: AuditActorType.EXTENSION_AGENT,
+          actorUserId: input.agentUserId,
           farmerId: farmer.id,
           agentId: null,
           farmId: farm.id,
@@ -137,7 +141,8 @@ export class FarmerRegistrationService {
         });
         if (stored.idDocumentKey) {
           await this.audit.record(tx, {
-            actorType: AuditActorType.FARMER,
+            actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: input.agentUserId,
             farmerId: farmer.id,
             agentId: null,
             farmId: null,
@@ -155,7 +160,8 @@ export class FarmerRegistrationService {
         );
         if (farmDocSummary) {
           await this.audit.record(tx, {
-            actorType: AuditActorType.FARMER,
+            actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: input.agentUserId,
             farmerId: farmer.id,
             agentId: null,
             farmId: farm.id,
@@ -170,6 +176,7 @@ export class FarmerRegistrationService {
         if (input.preferredAgentId) {
           await this.audit.record(tx, {
             actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: input.agentUserId,
             farmerId: null,
             agentId: input.preferredAgentId,
             farmId: farm.id,

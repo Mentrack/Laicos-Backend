@@ -29,7 +29,7 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 describe('BuyerService', () => {
-  const buyer = { findUnique: jest.fn(), update: jest.fn() };
+  const buyer = { findUnique: jest.fn(), update: jest.fn(), count: jest.fn() };
   const database = { buyer };
   const locations = { requireLga: jest.fn() };
   const service = new BuyerService(
@@ -96,5 +96,12 @@ describe('BuyerService', () => {
       id: 'buyer-1',
       buyerId: 'BY-000001',
     });
+  });
+
+  it('counts every buyer on the platform', async () => {
+    buyer.count.mockResolvedValue(186);
+
+    await expect(service.count()).resolves.toEqual({ total: 186 });
+    expect(buyer.count).toHaveBeenCalledWith();
   });
 });

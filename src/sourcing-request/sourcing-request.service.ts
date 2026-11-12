@@ -44,6 +44,7 @@ export class SourcingRequestService {
       });
       await this.audit.record(tx, {
         actorType: AuditActorType.BUYER,
+        actorUserId: user.id,
         farmerId: null,
         agentId: null,
         farmId: null,

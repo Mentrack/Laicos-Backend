@@ -38,6 +38,20 @@ export class AdminProduceService {
   }
 
   async findByFarm(farmId: string, query: AdminProduceQueryDto) {
+    await this.requireFarm(farmId);
+    return this.list(query, farmId);
+  }
+
+  async summary(): Promise<AdminProduceSummaryDto> {
+    return this.summarise();
+  }
+
+  async summaryForFarm(farmId: string): Promise<AdminProduceSummaryDto> {
+    await this.requireFarm(farmId);
+    return this.summarise(farmId);
+  }
+
+  private async requireFarm(farmId: string): Promise<void> {
     const farm = await this.database.farm.findUnique({
       where: { id: farmId },
       select: { id: true },
@@ -45,7 +59,6 @@ export class AdminProduceService {
     if (!farm) {
       throw new NotFoundException('Farm not found');
     }
-    return this.list(query, farmId);
   }
 
   private async list(query: AdminProduceQueryDto, farmId?: string) {
@@ -67,7 +80,7 @@ export class AdminProduceService {
     };
   }
 
-  async summary(): Promise<AdminProduceSummaryDto> {
+  private async summarise(farmId?: string): Promise<AdminProduceSummaryDto> {
     const since = new Date(Date.now() - WEEK_MS);
     const [
       totalProducts,
@@ -78,27 +91,31 @@ export class AdminProduceService {
       activeClusters,
       recentListings,
     ] = await Promise.all([
-      this.database.produce.count(),
+      this.database.produce.count({ where: { farmId } }),
       this.database.produce.groupBy({
         by: ['status'],
+        where: { farmId },
         _count: { _all: true },
       }),
       this.database.produce.groupBy({
         by: ['category'],
-        where: { category: { not: null } },
+        where: { category: { not: null }, farmId },
         _count: { _all: true },
       }),
-      this.database.produce.groupBy({ by: ['farmId'] }),
+      this.database.produce.groupBy({ by: ['farmId'], where: { farmId } }),
       // Units are free text, so only kilograms can be added into one figure.
       this.database.$queryRaw<{ sum: number }[]>`
         SELECT COALESCE(SUM("floatingQuantity"), 0)::int AS sum
         FROM "Produce"
         WHERE lower(btrim(unit)) = 'kg'
+        ${farmId ? Prisma.sql`AND "farmId" = ${farmId}` : Prisma.empty}
       `,
       this.database.cluster.count({
-        where: { farms: { some: { produce: { some: {} } } } },
+        where: { farms: { some: { id: farmId, produce: { some: {} } } } },
       }),
-      this.database.produce.count({ where: { createdAt: { gte: since } } }),
+      this.database.produce.count({
+        where: { createdAt: { gte: since }, farmId },
+      }),
     ]);
     const byStatus = {
       [ProduceStatus.DRAFT]: 0,

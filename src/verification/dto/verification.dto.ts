@@ -1,6 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, IntersectionType } from '@nestjs/swagger';
 import {
-  CheckResult,
   EvidenceKind,
   EvidenceStatus,
   PhotoSlot,
@@ -9,6 +8,7 @@ import {
 } from '../../../generated/client';
 import { IdentityDto } from '../../common/dto/identity.dto';
 import { FarmSummaryDto } from '../../farm/dto';
+import { VerificationFindingsDto } from './findings.dto';
 
 export class VerificationFarmerDto extends IdentityDto {
   @ApiProperty({ format: 'uuid' })
@@ -47,17 +47,6 @@ export class VerificationFarmDto extends FarmSummaryDto {
 
   @ApiProperty({ type: VerificationFarmerDto })
   farmer: VerificationFarmerDto;
-}
-
-export class VerificationCheckDto {
-  @ApiProperty({ enum: VerificationCheckKey, enumName: 'VerificationCheckKey' })
-  key: VerificationCheckKey;
-
-  @ApiProperty({ enum: CheckResult, enumName: 'CheckResult' })
-  result: CheckResult;
-
-  @ApiProperty({ type: String, nullable: true })
-  note: string | null;
 }
 
 export class VerificationEvidenceDto {
@@ -110,44 +99,12 @@ export class VerificationSummaryDto {
   createdAt: Date;
 }
 
-export class VerificationDto extends VerificationSummaryDto {
+export class VerificationDto extends IntersectionType(
+  VerificationSummaryDto,
+  VerificationFindingsDto,
+) {
   @ApiProperty({ type: VerificationFarmDto })
   declare farm: VerificationFarmDto;
-
-  @ApiProperty({ type: Boolean, nullable: true })
-  locationMatches: boolean | null;
-
-  @ApiProperty({ type: Number, nullable: true, example: 8.1234 })
-  discrepancyLat: number | null;
-
-  @ApiProperty({ type: Number, nullable: true, example: 4.2567 })
-  discrepancyLng: number | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  discrepancyNote: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  identityNote: string | null;
-
-  @ApiProperty({
-    type: Number,
-    nullable: true,
-    example: 4.8,
-    description: 'Measured on site, in the farm’s unit',
-  })
-  measuredSize: number | null;
-
-  @ApiProperty({ type: Number, nullable: true, example: 12 })
-  estimatedYield: number | null;
-
-  @ApiProperty({ type: String, nullable: true, example: 'tonnes' })
-  estimatedYieldUnit: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  generalNote: string | null;
-
-  @ApiProperty({ type: String, nullable: true })
-  rejectionReason: string | null;
 
   @ApiProperty({
     type: String,
@@ -159,9 +116,6 @@ export class VerificationDto extends VerificationSummaryDto {
 
   @ApiProperty({ type: Date, nullable: true })
   informationRequestedAt: Date | null;
-
-  @ApiProperty({ type: [VerificationCheckDto] })
-  checks: VerificationCheckDto[];
 
   @ApiProperty({
     type: String,

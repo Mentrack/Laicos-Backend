@@ -43,6 +43,7 @@ const OUTCOME_STATUS = {
 } as const;
 
 type Payee = {
+  payeeId: string;
   payeeRole: PayeeRole;
   payee: { farmer: { id: string } | null; agent: { id: string } | null };
 };
@@ -50,10 +51,11 @@ type Payee = {
 // The audit actor check needs the farmer or agent row, not the User. A
 // payee whose profile is gone is recorded as the system rather than failing
 // the webhook forever on the check.
-function payeeActor({ payeeRole, payee }: Payee) {
+function payeeActor({ payeeId, payeeRole, payee }: Payee) {
   if (payeeRole === PayeeRole.FARMER && payee.farmer) {
     return {
       actorType: AuditActorType.FARMER,
+      actorUserId: payeeId,
       farmerId: payee.farmer.id,
       agentId: null,
     };
@@ -61,11 +63,17 @@ function payeeActor({ payeeRole, payee }: Payee) {
   if (payeeRole === PayeeRole.AGENT && payee.agent) {
     return {
       actorType: AuditActorType.EXTENSION_AGENT,
+      actorUserId: payeeId,
       farmerId: null,
       agentId: payee.agent.id,
     };
   }
-  return { actorType: AuditActorType.SYSTEM, farmerId: null, agentId: null };
+  return {
+    actorType: AuditActorType.SYSTEM,
+    actorUserId: null,
+    farmerId: null,
+    agentId: null,
+  };
 }
 
 @Injectable()

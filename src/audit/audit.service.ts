@@ -4,15 +4,31 @@ import {
   AuditCategory,
   AuditResource,
   Prisma,
-  type AuditEvent,
 } from '../../generated/client';
+import { fullName } from '../common/names';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditEventDto } from './dto/audit-event.dto';
 import { AuditQueryDto } from './dto/audit-query.dto';
 
+const withActor = {
+  actorUser: {
+    select: { id: true, firstName: true, lastName: true, role: true },
+  },
+} satisfies Prisma.AuditEventInclude;
+
+type AuditRow = Prisma.AuditEventGetPayload<{ include: typeof withActor }>;
+
+export type AuditActor = {
+  type: AuditActorType;
+  /** The acting User.id; null only for SYSTEM. */
+  userId: string | null;
+};
+
 export interface AuditWrite {
   actorType: AuditActorType;
+  /** The acting User.id, never a profile id. Null only for SYSTEM. */
+  actorUserId: string | null;
   farmerId: string | null;
   agentId: string | null;
   farmId: string | null;
@@ -23,6 +39,7 @@ export interface AuditWrite {
   resource: AuditResource | null;
   resourceId: string | null;
   sourcingRequestId?: string | null;
+  orderId?: string | null;
 }
 
 @Injectable()
@@ -31,7 +48,11 @@ export class AuditService {
 
   async record(tx: Prisma.TransactionClient, event: AuditWrite): Promise<void> {
     await tx.auditEvent.create({
-      data: { ...event, sourcingRequestId: event.sourcingRequestId ?? null },
+      data: {
+        ...event,
+        sourcingRequestId: event.sourcingRequestId ?? null,
+        orderId: event.orderId ?? null,
+      },
     });
   }
 
@@ -94,6 +115,17 @@ export class AuditService {
     return this.list({ sourcingRequestId }, query);
   }
 
+  async findForOrder(orderId: string, query: AuditQueryDto) {
+    const order = await this.database.order.findUnique({
+      where: { id: orderId },
+      select: { id: true },
+    });
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+    return this.list({ orderId }, query);
+  }
+
   private async list(
     where: Prisma.AuditEventWhereInput,
     query: AuditQueryDto,
@@ -107,7 +139,13 @@ export class AuditService {
       { id: 'desc' },
     ];
     const [rows, total] = await Promise.all([
-      this.database.auditEvent.findMany({ where, orderBy, skip, take }),
+      this.database.auditEvent.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        include: withActor,
+      }),
       this.database.auditEvent.count({ where }),
     ]);
     return {
@@ -117,7 +155,7 @@ export class AuditService {
   }
 }
 
-function formatAuditEvent(row: AuditEvent): AuditEventDto {
+function formatAuditEvent(row: AuditRow): AuditEventDto {
   const action =
     row.actionLabel && row.resource && row.resourceId
       ? {
@@ -133,5 +171,13 @@ function formatAuditEvent(row: AuditEvent): AuditEventDto {
     title: row.title,
     summary: row.summary,
     action,
+    actorType: row.actorType,
+    actor: row.actorUser
+      ? {
+          id: row.actorUser.id,
+          name: fullName(row.actorUser),
+          role: row.actorUser.role,
+        }
+      : null,
   };
 }

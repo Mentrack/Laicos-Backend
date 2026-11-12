@@ -27,7 +27,11 @@ import { AssignmentService } from '../services/assignment.service';
 import { FarmDocumentsService } from '../services/farm-documents.service';
 import { VerificationService } from '../services/verification.service';
 
-const agent = { id: 'agent-1', isVerified: true } as Agent;
+const agent = {
+  id: 'agent-1',
+  userId: 'agent-user-1',
+  isVerified: true,
+} as Agent;
 const roundId = '1f0e2d3c-4b5a-4968-8776-5a4b3c2d1e0f';
 const scoped = { id: roundId, agentId: agent.id };
 const openWhere = {
@@ -167,6 +171,7 @@ describe('VerificationService', () => {
   let current: ReturnType<typeof detail> | null;
   const viewFarmAudit = (title: string, summary: string) => ({
     actorType: AuditActorType.EXTENSION_AGENT,
+    actorUserId: agent.userId,
     agentId: agent.id,
     farmerId: null,
     farmId: 'farm-1',
@@ -666,6 +671,7 @@ describe('VerificationService', () => {
         [
           expect.objectContaining({
             actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: agent.userId,
             agentId: agent.id,
             farmerId: null,
             farmId: 'farm-1',

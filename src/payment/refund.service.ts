@@ -1,5 +1,7 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
   DisputeStatus,
   NotificationType,
   OrderStatus,
@@ -13,6 +15,7 @@ import {
   type Refund,
   type User,
 } from '../../generated/client';
+import type { AuditActor } from '../audit/audit.service';
 import { advisoryLock } from '../common/advisory-lock';
 import { proportionalShare, toMinorUnits } from '../common/money';
 import { LIVE_PAYOUT_STATUSES } from '../payout/utils/eligibility';
@@ -20,6 +23,7 @@ import { lockPayees } from '../payout/utils/payee-locks';
 import { PaystackClient } from '../paystack/paystack.client';
 import { isDefiniteRejection, PaystackError } from '../paystack/paystack-error';
 import { NotificationService } from '../notifications/notification.service';
+import { orderAuditEvent } from '../order/utils/order-audit';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRefundDto, RefundDto } from './dto';
 import { formatRefund } from './formatters/refund.formatter';
@@ -103,7 +107,7 @@ export class RefundService {
         ? await orderRefundAmount(tx, payment, live, dto.orderId)
         : { amount: remaining, disputeId: null };
       assertWithinBalance(remaining, amount);
-      return tx.refund.create({
+      const created = await tx.refund.create({
         data: {
           paymentId: payment.id,
           orderId: dto.orderId ?? null,
@@ -113,6 +117,8 @@ export class RefundService {
           initiatedById: admin.id,
         },
       });
+      await recordRefundEvent(tx, created, adminActor(admin), 'Refund issued');
+      return created;
     });
     // Logged before Paystack is called: if we crash now, this is how the
     // PENDING row without a providerRefundId gets found and settled by hand.
@@ -133,7 +139,7 @@ export class RefundService {
   ): Promise<Refund> {
     const amount = disputeRefundAmount(payment, order, dispute);
     assertWithinBalance(remainingBalance(payment), amount);
-    return tx.refund.create({
+    const created = await tx.refund.create({
       data: {
         paymentId: payment.id,
         orderId: order.id,
@@ -143,17 +149,21 @@ export class RefundService {
         initiatedById: admin.id,
       },
     });
+    await recordRefundEvent(tx, created, adminActor(admin), 'Refund issued');
+    return created;
   }
 
   /** Money that couldn't be applied goes straight back, in full. */
-  createAutomatic(
+  async createAutomatic(
     tx: Prisma.TransactionClient,
     payment: Payment,
     reason: string,
   ): Promise<Refund> {
-    return tx.refund.create({
+    const created = await tx.refund.create({
       data: { paymentId: payment.id, amount: payment.chargedAmount, reason },
     });
+    await recordRefundEvent(tx, created, SYSTEM_ACTOR, 'Refund issued');
+    return created;
   }
 
   // After commit, like every Paystack call. A refusal is recorded, not
@@ -184,10 +194,14 @@ export class RefundService {
         `Refund ${refund.id} on ${reference} refused: ${error.message}`,
       );
       // The webhook may already have settled it.
-      await this.database.refund.updateMany({
-        where: { id: refund.id, status: RefundStatus.PENDING },
-        data: { status: RefundStatus.FAILED, failureReason: error.message },
-      });
+      await this.database.$transaction((tx) =>
+        settlePending(
+          tx,
+          refund,
+          { status: RefundStatus.FAILED, failureReason: error.message },
+          'Refund failed',
+        ),
+      );
       return this.database.refund.findUniqueOrThrow({
         where: { id: refund.id },
       });
@@ -211,18 +225,20 @@ export class RefundService {
       return;
     }
     const deliveryIds = await this.database.$transaction(async (tx) => {
-      const { count } = await tx.refund.updateMany({
-        where: { id: refund.id, status: RefundStatus.PENDING },
-        data: result.processed
+      const settled = await settlePending(
+        tx,
+        refund,
+        result.processed
           ? { status: RefundStatus.PROCESSED }
           : {
               status: RefundStatus.FAILED,
               failureReason:
                 result.reason ?? 'Paystack could not process the refund',
             },
-      });
-      // A concurrent webhook that settled it first already told the buyer.
-      if (!result.processed || count === 0) return [];
+        result.processed ? 'Refund processed' : 'Refund failed',
+      );
+      // Whoever settled it first already told the buyer.
+      if (!settled || !result.processed) return [];
       const { currency, checkout } = await tx.payment.findUniqueOrThrow({
         where: { id: refund.paymentId },
         select: {
@@ -267,6 +283,77 @@ export class RefundService {
       orderBy: { createdAt: 'asc' },
     });
   }
+}
+
+const SYSTEM_ACTOR: AuditActor = { type: AuditActorType.SYSTEM, userId: null };
+
+function adminActor(admin: User): AuditActor {
+  return { type: AuditActorType.ADMIN, userId: admin.id };
+}
+
+const REFUND_ORDER_SELECT = {
+  id: true,
+  orderNumber: true,
+  farmId: true,
+} satisfies Prisma.OrderSelect;
+
+// A refund without an order is for the whole checkout, so it lands on every
+// order the checkout holds.
+async function refundOrders(
+  tx: Prisma.TransactionClient,
+  refund: Pick<Refund, 'orderId' | 'paymentId'>,
+) {
+  if (refund.orderId) {
+    return [
+      await tx.order.findUniqueOrThrow({
+        where: { id: refund.orderId },
+        select: REFUND_ORDER_SELECT,
+      }),
+    ];
+  }
+  return tx.order.findMany({
+    where: { checkout: { payments: { some: { id: refund.paymentId } } } },
+    select: REFUND_ORDER_SELECT,
+  });
+}
+
+async function recordRefundEvent(
+  tx: Prisma.TransactionClient,
+  refund: Pick<Refund, 'orderId' | 'paymentId' | 'amount'>,
+  actor: AuditActor,
+  title: string,
+): Promise<void> {
+  const orders = await refundOrders(tx, refund);
+  if (orders.length === 0) {
+    return;
+  }
+  await tx.auditEvent.createMany({
+    data: orders.map((order) => ({
+      ...orderAuditEvent(order, actor, title, refund.amount.toFixed(2)),
+      // Money events file under PAYOUT and are titled by what the money did.
+      category: AuditCategory.PAYOUT,
+      title,
+    })),
+  });
+}
+
+// The PENDING guard lets only the first settlement through, so the event is
+// written once however many webhooks and refusals race.
+async function settlePending(
+  tx: Prisma.TransactionClient,
+  refund: Pick<Refund, 'id' | 'orderId' | 'paymentId' | 'amount'>,
+  data: Prisma.RefundUpdateManyMutationInput,
+  title: string,
+): Promise<boolean> {
+  const { count } = await tx.refund.updateMany({
+    where: { id: refund.id, status: RefundStatus.PENDING },
+    data,
+  });
+  if (count === 0) {
+    return false;
+  }
+  await recordRefundEvent(tx, refund, SYSTEM_ACTOR, title);
+  return true;
 }
 
 // Takes the payee locks the payout run does before looking, so a full refund

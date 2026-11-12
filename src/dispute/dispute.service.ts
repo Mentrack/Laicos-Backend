@@ -29,6 +29,7 @@ import {
   type StorageUploadFile,
 } from '../common/upload-pipes';
 import { NotificationService } from '../notifications/notification.service';
+import { orderAuditEvent } from '../order/utils/order-audit';
 import { RefundService } from '../payment/refund.service';
 import { PayoutConfig } from '../payout/payout.config';
 import { disputeWindowOpen } from '../payout/utils/dispute-window';
@@ -153,6 +154,7 @@ export class DisputeService {
         });
         await this.audit.record(tx, {
           actorType: AuditActorType.BUYER,
+          actorUserId: user.id,
           farmerId: null,
           agentId: null,
           farmId: current.farmId,
@@ -162,6 +164,7 @@ export class DisputeService {
           actionLabel: 'View dispute',
           resource: AuditResource.DISPUTE,
           resourceId: created.id,
+          orderId,
         });
         const admins = await tx.user.findMany({
           where: { role: Role.ADMIN },
@@ -286,10 +289,21 @@ export class DisputeService {
         select: ORDER_SELECT,
       });
       // The admin's decision ends an order the buyer never confirmed.
-      await tx.order.updateMany({
+      const fulfilled = await tx.order.updateMany({
         where: { id: order.id, status: OrderStatus.SHIPPED },
         data: { status: OrderStatus.FULFILLED, fulfilledAt: now },
       });
+      if (fulfilled.count === 1) {
+        await this.audit.record(
+          tx,
+          orderAuditEvent(
+            order,
+            { type: AuditActorType.ADMIN, userId: admin.id },
+            'fulfilled',
+            'Dispute resolved',
+          ),
+        );
+      }
       let created: Refund | null = null;
       if (payment && refundPercent.gt(0)) {
         const locked = await tx.payment.findUniqueOrThrow({
@@ -306,6 +320,7 @@ export class DisputeService {
       }
       await this.audit.record(tx, {
         actorType: AuditActorType.ADMIN,
+        actorUserId: admin.id,
         farmerId: null,
         agentId: null,
         farmId: order.farmId,
@@ -315,6 +330,7 @@ export class DisputeService {
         actionLabel: 'View dispute',
         resource: AuditResource.DISPUTE,
         resourceId: dispute.id,
+        orderId: order.id,
       });
       deliveryIds = await this.notification.notify(
         {

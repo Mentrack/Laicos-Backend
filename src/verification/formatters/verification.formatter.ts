@@ -6,6 +6,10 @@ import {
   formatFarmSummary,
 } from '../../farm/formatters/farm.formatter';
 import type { VerificationDto, VerificationSummaryDto } from '../dto';
+import {
+  formatVerificationFindings,
+  VERIFICATION_CHECKS_INCLUDE,
+} from './findings.formatter';
 import { checklistGaps } from '../utils/checklist';
 
 export const VERIFICATION_SUMMARY_INCLUDE = {
@@ -26,7 +30,7 @@ export const VERIFICATION_DETAIL_INCLUDE = {
       },
     },
   },
-  checks: { orderBy: { createdAt: 'asc' } },
+  ...VERIFICATION_CHECKS_INCLUDE,
   evidence: { orderBy: { createdAt: 'asc' } },
 } satisfies Prisma.FarmVerificationInclude;
 
@@ -102,23 +106,9 @@ export async function formatVerification(
         ...identity,
       },
     },
-    locationMatches: round.locationMatches,
-    discrepancyLat: round.discrepancyLat?.toNumber() ?? null,
-    discrepancyLng: round.discrepancyLng?.toNumber() ?? null,
-    discrepancyNote: round.discrepancyNote,
-    identityNote: round.identityNote,
-    measuredSize: round.measuredSize,
-    estimatedYield: round.estimatedYield,
-    estimatedYieldUnit: round.estimatedYieldUnit,
-    generalNote: round.generalNote,
-    rejectionReason: round.rejectionReason,
+    ...formatVerificationFindings(round),
     informationRequestNote: round.informationRequestNote ?? null,
     informationRequestedAt: round.informationRequestedAt ?? null,
-    checks: round.checks.map(({ key, result, note }) => ({
-      key,
-      result,
-      note,
-    })),
     locationEvidenceUrl,
     productionEvidenceUrl,
     farmPlotSketchUrl,

@@ -1,10 +1,10 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { InviteAdminDto } from '../dto';
+import { InviteByEmailDto } from '../dto';
 
-describe('InviteAdminDto', () => {
+describe('InviteByEmailDto', () => {
   it('lowercases the email and needs nothing else', async () => {
-    const dto = plainToInstance(InviteAdminDto, {
+    const dto = plainToInstance(InviteByEmailDto, {
       email: '  New@Laicos.test ',
     });
     expect(await validate(dto)).toHaveLength(0);
@@ -12,13 +12,13 @@ describe('InviteAdminDto', () => {
   });
 
   it('refuses a malformed email', async () => {
-    const dto = plainToInstance(InviteAdminDto, { email: 'nope' });
+    const dto = plainToInstance(InviteByEmailDto, { email: 'nope' });
     const [error] = await validate(dto);
     expect(error?.property).toBe('email');
   });
 
   it('rejects a name field', async () => {
-    const dto = plainToInstance(InviteAdminDto, {
+    const dto = plainToInstance(InviteByEmailDto, {
       email: 'new@laicos.test',
       firstName: 'Ngozi',
     });

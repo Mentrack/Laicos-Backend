@@ -4,7 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthenticatedRequest } from '../authenticated-request';
 import { FirebaseService } from '../firebase/firebase.service';
 import { ActivationGuard } from './activation.guard';
-import { FarmerStandingGuard } from './farmer-standing.guard';
+import { AccountStandingGuard } from './account-standing.guard';
 import { FirebaseAuthGuard } from './firebase-auth.guard';
 import { RequireLocalUserGuard } from './require-local-user.guard';
 
@@ -30,7 +30,7 @@ export class OptionalAuthGuard implements CanActivate {
       new FirebaseAuthGuard(firebase),
       new RequireLocalUserGuard(database),
       new ActivationGuard(database, reflector),
-      new FarmerStandingGuard(database, reflector),
+      new AccountStandingGuard(database, reflector),
     ];
   }
 

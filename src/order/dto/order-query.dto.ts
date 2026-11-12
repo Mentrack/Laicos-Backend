@@ -10,6 +10,11 @@ export class OrderFilterDto {
   @IsUUID()
   produceId?: string;
 
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
+  farmId?: string;
+
   @ApiPropertyOptional({ enum: OrderStatus, enumName: 'OrderStatus' })
   @IsOptional()
   @IsEnum(OrderStatus)

@@ -150,6 +150,32 @@ describe('AdminFarmService', () => {
     );
   });
 
+  it("lists a cluster's farms, newest first", async () => {
+    const result = await service.findInCluster('cluster-1', {
+      page: 2,
+      perPage: 10,
+    });
+
+    expect(farm.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { clusterId: 'cluster-1' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: 10,
+        take: 10,
+      }),
+    );
+    expect(farm.count).toHaveBeenCalledWith({
+      where: { clusterId: 'cluster-1' },
+    });
+    expect(result.data).toHaveLength(1);
+    expect(result.metaData).toEqual({
+      page: 2,
+      perPage: 10,
+      total: 1,
+      totalPages: 1,
+    });
+  });
+
   it('searches the farmer and the farm, and filters state and status', async () => {
     await service.findAll({
       page: 1,
@@ -240,6 +266,7 @@ describe('AdminFarmService', () => {
         cluster: {
           id: 'cluster-1',
           name: 'Dawakin Kudu Hub',
+          clusterCode: 'CL-000001',
           _count: { farms: 3 },
           agent: {
             id: 'agent-1',
@@ -256,6 +283,15 @@ describe('AdminFarmService', () => {
         verifications: [
           {
             id: 'round-2',
+            locationMatches: true,
+            discrepancyLat: null,
+            discrepancyLng: null,
+            discrepancyNote: null,
+            identityNote: 'ID matches',
+            measuredSize: 4.2,
+            estimatedYield: 12,
+            estimatedYieldUnit: 'tonnes',
+            checks: [{ key: 'FARMER_ID', result: 'VERIFIED', note: null }],
             status: VerificationTaskStatus.APPROVED,
             generalNote: null,
             rejectionReason: null,
@@ -276,6 +312,15 @@ describe('AdminFarmService', () => {
           },
           {
             id: 'round-1',
+            locationMatches: null,
+            discrepancyLat: null,
+            discrepancyLng: null,
+            discrepancyNote: null,
+            identityNote: null,
+            measuredSize: null,
+            estimatedYield: null,
+            estimatedYieldUnit: null,
+            checks: [],
             status: VerificationTaskStatus.REJECTED,
             generalNote: 'Look again',
             rejectionReason: 'Boundary unclear',
@@ -367,6 +412,7 @@ describe('AdminFarmService', () => {
     expect(detail.cluster).toEqual({
       id: 'cluster-1',
       name: 'Dawakin Kudu Hub',
+      clusterCode: 'CL-000001',
       farmCount: 3,
     });
     expect(detail.evidence).toEqual([]);
@@ -381,9 +427,31 @@ describe('AdminFarmService', () => {
       visits: 1,
       lastVisitAt: visited,
     });
+    expect(farm.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          verifications: expect.objectContaining({
+            include: expect.objectContaining({
+              checks: { orderBy: { createdAt: 'asc' } },
+            }),
+          }),
+        }),
+      }),
+    );
     expect(detail.verifications).toEqual([
       {
         id: 'round-2',
+        locationMatches: true,
+        discrepancyLat: null,
+        discrepancyLng: null,
+        discrepancyNote: null,
+        identityNote: 'ID matches',
+        measuredSize: 4.2,
+        estimatedYield: 12,
+        estimatedYieldUnit: 'tonnes',
+        generalNote: null,
+        rejectionReason: null,
+        checks: [{ key: 'FARMER_ID', result: 'VERIFIED', note: null }],
         status: VerificationTaskStatus.APPROVED,
         createdAt: visited,
         decidedAt: visited,
@@ -407,6 +475,17 @@ describe('AdminFarmService', () => {
       },
       {
         id: 'round-1',
+        locationMatches: null,
+        discrepancyLat: null,
+        discrepancyLng: null,
+        discrepancyNote: null,
+        identityNote: null,
+        measuredSize: null,
+        estimatedYield: null,
+        estimatedYieldUnit: null,
+        generalNote: 'Look again',
+        rejectionReason: 'Boundary unclear',
+        checks: [],
         status: VerificationTaskStatus.REJECTED,
         createdAt: created,
         decidedAt: created,

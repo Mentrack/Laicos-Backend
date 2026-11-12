@@ -297,6 +297,7 @@ export class AuthService {
           });
           await this.audit.record(tx, {
             actorType: AuditActorType.FARMER,
+            actorUserId: user.id,
             farmerId: farmer.id,
             agentId: null,
             farmId: null,
@@ -314,6 +315,7 @@ export class AuthService {
           });
           await this.audit.record(tx, {
             actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: user.id,
             farmerId: null,
             agentId: agent.id,
             farmId: null,
@@ -471,7 +473,7 @@ export class AuthService {
   }
 
   /** Farmers and agents file this after signup. Other roles have none. */
-  private async createDraftApplication(
+  async createDraftApplication(
     tx: Prisma.TransactionClient,
     user: UserModel,
   ): Promise<void> {

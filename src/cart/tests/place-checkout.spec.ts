@@ -1,5 +1,8 @@
 import { HttpException } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   CheckoutStatus,
   OrderStatus,
   Prisma,
@@ -109,7 +112,11 @@ describe('resolveDelivery', () => {
 });
 
 describe('createCheckout', () => {
-  const tx = { checkout: { create: jest.fn() } };
+  const tx = {
+    checkout: { create: jest.fn() },
+    auditEvent: { createMany: jest.fn() },
+  };
+  const placedBy = { type: AuditActorType.BUYER, userId: 'buyer-user-1' };
   const delivery: DeliverySnapshot = {
     deliveryDate: new Date('2026-10-09T00:00:00.000Z'),
     deliveryLabel: 'Warehouse A',
@@ -135,6 +142,7 @@ describe('createCheckout', () => {
         idempotencyKey: key,
         lines: [line('a', '45000.00'), line('b', '9000.00')],
         delivery,
+        placedBy,
         expectedTotal,
       },
       config,
@@ -143,7 +151,47 @@ describe('createCheckout', () => {
 
   beforeEach(() => {
     jest.resetAllMocks();
-    tx.checkout.create.mockResolvedValue({ id: 'checkout-1' });
+    tx.checkout.create.mockResolvedValue({
+      id: 'checkout-1',
+      checkoutNumber: 'CHK-000001',
+      orders: [{ id: 'order-a', orderNumber: 'ORD-000001', farmId: 'farm-1' }],
+    });
+  });
+
+  it('records each order placed, linked to its sourcing request', async () => {
+    await createCheckout(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        buyerId: 'buyer-1',
+        idempotencyKey: key,
+        lines: [line('a', '45000.00'), line('b', '9000.00')],
+        delivery,
+        placedBy: { type: AuditActorType.ADMIN, userId: 'admin-1' },
+        expectedTotal: 57500,
+        sourcingRequestId: 'request-1',
+      },
+      config,
+      now,
+    );
+    expect(tx.auditEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          actorType: AuditActorType.ADMIN,
+          actorUserId: 'admin-1',
+          farmerId: null,
+          agentId: null,
+          farmId: 'farm-1',
+          category: AuditCategory.ORDER,
+          title: 'Order ORD-000001 placed',
+          summary: 'CHK-000001',
+          actionLabel: 'View order',
+          resource: AuditResource.ORDER,
+          resourceId: 'order-a',
+          sourcingRequestId: 'request-1',
+          orderId: 'order-a',
+        },
+      ],
+    });
   });
 
   it('adds the delivery fee and holds stock awaiting payment', async () => {
@@ -184,6 +232,7 @@ describe('createCheckout', () => {
         idempotencyKey: key,
         lines: [line('a', '45000.00'), line('b', '9000.00')],
         delivery,
+        placedBy,
         expectedTotal: 60200,
       },
       testCheckoutConfig({ SERVICE_FEE_PERCENT: '5' }),
@@ -204,6 +253,7 @@ describe('createCheckout', () => {
         idempotencyKey: key,
         lines: [line('a', '1000.10'), line('b', '333.33')],
         delivery,
+        placedBy,
         expectedTotal: 4900.11,
       },
       testCheckoutConfig({ AGENT_COMMISSION_PERCENT: '5' }),

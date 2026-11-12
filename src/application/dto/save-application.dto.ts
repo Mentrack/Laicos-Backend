@@ -12,6 +12,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { IdType } from '../../../generated/client';
+import { Trimmed } from '../../common/dto/trimmed';
 import { MultipartBoolean } from '../../farm/dto/create-farm.dto';
 
 /** Partial application. Omitted fields stay as they are. Multipart, like a farm. */
@@ -95,4 +96,15 @@ export class SaveApplicationDto {
   @IsOptional()
   @IsUUID()
   referralAgentId?: string;
+
+  @ApiPropertyOptional({
+    example: 'Kano State Extension Office',
+    description: 'Extension agents only',
+  })
+  @IsOptional()
+  @Trimmed()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  organisation?: string;
 }

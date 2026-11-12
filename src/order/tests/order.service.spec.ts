@@ -20,10 +20,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OrderService } from '../order.service';
 
 const buyer = { id: 'buyer-1', role: Role.BUYER } as User;
-const farmer = { id: 'farmer-1', role: Role.FARMER } as User;
+const farmer = { id: 'farmer-user-1', role: Role.FARMER } as User;
 const admin = { id: 'admin-1', role: Role.ADMIN } as User;
 const orderId = '9d2e7c4a-1b3f-4e5d-8a6b-7c8d9e0f1a2b';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
+const farmId = '6c1e2b3a-4d5f-4a7b-8c9d-0e1f2a3b4c5d';
 
 function prismaError(code: string) {
   return new Prisma.PrismaClientKnownRequestError('boom', {
@@ -57,6 +58,7 @@ describe('OrderService', () => {
   const farm = { findUniqueOrThrow: jest.fn() };
   const checkout = { findUnique: jest.fn(), create: jest.fn() };
   const address = { findFirst: jest.fn() };
+  const auditEvent = { createMany: jest.fn() };
   const tx = {
     $executeRaw: jest.fn(),
     produce,
@@ -65,6 +67,7 @@ describe('OrderService', () => {
     farm,
     checkout,
     address,
+    auditEvent,
   };
   let transactionOptions: unknown;
   const buyerModel = { findUnique: jest.fn() };
@@ -202,6 +205,36 @@ describe('OrderService', () => {
       expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
     });
 
+    it('records each placed order against the buyer', async () => {
+      produce.updateMany.mockResolvedValue({ count: 1 });
+      produce.findUnique.mockResolvedValue(published);
+      tx.checkout.create.mockResolvedValue({
+        ...placed,
+        orders: [{ id: orderId, orderNumber: 'ORD-000001', farmId }],
+      });
+      const total = published.pricePerUnit.mul(10).add(3500).toNumber();
+      await service.create(buyer, key, { ...dto, expectedTotal: total });
+      expect(auditEvent.createMany).toHaveBeenCalledWith({
+        data: [
+          {
+            actorType: AuditActorType.BUYER,
+            actorUserId: buyer.id,
+            farmerId: null,
+            agentId: null,
+            farmId,
+            category: AuditCategory.ORDER,
+            title: 'Order ORD-000001 placed',
+            summary: 'CHK-000001',
+            actionLabel: 'View order',
+            resource: AuditResource.ORDER,
+            resourceId: orderId,
+            sourcingRequestId: null,
+            orderId,
+          },
+        ],
+      });
+    });
+
     it('asks the buyer to retry when the transaction times out', async () => {
       tx.address.findFirst.mockRejectedValue(prismaError('P2028'));
       await expect(
@@ -264,6 +297,34 @@ describe('OrderService', () => {
     );
     expect(order.count).toHaveBeenCalledWith({ where });
     expect(result.metaData.total).toBe(4);
+  });
+
+  it('lets an admin list one farm’s orders', async () => {
+    order.findMany.mockResolvedValue([]);
+    order.count.mockResolvedValue(0);
+    await service.findAll(admin, { farmId });
+    expect(order.count).toHaveBeenCalledWith({ where: { farmId } });
+  });
+
+  it('keeps a farmer’s ownership scope when they filter by farm', async () => {
+    order.findMany.mockResolvedValue([]);
+    order.count.mockResolvedValue(0);
+    await service.findAll(farmer, { farmId });
+    expect(order.count).toHaveBeenCalledWith({
+      where: {
+        farm: { owner: { userId: farmer.id } },
+        NOT: { status: OrderStatus.AWAITING_PAYMENT },
+        farmId,
+      },
+    });
+  });
+
+  it('counts one farm’s orders', async () => {
+    order.groupBy.mockResolvedValue([]);
+    await service.count(admin, { farmId });
+    expect(order.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { farmId } }),
+    );
   });
 
   it('hides unpaid orders from farmers even when filtering by status', async () => {
@@ -709,6 +770,7 @@ describe('OrderService', () => {
     };
     const auditEvent = (title: string, summary: string) => ({
       actorType: AuditActorType.FARMER,
+      actorUserId: farmer.id,
       farmerId: 'farmer-1',
       agentId: null,
       farmId: pending.farmId,
@@ -719,6 +781,7 @@ describe('OrderService', () => {
       resource: AuditResource.ORDER,
       resourceId: orderId,
       sourcingRequestId: null,
+      orderId,
     });
 
     beforeEach(() => {
@@ -774,11 +837,27 @@ describe('OrderService', () => {
       );
     });
 
-    it('an admin transition writes nothing', async () => {
+    it('an admin confirm on an unlinked order is recorded on the order', async () => {
       order.findFirst.mockResolvedValue(pending);
       produce.findUniqueOrThrow.mockResolvedValue(published);
       await service.confirm(admin, orderId);
-      expect(audit.record).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        ...auditEvent('Order ORD-000001 confirmed', 'ORD-000001'),
+        actorType: AuditActorType.ADMIN,
+        actorUserId: 'admin-1',
+        farmerId: null,
+      });
+    });
+
+    it('a buyer cancel on an unlinked order is recorded on the order', async () => {
+      order.findFirst.mockResolvedValue(pending);
+      await service.cancel(buyer, orderId, { reason: 'Changed my mind' });
+      expect(audit.record).toHaveBeenCalledWith(tx, {
+        ...auditEvent('Order ORD-000001 cancelled', 'Changed my mind'),
+        actorType: AuditActorType.BUYER,
+        actorUserId: buyer.id,
+        farmerId: null,
+      });
     });
   });
 
@@ -800,9 +879,11 @@ describe('OrderService', () => {
         tx,
         expect.objectContaining({
           actorType: AuditActorType.BUYER,
+          actorUserId: buyer.id,
           category: AuditCategory.ORDER,
           title: 'Order ORD-000001 received',
           resourceId: orderId,
+          orderId,
         }),
       );
     });

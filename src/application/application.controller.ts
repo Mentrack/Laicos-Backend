@@ -33,6 +33,8 @@ const FILE_FIELDS = [
   { name: 'idDocument', required: false },
   { name: 'ownershipDocument', required: false },
   { name: 'chiefConfirmation', required: false },
+  { name: 'professionalCertificate', required: false },
+  { name: 'bankStatement', required: false },
 ];
 
 const FILES = FileFieldsInterceptor(
@@ -46,6 +48,8 @@ function filesPipe() {
       idDocument: { required: false },
       ownershipDocument: { required: false },
       chiefConfirmation: { required: false },
+      professionalCertificate: { required: false },
+      bankStatement: { required: false },
     },
     documentUploadPipe,
   );

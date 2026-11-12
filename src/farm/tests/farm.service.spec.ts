@@ -167,6 +167,7 @@ describe('FarmService', () => {
       expect(audit.record).toHaveBeenCalledTimes(2);
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: 'user-1',
         farmerId: 'farmer-1',
         agentId: null,
         farmId,
@@ -179,6 +180,7 @@ describe('FarmService', () => {
       });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: 'user-1',
         farmerId: 'farmer-1',
         agentId: null,
         farmId,
@@ -342,6 +344,7 @@ describe('FarmService', () => {
       await service.update(user, farmId, { name: 'New name' });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: 'user-1',
         farmerId: 'farmer-1',
         agentId: null,
         farmId,
@@ -459,6 +462,7 @@ describe('FarmService', () => {
       [
         expect.objectContaining({
           actorType: AuditActorType.FARMER,
+          actorUserId: 'user-1',
           farmerId: 'farmer-1',
           farmId,
           title: 'Farm documents uploaded',

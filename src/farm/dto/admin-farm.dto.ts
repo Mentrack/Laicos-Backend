@@ -19,6 +19,7 @@ import {
 } from '../../../generated/client';
 import { PaginationQueryDto } from '../../common/pagination';
 import { LgaDto, StateDto } from '../../location/dto';
+import { VerificationFindingsDto } from '../../verification/dto/findings.dto';
 import { FarmDto } from './farm.dto';
 
 export class AdminFarmFarmerDto {
@@ -133,6 +134,9 @@ export class AdminFarmClusterDto {
     description: 'Set when the agent sets their LGA',
   })
   name: string | null;
+
+  @ApiProperty({ example: 'CL-000018', description: 'Public cluster code' })
+  clusterCode: string;
 
   @ApiProperty({
     type: 'integer',
@@ -273,7 +277,7 @@ export class AdminFarmDocumentsDto {
   harvestEstimateUrl: string | null;
 }
 
-export class AdminFarmVerificationDto {
+export class AdminFarmVerificationDto extends VerificationFindingsDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 

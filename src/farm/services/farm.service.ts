@@ -107,6 +107,7 @@ export class FarmService {
         const { farm: inserted } = result;
         await this.audit.record(tx, {
           actorType: AuditActorType.FARMER,
+          actorUserId: user.id,
           farmerId: farmer.id,
           agentId: null,
           farmId: inserted.id,
@@ -124,6 +125,7 @@ export class FarmService {
         if (docSummary) {
           await this.audit.record(tx, {
             actorType: AuditActorType.FARMER,
+            actorUserId: user.id,
             farmerId: farmer.id,
             agentId: null,
             farmId: inserted.id,
@@ -261,6 +263,7 @@ export class FarmService {
         const name = dto.name ?? current.name;
         await this.audit.record(tx, {
           actorType: AuditActorType.FARMER,
+          actorUserId: user.id,
           farmerId: current.ownerId,
           agentId: null,
           farmId: id,
@@ -314,7 +317,7 @@ export class FarmService {
       id,
       farmOwnedBy(user),
       documents,
-      farmerDocumentEvents(farmer, id, documents),
+      farmerDocumentEvents(user.id, farmer, id, documents),
     );
     return this.findOne(user, id);
   }
@@ -392,6 +395,7 @@ export function mapFarmSaveError(error: unknown): unknown {
 }
 
 function farmerDocumentEvents(
+  userId: string,
   farmer: { id: string; idType: string | null | undefined },
   farmId: string,
   documents: FarmDocumentUploads,
@@ -400,6 +404,7 @@ function farmerDocumentEvents(
   if (documents.idDocument) {
     events.push({
       actorType: AuditActorType.FARMER,
+      actorUserId: userId,
       farmerId: farmer.id,
       agentId: null,
       farmId: null,
@@ -416,18 +421,20 @@ function farmerDocumentEvents(
     documents.chiefConfirmation ? 'chief' : null,
   );
   if (docSummary) {
-    events.push(farmDocumentEvent(farmer.id, farmId, docSummary));
+    events.push(farmDocumentEvent(userId, farmer.id, farmId, docSummary));
   }
   return events;
 }
 
 function farmDocumentEvent(
+  userId: string,
   farmerId: string,
   farmId: string,
   summary: string,
 ): AuditWrite {
   return {
     actorType: AuditActorType.FARMER,
+    actorUserId: userId,
     farmerId,
     agentId: null,
     farmId,

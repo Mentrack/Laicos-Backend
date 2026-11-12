@@ -61,11 +61,12 @@ export class CheckoutService {
   async checkout(user: User, idempotencyKey: string, dto: CreateCheckoutDto) {
     const buyer = await requireBuyer(this.database, user);
     return busyAsConflict(() =>
-      this.placeOrders(buyer.id, idempotencyKey, dto),
+      this.placeOrders(user.id, buyer.id, idempotencyKey, dto),
     );
   }
 
   private placeOrders(
+    userId: string,
     buyerId: string,
     idempotencyKey: string,
     dto: CreateCheckoutDto,
@@ -129,6 +130,7 @@ export class CheckoutService {
           lines,
           delivery,
           expectedTotal: dto.expectedTotal,
+          placedBy: { type: AuditActorType.BUYER, userId },
         },
         this.config,
       );
@@ -154,10 +156,10 @@ export class CheckoutService {
 
   async cancel(user: User, id: string) {
     const buyer = await requireBuyer(this.database, user);
-    return busyAsConflict(() => this.release(buyer.id, id));
+    return busyAsConflict(() => this.release(user.id, buyer.id, id));
   }
 
-  private release(buyerId: string, id: string) {
+  private release(userId: string, buyerId: string, id: string) {
     return this.database.$transaction(async (tx) => {
       await lockCheckout(tx, id);
       const checkout = await tx.checkout.findFirst({
@@ -177,11 +179,13 @@ export class CheckoutService {
         id,
         CheckoutStatus.CANCELLED,
         'Cancelled by buyer',
+        { type: AuditActorType.BUYER, userId },
       );
       if (checkout.sourcingRequestId) {
         await syncSourcingRequest(tx, checkout.sourcingRequestId);
         await recordLinkedAudit(tx, {
           actorType: AuditActorType.BUYER,
+          actorUserId: userId,
           farmerId: null,
           agentId: null,
           farmId: null,

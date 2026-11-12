@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { CheckoutStatus, OrderStatus, Prisma } from '../../../generated/client';
 import { addressNotFound } from '../../address/utils/address-not-found';
+import type { AuditActor } from '../../audit/audit.service';
 import { addDays, lagosToday, toDateColumn } from '../../common/dates';
 import { percentOf } from '../../common/money';
+import { orderAuditEvent } from '../../order/utils/order-audit';
 import type { OrderLine } from '../../order/utils/reservation';
 import type { CheckoutConfig } from '../../payment/checkout-config';
 import { commissionFor } from '../../payment/utils/order-share';
@@ -28,6 +30,7 @@ export type CheckoutDraft = {
   delivery: DeliverySnapshot;
   expectedTotal: number;
   sourcingRequestId?: string;
+  placedBy: AuditActor;
 };
 
 export function findReplay(
@@ -82,7 +85,7 @@ export async function resolveDelivery(
 
 /**
  * Prices the reserved lines plus delivery, the service fee and the agent
- * commission and places them awaiting payment.
+ * commission and places them awaiting payment, recording each order placed.
  * The lines must come from rows the caller has just reserved (and so
  * locked), so a farmer's price edit can't slip in after the check.
  */
@@ -115,7 +118,7 @@ export async function createCheckout(
       code: 'CART_PRICE_CHANGED',
     });
   }
-  return tx.checkout.create({
+  const checkout = await tx.checkout.create({
     data: {
       buyerId: draft.buyerId,
       idempotencyKey: draft.idempotencyKey,
@@ -141,4 +144,18 @@ export async function createCheckout(
     },
     include: CHECKOUT_INCLUDE,
   });
+  await tx.auditEvent.createMany({
+    data: checkout.orders.map((order) =>
+      orderAuditEvent(
+        order,
+        draft.placedBy,
+        'placed',
+        checkout.checkoutNumber,
+        {
+          sourcingRequestId: draft.sourcingRequestId,
+        },
+      ),
+    ),
+  });
+  return checkout;
 }

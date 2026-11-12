@@ -1,16 +1,17 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AdminInvite, Role, User } from '../../../generated/client';
+import { Invite, Role, User } from '../../../generated/client';
 import { AuthService } from '../../auth/auth.service';
 import { MailService } from '../../mail/mail.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AdminInviteService } from '../admin-invite.service';
-import type { AcceptAdminInviteDto } from '../dto';
+import { InviteService } from '../invite.service';
+import type { AcceptInviteDto } from '../dto';
+import { inviteInvalidError } from '../utils/invite-errors';
 import { hashInviteToken } from '../utils/invite-token';
 
 const NOW = new Date('2026-11-09T12:00:00.000Z');
 const email = 'new@laicos.test';
-const dto: AcceptAdminInviteDto = {
+const dto: AcceptInviteDto = {
   token: 'raw-token',
   password: 'Password1!',
   firstName: 'Ngozi',
@@ -18,12 +19,13 @@ const dto: AcceptAdminInviteDto = {
   phoneNumber: '+2348012345678',
 };
 
-function invite(overrides: Partial<AdminInvite> = {}): AdminInvite {
+function invite(overrides: Partial<Invite> = {}): Invite {
   return {
     id: 'invite-1',
     email,
     tokenHash: hashInviteToken(dto.token),
     expiresAt: new Date(NOW.getTime() + 60_000),
+    role: Role.ADMIN,
     invitedById: 'user-1',
     acceptedAt: null,
     userId: null,
@@ -39,10 +41,10 @@ function codeOf(error: unknown): unknown {
     .code;
 }
 
-describe('AdminInviteService.accept', () => {
+describe('InviteService.accept', () => {
   const database = {
     user: { findUnique: jest.fn() },
-    adminInvite: {
+    invite: {
       findUnique: jest.fn(),
       updateMany: jest.fn(),
       update: jest.fn(),
@@ -52,10 +54,11 @@ describe('AdminInviteService.accept', () => {
   const auth = {
     createFirebaseUser: jest.fn(),
     createLocalUser: jest.fn(),
+    createDraftApplication: jest.fn(),
     deleteFirebaseUser: jest.fn(),
     startSession: jest.fn(),
   };
-  const service = new AdminInviteService(
+  const service = new InviteService(
     database as unknown as PrismaService,
     auth as unknown as AuthService,
     {} as MailService,
@@ -73,14 +76,15 @@ describe('AdminInviteService.accept', () => {
     jest.clearAllMocks();
     jest.useFakeTimers().setSystemTime(NOW);
     database.user.findUnique.mockResolvedValue(null);
-    database.adminInvite.findUnique.mockResolvedValue(invite());
-    database.adminInvite.updateMany.mockResolvedValue({ count: 1 });
-    database.adminInvite.update.mockResolvedValue(invite());
+    database.invite.findUnique.mockResolvedValue(invite());
+    database.invite.updateMany.mockResolvedValue({ count: 1 });
+    database.invite.update.mockResolvedValue(invite());
     database.$transaction.mockImplementation(
       (run: (tx: typeof database) => Promise<unknown>) => run(database),
     );
     auth.createFirebaseUser.mockResolvedValue({ uid: 'fb-1' });
     auth.createLocalUser.mockResolvedValue(created);
+    auth.createDraftApplication.mockResolvedValue(undefined);
     auth.deleteFirebaseUser.mockResolvedValue(undefined);
     auth.startSession.mockResolvedValue(session);
   });
@@ -90,12 +94,12 @@ describe('AdminInviteService.accept', () => {
   });
 
   it('creates the admin from the invite and signs them in', async () => {
-    const result = await service.accept(dto);
+    const result = await service.accept(dto, Role.ADMIN);
 
-    expect(database.adminInvite.findUnique).toHaveBeenCalledWith({
+    expect(database.invite.findUnique).toHaveBeenCalledWith({
       where: { tokenHash: hashInviteToken(dto.token) },
     });
-    expect(database.adminInvite.updateMany).toHaveBeenCalledWith({
+    expect(database.invite.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'invite-1',
         tokenHash: hashInviteToken(dto.token),
@@ -125,7 +129,7 @@ describe('AdminInviteService.accept', () => {
       },
       database,
     );
-    expect(database.adminInvite.update).toHaveBeenCalledWith({
+    expect(database.invite.update).toHaveBeenCalledWith({
       where: { id: 'invite-1' },
       data: { userId: created.id },
     });
@@ -134,48 +138,99 @@ describe('AdminInviteService.accept', () => {
   });
 
   it('rejects an unknown token with INVITE_INVALID', async () => {
-    database.adminInvite.findUnique.mockResolvedValue(null);
+    database.invite.findUnique.mockResolvedValue(null);
 
-    const error = await service.accept(dto).catch((e: unknown) => e);
+    const error = await service
+      .accept(dto, Role.ADMIN)
+      .catch((e: unknown) => e);
     expect(codeOf(error)).toBe('INVITE_INVALID');
-    expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+    expect(database.invite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invite of the other role as INVITE_INVALID', async () => {
+    database.invite.findUnique.mockResolvedValue(invite({ role: Role.ADMIN }));
+
+    const error = await service
+      .accept(dto, Role.EXTENSION_AGENT)
+      .catch((e: unknown) => e);
+    expect(error).toEqual(inviteInvalidError());
+    expect(codeOf(error)).toBe('INVITE_INVALID');
+    expect(database.invite.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('as EXTENSION_AGENT creates a verified agent with a draft application', async () => {
+    const agent = { id: 'user-3', role: Role.EXTENSION_AGENT } as User;
+    database.invite.findUnique.mockResolvedValue(
+      invite({ role: Role.EXTENSION_AGENT }),
+    );
+    auth.createLocalUser.mockResolvedValue(agent);
+
+    await service.accept(dto, Role.EXTENSION_AGENT);
+
+    expect(auth.createFirebaseUser).toHaveBeenCalledWith(
+      expect.objectContaining({ emailVerified: true }),
+    );
+    const [input, client] = auth.createLocalUser.mock.calls[0] as [
+      { role: Role; isVerified: boolean; agreedToTerms?: boolean },
+      unknown,
+    ];
+    expect(input).toMatchObject({
+      role: Role.EXTENSION_AGENT,
+      isVerified: true,
+    });
+    expect(input.agreedToTerms).toBe(false);
+    expect(client).toBe(database);
+    expect(auth.createDraftApplication).toHaveBeenCalledWith(database, agent);
+    expect(auth.startSession).toHaveBeenCalledWith(agent);
+  });
+
+  it('as ADMIN leaves the application decision to createDraftApplication', async () => {
+    await service.accept(dto, Role.ADMIN);
+
+    expect(auth.createDraftApplication).toHaveBeenCalledWith(database, created);
   });
 
   it('rejects an accepted invite with INVITE_INVALID', async () => {
-    database.adminInvite.findUnique.mockResolvedValue(
-      invite({ acceptedAt: NOW }),
-    );
+    database.invite.findUnique.mockResolvedValue(invite({ acceptedAt: NOW }));
 
-    const error = await service.accept(dto).catch((e: unknown) => e);
+    const error = await service
+      .accept(dto, Role.ADMIN)
+      .catch((e: unknown) => e);
     expect(codeOf(error)).toBe('INVITE_INVALID');
-    expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+    expect(database.invite.updateMany).not.toHaveBeenCalled();
   });
 
   it('rejects an expired invite with INVITE_EXPIRED', async () => {
-    database.adminInvite.findUnique.mockResolvedValue(
+    database.invite.findUnique.mockResolvedValue(
       invite({ expiresAt: new Date(NOW.getTime() - 1) }),
     );
 
-    const error = await service.accept(dto).catch((e: unknown) => e);
+    const error = await service
+      .accept(dto, Role.ADMIN)
+      .catch((e: unknown) => e);
     expect(codeOf(error)).toBe('INVITE_EXPIRED');
-    expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+    expect(database.invite.updateMany).not.toHaveBeenCalled();
   });
 
   it('409s when the email already has an account, leaving the invite pending', async () => {
     database.user.findUnique.mockResolvedValue({ id: 'user-9' });
 
-    await expect(service.accept(dto)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.accept(dto, Role.ADMIN)).rejects.toBeInstanceOf(
+      ConflictException,
+    );
     expect(database.user.findUnique).toHaveBeenCalledWith({
       where: { email },
     });
-    expect(database.adminInvite.updateMany).not.toHaveBeenCalled();
+    expect(database.invite.updateMany).not.toHaveBeenCalled();
     expect(auth.createFirebaseUser).not.toHaveBeenCalled();
   });
 
   it('claims the invite before creating anything', async () => {
-    database.adminInvite.updateMany.mockResolvedValue({ count: 0 });
+    database.invite.updateMany.mockResolvedValue({ count: 0 });
 
-    const error = await service.accept(dto).catch((e: unknown) => e);
+    const error = await service
+      .accept(dto, Role.ADMIN)
+      .catch((e: unknown) => e);
     expect(codeOf(error)).toBe('INVITE_INVALID');
     expect(auth.createFirebaseUser).not.toHaveBeenCalled();
   });
@@ -184,9 +239,9 @@ describe('AdminInviteService.accept', () => {
     const failure = new Error('db down');
     auth.createLocalUser.mockRejectedValue(failure);
 
-    await expect(service.accept(dto)).rejects.toBe(failure);
+    await expect(service.accept(dto, Role.ADMIN)).rejects.toBe(failure);
     expect(auth.deleteFirebaseUser).toHaveBeenCalledWith('fb-1');
-    expect(database.adminInvite.updateMany).toHaveBeenLastCalledWith({
+    expect(database.invite.updateMany).toHaveBeenLastCalledWith({
       where: { id: 'invite-1', userId: null },
       data: { acceptedAt: null },
     });
@@ -197,8 +252,8 @@ describe('AdminInviteService.accept', () => {
     const conflict = new ConflictException('Account already registered');
     auth.createFirebaseUser.mockRejectedValue(conflict);
 
-    await expect(service.accept(dto)).rejects.toBe(conflict);
-    expect(database.adminInvite.updateMany).toHaveBeenLastCalledWith({
+    await expect(service.accept(dto, Role.ADMIN)).rejects.toBe(conflict);
+    expect(database.invite.updateMany).toHaveBeenLastCalledWith({
       where: { id: 'invite-1', userId: null },
       data: { acceptedAt: null },
     });
@@ -208,14 +263,14 @@ describe('AdminInviteService.accept', () => {
   it('rethrows the original error when reverting the claim fails', async () => {
     const conflict = new ConflictException('Account already registered');
     auth.createFirebaseUser.mockRejectedValue(conflict);
-    database.adminInvite.updateMany
+    database.invite.updateMany
       .mockResolvedValueOnce({ count: 1 })
       .mockRejectedValueOnce(new Error('revert failed'));
     const logged = jest
       .spyOn(service['logger'], 'error')
       .mockImplementation(() => undefined);
 
-    await expect(service.accept(dto)).rejects.toBe(conflict);
+    await expect(service.accept(dto, Role.ADMIN)).rejects.toBe(conflict);
     expect(logged).toHaveBeenCalled();
   });
 });

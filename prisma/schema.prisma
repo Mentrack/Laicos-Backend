@@ -48,24 +48,30 @@ model User {
   application           Application?
   notifications         Notification[]
   pushDevices           PushDevice[]
-  adminInvitesSent      AdminInvite[]          @relation("AdminInvitesSent")
-  adminInvite           AdminInvite?           @relation("AdminInviteAccepted")
+  invitesSent           Invite[]               @relation("InvitesSent")
+  auditEvents           AuditEvent[]           @relation("AuditActor")
+  invite                Invite?                @relation("InviteAccepted")
 }
 
-// An admin's invite link. The raw token is only ever emailed; we keep its
-// SHA-256. Resending overwrites tokenHash, which kills the old link.
-model AdminInvite {
+// An invite link for an admin or extension agent. The raw token is only ever
+// emailed; we keep its SHA-256. Resending overwrites tokenHash, which kills the
+// old link. Email is unique across roles and kept after acceptance: one invite per address, ever.
+// The table keeps its old name so the rename needs no data migration.
+model Invite {
   id          String    @id @default(uuid())
   email       String    @unique
+  role        Role
   tokenHash   String    @unique
   expiresAt   DateTime
   invitedById String
-  invitedBy   User      @relation("AdminInvitesSent", fields: [invitedById], references: [id])
+  invitedBy   User      @relation("InvitesSent", fields: [invitedById], references: [id])
   acceptedAt  DateTime?
   userId      String?   @unique
-  user        User?     @relation("AdminInviteAccepted", fields: [userId], references: [id])
+  user        User?     @relation("InviteAccepted", fields: [userId], references: [id])
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+
+  @@map("AdminInvite")
 }
 
 model RefreshToken {
@@ -221,33 +227,46 @@ model Lga {
 }
 
 model Agent {
-  id                       String              @id @default(uuid())
+  id                         String              @id @default(uuid())
   // Public code (AG-000123), backed by a hand-made sequence like Farmer.farmerId.
-  agentId                  String              @unique @default(dbgenerated("('AG-'::text || lpad((nextval('\"Agent_agentId_seq\"'::regclass))::text, 6, '0'::text))"))
-  userId                   String              @unique
-  user                     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  country                  String              @default("NG")
+  agentId                    String              @unique @default(dbgenerated("('AG-'::text || lpad((nextval('\"Agent_agentId_seq\"'::regclass))::text, 6, '0'::text))"))
+  userId                     String              @unique
+  user                       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country                    String              @default("NG")
   // Location and ID are null until profile setup.
-  stateId                  String?
-  state                    State?              @relation(fields: [stateId], references: [id], onDelete: Restrict)
-  lgaId                    String?
-  lga                      Lga?                @relation(fields: [lgaId], references: [id], onDelete: Restrict)
-  idType                   IdType?
-  idNumber                 String?
+  stateId                    String?
+  state                      State?              @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  lgaId                      String?
+  lga                        Lga?                @relation(fields: [lgaId], references: [id], onDelete: Restrict)
+  idType                     IdType?
+  idNumber                   String?
   // Private-bucket key.
-  idDocumentKey            String?
+  idDocumentKey              String?
+  // Optional at signup, copied from the application. Private-bucket keys.
+  organisation               String?
+  professionalCertificateKey String?
+  bankStatementKey           String?
   // Set by an admin; only verified agents are assigned farms.
-  isVerified               Boolean             @default(false)
-  verifiedAt               DateTime?
-  cluster                  Cluster?
-  verifications            FarmVerification[]
-  declines                 AssignmentDecline[]
-  handovers                OrderHandover[]
-  referredFarms            Farm[]              @relation("FarmReferral")
-  auditEvents              AuditEvent[]
-  assignedSourcingRequests SourcingRequest[]
-  createdAt                DateTime            @default(now())
-  updatedAt                DateTime            @updatedAt
+  isVerified                 Boolean             @default(false)
+  verifiedAt                 DateTime?
+  // Set when an admin rejects the application. Final for now: the agent
+  // stays locked out and cannot resubmit.
+  rejectedAt                 DateTime?
+  rejectionReason            String?
+  // Suspended means suspendedAt is set and suspendedUntil is null or in the
+  // future. The sweep clears expired rows.
+  suspendedAt                DateTime?
+  suspendedUntil             DateTime?
+  suspensionReason           String?
+  cluster                    Cluster?
+  verifications              FarmVerification[]
+  declines                   AssignmentDecline[]
+  handovers                  OrderHandover[]
+  referredFarms              Farm[]              @relation("FarmReferral")
+  auditEvents                AuditEvent[]
+  assignedSourcingRequests   SourcingRequest[]
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
 
   @@index([lgaId, isVerified])
 }
@@ -270,23 +289,30 @@ model AuditEvent {
   actionLabel       String?
   resource          AuditResource?
   resourceId        String?
+  orderId           String?
+  order             Order?           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actorUserId       String?
+  actorUser         User?            @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([farmerId, occurredAt])
   @@index([agentId, occurredAt])
   @@index([farmId, occurredAt])
   @@index([sourcingRequestId, occurredAt])
+  @@index([orderId, occurredAt])
 }
 
 // Exactly one per agent, created with it: the farms that agent manages.
 model Cluster {
-  id        String   @id @default(uuid())
-  agentId   String   @unique
-  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  id          String   @id @default(uuid())
+  // Public code (CL-000123), backed by a hand-made sequence like Farm.farmCode.
+  clusterCode String   @unique @default(dbgenerated("('CL-'::text || lpad((nextval('\"Cluster_clusterCode_seq\"'::regclass))::text, 6, '0'::text))"))
+  agentId     String   @unique
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
   // "<LGA> Hub", set whenever the agent sets their LGA.
-  name      String?
-  farms     Farm[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  name        String?
+  farms       Farm[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // One verification round of a farm. A farm keeps every round, and at most one
@@ -450,6 +476,7 @@ model Order {
   fulfilledAt        DateTime?
   payoutItems        PayoutItem[]
   refunds            Refund[]
+  auditEvents        AuditEvent[]
   dispute            Dispute?
   conversation       Conversation?
   createdAt          DateTime        @default(now())
@@ -1142,29 +1169,33 @@ enum ApplicationStatus {
 }
 
 model Application {
-  id                   String            @id @default(uuid())
-  userId               String            @unique
-  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status               ApplicationStatus @default(DRAFT)
-  phoneNumber          String?
-  agreedToTerms        Boolean           @default(false)
-  idType               IdType?
-  idNumber             String?
-  idDocumentKey        String?
-  farmName             String?
-  stateId              String?
-  lgaId                String?
-  location             String?
-  size                 Float?
-  unit                 String?
-  mainProduce          String?
-  isExporting          Boolean?
-  referralAgentId      String?
-  ownershipDocumentKey String?
-  chiefConfirmationKey String?
-  completedAt          DateTime?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  id                         String            @id @default(uuid())
+  userId                     String            @unique
+  user                       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status                     ApplicationStatus @default(DRAFT)
+  phoneNumber                String?
+  agreedToTerms              Boolean           @default(false)
+  idType                     IdType?
+  idNumber                   String?
+  idDocumentKey              String?
+  farmName                   String?
+  stateId                    String?
+  lgaId                      String?
+  location                   String?
+  size                       Float?
+  unit                       String?
+  mainProduce                String?
+  isExporting                Boolean?
+  referralAgentId            String?
+  ownershipDocumentKey       String?
+  chiefConfirmationKey       String?
+  // Agent-only, optional.
+  organisation               String?
+  professionalCertificateKey String?
+  bankStatementKey           String?
+  completedAt                DateTime?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
 }
 
 enum NotificationType {

@@ -1,4 +1,9 @@
-import { CheckoutStatus, OrderStatus } from '../../../generated/client';
+import {
+  AuditActorType,
+  CheckoutStatus,
+  OrderStatus,
+  ProduceStatus,
+} from '../../../generated/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckoutExpiryService } from '../checkout-expiry.service';
 
@@ -12,6 +17,7 @@ describe('CheckoutExpiryService', () => {
     order: { findMany: jest.fn(), updateMany: jest.fn() },
     payment: { updateMany: jest.fn() },
     produce: { update: jest.fn() },
+    auditEvent: { createMany: jest.fn() },
   };
   let transactionOptions: unknown;
   const database = {
@@ -70,6 +76,43 @@ describe('CheckoutExpiryService', () => {
       expect.objectContaining({ data: { status: CheckoutStatus.EXPIRED } }),
     );
     expect(transactionOptions).toEqual({ timeout: 15_000, maxWait: 5_000 });
+  });
+
+  it('records each expired order as a system cancellation', async () => {
+    database.checkout.findMany.mockResolvedValue([{ id: 'a' }]);
+    tx.checkout.findUnique.mockResolvedValue({
+      id: 'a',
+      status: CheckoutStatus.AWAITING_PAYMENT,
+      expiresAt: past,
+    });
+    tx.order.findMany.mockResolvedValue([
+      {
+        id: 'order-1',
+        orderNumber: 'ORD-000001',
+        farmId: 'farm-1',
+        produceId: 'produce-1',
+        quantity: 2,
+        status: OrderStatus.AWAITING_PAYMENT,
+      },
+    ]);
+    tx.produce.update.mockResolvedValue({
+      id: 'produce-1',
+      status: ProduceStatus.PUBLISHED,
+      actualQuantity: 10,
+      floatingQuantity: 10,
+    });
+    tx.checkout.update.mockResolvedValue({ id: 'a', sourcingRequestId: null });
+    await service.expireOverdue(now);
+    expect(tx.auditEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          actorType: AuditActorType.SYSTEM,
+          actorUserId: null,
+          orderId: 'order-1',
+          summary: 'Payment not received',
+        }),
+      ],
+    });
   });
 
   it.each([

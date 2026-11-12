@@ -78,6 +78,7 @@ export class ProduceService {
       });
       await this.audit.record(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: user.id,
         farmerId: farm.ownerId,
         agentId: null,
         farmId: dto.farmId,
@@ -207,6 +208,7 @@ export class ProduceService {
         const name = dto.name ?? current.name;
         await this.audit.record(tx, {
           actorType: AuditActorType.FARMER,
+          actorUserId: user.id,
           farmerId: current.farm.ownerId,
           agentId: null,
           farmId: current.farmId,
@@ -254,6 +256,7 @@ export class ProduceService {
         });
         await this.audit.record(tx, {
           actorType: AuditActorType.FARMER,
+          actorUserId: user.id,
           farmerId: current.farm.ownerId,
           agentId: null,
           farmId: current.farmId,

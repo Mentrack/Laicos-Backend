@@ -106,12 +106,7 @@ export class HandoverService {
           include: HANDOVER_INCLUDE,
         }),
       );
-      await this.recordHandoverAudit(
-        tx,
-        agent.id,
-        updated,
-        'Handover verified',
-      );
+      await this.recordHandoverAudit(tx, agent, updated, 'Handover verified');
       return updated;
     });
     return formatHandover(this.storage, handover);
@@ -155,7 +150,7 @@ export class HandoverService {
         });
         await this.recordHandoverAudit(
           tx,
-          agent.id,
+          agent,
           handedOver,
           'Handover completed',
         );
@@ -205,7 +200,7 @@ export class HandoverService {
         });
         await this.recordHandoverAudit(
           tx,
-          agent.id,
+          agent,
           handover,
           'Handover proof added',
         );
@@ -237,7 +232,7 @@ export class HandoverService {
 
   private async recordHandoverAudit(
     tx: Prisma.TransactionClient,
-    agentId: string,
+    agent: Agent,
     handover: Prisma.OrderHandoverGetPayload<{
       include: typeof HANDOVER_INCLUDE;
     }>,
@@ -247,8 +242,9 @@ export class HandoverService {
     const sourcingRequestId = await sourcingRequestIdForOrder(tx, order.id);
     await this.audit.record(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
+      actorUserId: agent.userId,
       farmerId: null,
-      agentId,
+      agentId: agent.id,
       farmId: order.farm.id,
       category: AuditCategory.HANDOVER,
       title,
@@ -257,6 +253,7 @@ export class HandoverService {
       resource: AuditResource.ORDER,
       resourceId: order.id,
       sourcingRequestId,
+      orderId: order.id,
     });
     if (sourcingRequestId) {
       await syncSourcingRequest(tx, sourcingRequestId);

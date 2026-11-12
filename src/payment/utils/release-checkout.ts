@@ -4,7 +4,9 @@ import {
   type CheckoutStatus,
   type Prisma,
 } from '../../../generated/client';
+import type { AuditActor } from '../../audit/audit.service';
 import { CHECKOUT_INCLUDE } from '../../cart/formatters/checkout.formatter';
+import { orderAuditEvent } from '../../order/utils/order-audit';
 import { releaseStock } from '../../order/utils/reservation';
 
 /**
@@ -17,6 +19,7 @@ export async function releaseCheckout(
   checkoutId: string,
   status: CheckoutStatus,
   reason: string,
+  actor: AuditActor,
 ) {
   const unpaid = { checkoutId, status: OrderStatus.AWAITING_PAYMENT };
   // produceId order, like reservation, so a release and a checkout lock
@@ -36,9 +39,19 @@ export async function releaseCheckout(
     where: { checkoutId, status: PaymentStatus.PENDING },
     data: { status: PaymentStatus.ABANDONED },
   });
-  return tx.checkout.update({
+  const released = await tx.checkout.update({
     where: { id: checkoutId },
     data: { status },
     include: CHECKOUT_INCLUDE,
   });
+  if (orders.length > 0) {
+    await tx.auditEvent.createMany({
+      data: orders.map((order) =>
+        orderAuditEvent(order, actor, 'cancelled', reason, {
+          sourcingRequestId: released.sourcingRequestId,
+        }),
+      ),
+    });
+  }
+  return released;
 }

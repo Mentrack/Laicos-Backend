@@ -69,11 +69,13 @@ export class CheckoutExpiryService {
         id,
         CheckoutStatus.EXPIRED,
         'Payment not received',
+        { type: AuditActorType.SYSTEM, userId: null },
       );
       if (checkout.sourcingRequestId) {
         await syncSourcingRequest(tx, checkout.sourcingRequestId);
         await recordLinkedAudit(tx, {
           actorType: AuditActorType.SYSTEM,
+          actorUserId: null,
           farmerId: null,
           agentId: null,
           farmId: null,

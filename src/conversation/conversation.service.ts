@@ -285,6 +285,7 @@ export class ConversationService {
           ]);
           await this.audit.record(tx, {
             actorType: AuditActorType.EXTENSION_AGENT,
+            actorUserId: user.id,
             farmerId: null,
             agentId: agent!.id,
             farmId: order!.farmId,
@@ -303,6 +304,7 @@ export class ConversationService {
           });
           await this.audit.record(tx, {
             actorType: AuditActorType.BUYER,
+            actorUserId: user.id,
             farmerId: null,
             agentId: null,
             farmId: null,

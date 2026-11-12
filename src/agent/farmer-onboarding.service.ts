@@ -44,6 +44,7 @@ export class FarmerOnboardingService {
       farm: { ...dto.farm, stateId, lgaId, referralAgentId: agent.id },
       documents: {},
       preferredAgentId: agent.id,
+      agentUserId: agent.userId,
     });
   }
 }

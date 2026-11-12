@@ -7,43 +7,56 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   Role,
-  type AdminInvite,
+  type Invite,
   type Prisma,
   type User,
 } from '../../generated/client';
 import { AuthService } from '../auth/auth.service';
 import type { TokenPairDto } from '../auth/dto';
 import { webappUrl } from '../common/config';
-import { paginationMeta, resolvePagination } from '../common/pagination';
+import {
+  paginationMeta,
+  resolvePagination,
+  type PaginationMetaDto,
+} from '../common/pagination';
 import { isUniqueViolation } from '../common/prisma-errors';
 import { MailService } from '../mail/mail.service';
-import { adminInviteEmail } from '../mail/templates';
+import { adminInviteEmail, agentInviteEmail } from '../mail/templates';
 import { PrismaService } from '../prisma/prisma.service';
 import {
-  AdminInviteStatus,
-  type AcceptAdminInviteDto,
-  type AdminInviteDto,
-  type AdminInviteQueryDto,
-  type InviteAdminDto,
+  InviteStatus,
+  type AcceptInviteDto,
+  type InviteDto,
+  type InviteQueryDto,
 } from './dto';
-import { toAdminInviteDto } from './formatters/admin-invite.formatter';
+import { toInviteDto } from './formatters/invite.formatter';
 import { inviteExpiredError, inviteInvalidError } from './utils/invite-errors';
 import { hashInviteToken, newInviteToken } from './utils/invite-token';
 
-export const ADMIN_INVITE_TTL_DAYS = 7;
+export type InviteRole = typeof Role.ADMIN | typeof Role.EXTENSION_AGENT;
+
+export const INVITE_TTL_DAYS = 7;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // Longer than any in-flight accept, so an older claim without a user is stuck.
 const STUCK_CLAIM_GRACE_MS = 10 * 60 * 1000;
 
+const ROLES: Record<
+  InviteRole,
+  { path: string; email: typeof adminInviteEmail }
+> = {
+  [Role.ADMIN]: { path: '/admin-invite', email: adminInviteEmail },
+  [Role.EXTENSION_AGENT]: { path: '/agent-invite', email: agentInviteEmail },
+};
+
 /**
- * Invites an admin by email. The account is created later, when they follow
- * the link and choose a name and password.
+ * Invites an admin or extension agent by email. The account is created later,
+ * when they follow the link and choose a name and password.
  */
 @Injectable()
-export class AdminInviteService {
-  private readonly logger = new Logger(AdminInviteService.name);
+export class InviteService {
+  private readonly logger = new Logger(InviteService.name);
 
   constructor(
     private readonly database: PrismaService,
@@ -52,58 +65,64 @@ export class AdminInviteService {
     private readonly config: ConfigService,
   ) {}
 
-  async invite(inviter: User, dto: InviteAdminDto): Promise<AdminInviteDto> {
-    await this.assertNoAccount(dto.email);
+  async invite(
+    inviter: User,
+    email: string,
+    role: InviteRole,
+  ): Promise<InviteDto> {
+    await this.assertNoAccount(email);
     const { token, tokenHash } = newInviteToken();
     const expiresAt = this.expiry();
-    let row: AdminInvite;
+    let row: Invite;
     try {
-      row = await this.database.adminInvite.create({
+      row = await this.database.invite.create({
         data: {
-          email: dto.email,
+          email,
           tokenHash,
+          role,
           invitedById: inviter.id,
           expiresAt,
         },
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
-        throw new ConflictException(
-          'This email already has a pending invite. Resend it instead.',
-        );
+        throw new ConflictException('This email already has a pending invite');
       }
       throw error;
     }
-    await this.sendEmail(row, token);
-    return toAdminInviteDto(row);
+    await this.sendEmail(row, token, role);
+    return toInviteDto(row);
   }
 
-  async findAll(query: AdminInviteQueryDto) {
+  async findAll(
+    query: InviteQueryDto,
+    role: InviteRole,
+  ): Promise<{ data: InviteDto[]; metaData: PaginationMetaDto }> {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const where: Prisma.AdminInviteWhereInput =
-      query.status === AdminInviteStatus.PENDING
-        ? { acceptedAt: null }
-        : query.status === AdminInviteStatus.ACCEPTED
-          ? { acceptedAt: { not: null } }
-          : {};
+    const where: Prisma.InviteWhereInput =
+      query.status === InviteStatus.PENDING
+        ? { role, acceptedAt: null }
+        : query.status === InviteStatus.ACCEPTED
+          ? { role, acceptedAt: { not: null } }
+          : { role };
     const [rows, total] = await Promise.all([
-      this.database.adminInvite.findMany({
+      this.database.invite.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip,
         take,
       }),
-      this.database.adminInvite.count({ where }),
+      this.database.invite.count({ where }),
     ]);
     return {
-      data: rows.map(toAdminInviteDto),
+      data: rows.map(toInviteDto),
       metaData: paginationMeta(page, perPage, total),
     };
   }
 
-  async resend(id: string): Promise<AdminInviteDto> {
-    const invite = await this.database.adminInvite.findUnique({
-      where: { id },
+  async resend(id: string, role: InviteRole): Promise<InviteDto> {
+    const invite = await this.database.invite.findFirst({
+      where: { id, role },
     });
     if (!invite) {
       throw new NotFoundException('Invite not found');
@@ -119,7 +138,7 @@ export class AdminInviteService {
     const { token, tokenHash } = newInviteToken();
     // Repeats the state checked above so a concurrent accept can't be
     // overwritten; clearing acceptedAt recovers a stuck claim.
-    const { count } = await this.database.adminInvite.updateMany({
+    const { count } = await this.database.invite.updateMany({
       where: {
         id,
         userId: null,
@@ -130,20 +149,22 @@ export class AdminInviteService {
     if (count === 0) {
       throw new ConflictException('Invite already accepted');
     }
-    const row = await this.database.adminInvite.findUniqueOrThrow({
+    const row = await this.database.invite.findUniqueOrThrow({
       where: { id },
     });
-    await this.sendEmail(row, token);
-    return toAdminInviteDto(row);
+    await this.sendEmail(row, token, role);
+    return toInviteDto(row);
   }
 
   async accept(
-    dto: AcceptAdminInviteDto,
+    dto: AcceptInviteDto,
+    role: InviteRole,
   ): Promise<{ user: User } & TokenPairDto> {
-    const invite = await this.database.adminInvite.findUnique({
+    const invite = await this.database.invite.findUnique({
       where: { tokenHash: hashInviteToken(dto.token) },
     });
-    if (!invite || invite.acceptedAt) {
+    // The other role's link is treated as unknown, so it reveals nothing.
+    if (!invite || invite.role !== role || invite.acceptedAt) {
       throw inviteInvalidError();
     }
     const now = new Date();
@@ -156,7 +177,7 @@ export class AdminInviteService {
     // request sees count 1. The tokenHash match makes a resend that rotated
     // the hash after the read above kill this link. Expiry is re-checked here so the invite can't
     // lapse between the read above and the claim.
-    const { count } = await this.database.adminInvite.updateMany({
+    const { count } = await this.database.invite.updateMany({
       where: {
         id: invite.id,
         tokenHash: invite.tokenHash,
@@ -193,13 +214,15 @@ export class AdminInviteService {
             firstName: dto.firstName,
             lastName: dto.lastName,
             phoneNumber: dto.phoneNumber,
-            role: Role.ADMIN,
+            role,
             isVerified: true,
-            agreedToTerms: true,
+            // An agent agrees to the terms in the application they file next.
+            agreedToTerms: role === Role.ADMIN,
           },
           tx,
         );
-        await tx.adminInvite.update({
+        await this.auth.createDraftApplication(tx, created);
+        await tx.invite.update({
           where: { id: invite.id },
           data: { userId: created.id },
         });
@@ -217,18 +240,18 @@ export class AdminInviteService {
   // Lets the invitee retry. A failed release is logged, not thrown, so the
   // caller still sees the error that caused it.
   private async releaseClaim(id: string) {
-    await this.database.adminInvite
+    await this.database.invite
       .updateMany({
         where: { id, userId: null },
         data: { acceptedAt: null },
       })
       .catch((error: unknown) => {
-        this.logger.error(`Admin invite ${id} claim not released`, error);
+        this.logger.error(`Invite ${id} claim not released`, error);
       });
   }
 
   private expiry(): Date {
-    return new Date(Date.now() + ADMIN_INVITE_TTL_DAYS * DAY_MS);
+    return new Date(Date.now() + INVITE_TTL_DAYS * DAY_MS);
   }
 
   private async assertNoAccount(email: string) {
@@ -239,23 +262,21 @@ export class AdminInviteService {
   }
 
   // The invite stands without the email; an admin can resend it.
-  private async sendEmail(invite: AdminInvite, token: string) {
+  private async sendEmail(invite: Invite, token: string, role: InviteRole) {
+    const { path, email } = ROLES[role];
     await this.mail
       .send(
         invite.email,
-        adminInviteEmail({
+        email({
           acceptUrl: webappUrl(
             this.config,
-            `/admin-invite?token=${encodeURIComponent(token)}`,
+            `${path}?token=${encodeURIComponent(token)}`,
           ),
           expiresAt: invite.expiresAt,
         }),
       )
       .catch((error: unknown) => {
-        this.logger.error(
-          `Admin invite email not sent for ${invite.id}`,
-          error,
-        );
+        this.logger.error(`Invite email not sent for ${invite.id}`, error);
       });
   }
 }

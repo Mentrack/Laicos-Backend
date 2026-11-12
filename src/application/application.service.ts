@@ -37,6 +37,8 @@ export interface ApplicationFiles {
   idDocument?: StorageUploadFile;
   ownershipDocument?: StorageUploadFile;
   chiefConfirmation?: StorageUploadFile;
+  professionalCertificate?: StorageUploadFile;
+  bankStatement?: StorageUploadFile;
 }
 
 /**
@@ -179,6 +181,14 @@ export class ApplicationService {
         'chief-confirmation',
         files.chiefConfirmation,
       );
+      const professionalCertificateKey = await upload(
+        'professional-certificate',
+        files.professionalCertificate,
+      );
+      const bankStatementKey = await upload(
+        'bank-statement',
+        files.bankStatement,
+      );
       const saved = await this.database.application.update({
         where: { id: current.id },
         data: {
@@ -195,15 +205,20 @@ export class ApplicationService {
           mainProduce: dto.mainProduce,
           isExporting: dto.isExporting,
           referralAgentId: dto.referralAgentId,
+          organisation: dto.organisation,
           idDocumentKey,
           ownershipDocumentKey,
           chiefConfirmationKey,
+          professionalCertificateKey,
+          bankStatementKey,
         },
       });
       await this.storage.deletePrivate([
         idDocumentKey ? current.idDocumentKey : null,
         ownershipDocumentKey ? current.ownershipDocumentKey : null,
         chiefConfirmationKey ? current.chiefConfirmationKey : null,
+        professionalCertificateKey ? current.professionalCertificateKey : null,
+        bankStatementKey ? current.bankStatementKey : null,
       ]);
       return saved;
     } catch (error) {
@@ -246,6 +261,7 @@ export class ApplicationService {
     const fullName = `${user.firstName} ${user.lastName}`;
     await this.audit.record(tx, {
       actorType: AuditActorType.FARMER,
+      actorUserId: user.id,
       farmerId: farmer.id,
       agentId: null,
       farmId: null,
@@ -258,6 +274,7 @@ export class ApplicationService {
     });
     await this.audit.record(tx, {
       actorType: AuditActorType.FARMER,
+      actorUserId: user.id,
       farmerId: farmer.id,
       agentId: null,
       farmId: farm.id,
@@ -271,6 +288,7 @@ export class ApplicationService {
     if (application.idDocumentKey) {
       await this.audit.record(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: user.id,
         farmerId: farmer.id,
         agentId: null,
         farmId: null,
@@ -289,6 +307,7 @@ export class ApplicationService {
     if (docSummary) {
       await this.audit.record(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: user.id,
         farmerId: farmer.id,
         agentId: null,
         farmId: farm.id,
@@ -316,6 +335,9 @@ export class ApplicationService {
         idType: application.idType,
         idNumber: application.idNumber,
         idDocumentKey: application.idDocumentKey,
+        organisation: application.organisation,
+        professionalCertificateKey: application.professionalCertificateKey,
+        bankStatementKey: application.bankStatementKey,
         state: { connect: { id: stateId } },
         lga: { connect: { id: lgaId } },
         cluster: { create: { name: clusterName(lgaName) } },
@@ -324,6 +346,7 @@ export class ApplicationService {
     const fullName = `${user.firstName} ${user.lastName}`;
     await this.audit.record(tx, {
       actorType: AuditActorType.EXTENSION_AGENT,
+      actorUserId: user.id,
       farmerId: null,
       agentId: agent.id,
       farmId: null,

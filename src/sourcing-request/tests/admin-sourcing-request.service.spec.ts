@@ -1,13 +1,16 @@
 import { ConflictException } from '@nestjs/common';
 import {
+  AuditActorType,
   BuyerType,
   CheckoutStatus,
   FarmVerificationStatus,
+  OrderStatus,
   Prisma,
   ProduceStatus,
   ProduceType,
   SourcingRequestStatus,
   SourcingUnit,
+  type User,
 } from '../../../generated/client';
 import { AuditService } from '../../audit/audit.service';
 import { addDays, lagosToday } from '../../common/dates';
@@ -15,6 +18,7 @@ import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture'
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminSourcingRequestService } from '../admin-sourcing-request.service';
 
+const admin = { id: 'admin-1' } as User;
 const requestId = '11111111-1111-4111-8111-111111111111';
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const buyerId = 'buyer-1';
@@ -89,7 +93,7 @@ function requestRow(overrides: Record<string, unknown> = {}, selected = 10) {
       id: agentId,
       agentId: 'AG-000001',
       user: { firstName: 'Tunde', lastName: 'Bello' },
-      cluster: { id: 'cluster-1', name: 'Kano' },
+      cluster: { id: 'cluster-1', name: 'Kano', clusterCode: 'CL-000001' },
     },
     ...overrides,
   };
@@ -152,6 +156,7 @@ describe('AdminSourcingRequestService', () => {
   const address = { findFirst: jest.fn() };
   const payment = { updateMany: jest.fn() };
   const cartItem = { deleteMany: jest.fn() };
+  const auditEvent = { createMany: jest.fn() };
   const tx = {
     $executeRaw: jest.fn(),
     sourcingRequest,
@@ -163,6 +168,7 @@ describe('AdminSourcingRequestService', () => {
     address,
     payment,
     cartItem,
+    auditEvent,
   };
   const database = {
     ...tx,
@@ -199,6 +205,15 @@ describe('AdminSourcingRequestService', () => {
         return requestRow();
       },
     );
+  });
+
+  it("exposes the assigned agent's cluster code", async () => {
+    const detail = await service.findOne(requestId);
+
+    expect(detail.assignment).toMatchObject({
+      clusterName: 'Kano',
+      clusterCode: 'CL-000001',
+    });
   });
 
   it('drops a listing whose name is not the requested produce', async () => {
@@ -240,9 +255,9 @@ describe('AdminSourcingRequestService', () => {
     sourcingRequest.findUnique.mockResolvedValue(
       requestRow({ status: SourcingRequestStatus.AWAITING_BUYER }),
     );
-    await expect(service.save(requestId, { items: [] })).rejects.toBeInstanceOf(
-      ConflictException,
-    );
+    await expect(
+      service.save(admin, requestId, { items: [] }),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(sourcingAllocation.deleteMany).not.toHaveBeenCalled();
   });
 
@@ -253,7 +268,7 @@ describe('AdminSourcingRequestService', () => {
     });
     sourcingAllocation.findMany.mockResolvedValue([]);
     produce.findUnique.mockResolvedValue(listing());
-    await service.save(requestId, {
+    await service.save(admin, requestId, {
       items: [{ produceId, quantity: 10 }],
     });
     expect(sourcingAllocation.deleteMany).toHaveBeenCalled();
@@ -263,7 +278,10 @@ describe('AdminSourcingRequestService', () => {
     expect(audit.record).toHaveBeenCalledTimes(1);
     expect(audit.record).toHaveBeenCalledWith(
       tx,
-      expect.objectContaining({ title: 'Supply selection updated' }),
+      expect.objectContaining({
+        actorUserId: 'admin-1',
+        title: 'Supply selection updated',
+      }),
     );
   });
 
@@ -276,7 +294,7 @@ describe('AdminSourcingRequestService', () => {
       { produceId, quantity: 10 },
     ]);
     produce.findUnique.mockResolvedValue(listing());
-    await service.save(requestId, {
+    await service.save(admin, requestId, {
       items: [{ produceId, quantity: 10 }],
     });
     expect(audit.record).not.toHaveBeenCalled();
@@ -302,7 +320,7 @@ describe('AdminSourcingRequestService', () => {
     );
     checkout.findUnique.mockResolvedValue(null);
     await expect(
-      service.confirm(requestId, idempotencyKey, {
+      service.confirm(admin, requestId, idempotencyKey, {
         addressId: 'address-1',
         deliveryDate: addDays(lagosToday(), 2),
         expectedTotal: 4500,
@@ -352,7 +370,7 @@ describe('AdminSourcingRequestService', () => {
     produce.updateMany.mockResolvedValue({ count: 1 });
     produce.findUnique.mockResolvedValue(listing());
     checkout.create.mockResolvedValue(placedCheckout());
-    const result = await service.confirm(requestId, idempotencyKey, {
+    const result = await service.confirm(admin, requestId, idempotencyKey, {
       addressId: 'address-1',
       deliveryDate: addDays(lagosToday(), 2),
       expectedTotal: 4500,
@@ -366,13 +384,16 @@ describe('AdminSourcingRequestService', () => {
     expect(cartItem.deleteMany).not.toHaveBeenCalled();
     expect(audit.record).toHaveBeenCalledWith(
       tx,
-      expect.objectContaining({ title: 'Supply confirmed' }),
+      expect.objectContaining({
+        actorUserId: 'admin-1',
+        title: 'Supply confirmed',
+      }),
     );
   });
 
   it('replays a confirm that already belongs to this request', async () => {
     checkout.findUnique.mockResolvedValue(placedCheckout());
-    const result = await service.confirm(requestId, idempotencyKey, {
+    const result = await service.confirm(admin, requestId, idempotencyKey, {
       addressId: 'address-1',
       deliveryDate: addDays(lagosToday(), 2),
       expectedTotal: 4500,
@@ -387,7 +408,7 @@ describe('AdminSourcingRequestService', () => {
       sourcingRequestId: 'other-request',
     });
     await expect(
-      service.confirm(requestId, idempotencyKey, {
+      service.confirm(admin, requestId, idempotencyKey, {
         addressId: 'address-1',
         deliveryDate: addDays(lagosToday(), 2),
         expectedTotal: 4500,
@@ -421,8 +442,34 @@ describe('AdminSourcingRequestService', () => {
       status: CheckoutStatus.AWAITING_PAYMENT,
     });
     checkout.update.mockResolvedValue(placedCheckout());
-    await service.close(requestId, { reason: 'Buyer withdrew' });
+    order.findMany.mockResolvedValue([
+      {
+        id: 'order-1',
+        orderNumber: 'ORD-000001',
+        farmId: 'farm-1',
+        produceId: 'produce-1',
+        quantity: 2,
+        status: OrderStatus.AWAITING_PAYMENT,
+      },
+    ]);
+    produce.update.mockResolvedValue({
+      id: 'produce-1',
+      status: ProduceStatus.PUBLISHED,
+      actualQuantity: 10,
+      floatingQuantity: 10,
+    });
+    await service.close(admin, requestId, { reason: 'Buyer withdrew' });
     expect(order.findMany).toHaveBeenCalled();
+    expect(auditEvent.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          actorType: AuditActorType.ADMIN,
+          actorUserId: 'admin-1',
+          orderId: 'order-1',
+          summary: 'Buyer withdrew',
+        }),
+      ],
+    });
     expect(checkout.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: CheckoutStatus.CANCELLED }),
@@ -431,6 +478,7 @@ describe('AdminSourcingRequestService', () => {
     expect(audit.record).toHaveBeenCalledWith(
       tx,
       expect.objectContaining({
+        actorUserId: 'admin-1',
         title: 'Request closed',
         summary: 'Buyer withdrew. Unpaid checkout released',
       }),
@@ -446,7 +494,7 @@ describe('AdminSourcingRequestService', () => {
         return requestRow({ escalatedAt: new Date() });
       },
     );
-    await service.escalate(requestId);
+    await service.escalate(admin, requestId);
     expect(audit.record).not.toHaveBeenCalled();
     expect(sourcingRequest.update).not.toHaveBeenCalled();
   });

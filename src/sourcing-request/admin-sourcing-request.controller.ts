@@ -9,10 +9,11 @@ import {
   Query,
 } from '@nestjs/common';
 import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Role } from '../../generated/client';
+import { Role, type User } from '../../generated/client';
 import { AuditService } from '../audit/audit.service';
 import { AuditEventDto } from '../audit/dto/audit-event.dto';
 import { Auth } from '../auth/decorators/auth.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateCheckoutDto } from '../cart/dto';
 import { CheckoutDto } from '../cart/dto/checkout.dto';
 import { IdempotencyKey, idempotencyKeyPipe } from '../common/idempotency-key';
@@ -107,10 +108,11 @@ export class AdminSourcingRequestController {
       'The agent must be verified. Refused once a checkout exists, or when the saved listings sit outside the new agent’s cluster.',
   })
   async assign(
+    @CurrentUser() admin: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AssignAgentDto,
   ) {
-    const data = await this.requests.assign(id, dto);
+    const data = await this.requests.assign(admin, id, dto);
     return { data, message: 'Agent assigned' };
   }
 
@@ -121,10 +123,11 @@ export class AdminSourcingRequestController {
       'Does not reserve stock. An empty list clears the group. Refused once a checkout is awaiting payment or paid.',
   })
   async save(
+    @CurrentUser() admin: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SaveAllocationsDto,
   ) {
-    const data = await this.requests.save(id, dto);
+    const data = await this.requests.save(admin, id, dto);
     return { data, message: 'Selection saved' };
   }
 
@@ -137,11 +140,12 @@ export class AdminSourcingRequestController {
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiEnvelope(CheckoutDto)
   async confirm(
+    @CurrentUser() admin: User,
     @Param('id', ParseUUIDPipe) id: string,
     @IdempotencyKey(idempotencyKeyPipe()) idempotencyKey: string,
     @Body() dto: CreateCheckoutDto,
   ) {
-    const data = await this.requests.confirm(id, idempotencyKey, dto);
+    const data = await this.requests.confirm(admin, id, idempotencyKey, dto);
     return { data, message: 'Supply confirmed' };
   }
 
@@ -151,8 +155,11 @@ export class AdminSourcingRequestController {
     description:
       'Sets the time and does not change the status. A second call changes nothing.',
   })
-  async escalate(@Param('id', ParseUUIDPipe) id: string) {
-    const data = await this.requests.escalate(id);
+  async escalate(
+    @CurrentUser() admin: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.requests.escalate(admin, id);
     return { data, message: 'Request escalated' };
   }
 
@@ -163,10 +170,11 @@ export class AdminSourcingRequestController {
       'Releases an unpaid checkout. Refused while a paid order is still open, or when the request is completed or already closed.',
   })
   async close(
+    @CurrentUser() admin: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CloseSourcingRequestDto,
   ) {
-    const data = await this.requests.close(id, dto);
+    const data = await this.requests.close(admin, id, dto);
     return { data, message: 'Request closed' };
   }
 }

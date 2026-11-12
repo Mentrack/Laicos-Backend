@@ -3,6 +3,7 @@ import {
   AuditActorType,
   AuditCategory,
   AuditResource,
+  Role,
 } from '../../../generated/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../audit.service';
@@ -17,6 +18,8 @@ const profile = {
   resource: AuditResource.FARMER,
   resourceId: 'farmer-1',
   farmId: null,
+  actorType: AuditActorType.FARMER,
+  actorUser: null,
 };
 const payout = {
   id: 'event-2',
@@ -61,7 +64,8 @@ describe('AuditService', () => {
   const farmer = { findUnique: jest.fn() };
   const agent = { findUnique: jest.fn() };
   const farm = { findFirst: jest.fn(), findUnique: jest.fn() };
-  const database = { auditEvent, farmer, agent, farm };
+  const order = { findUnique: jest.fn() };
+  const database = { auditEvent, farmer, agent, farm, order };
   const service = new AuditService(database as unknown as PrismaService);
 
   beforeEach(() => jest.clearAllMocks());
@@ -172,6 +176,7 @@ describe('AuditService', () => {
     const tx = { auditEvent: { create: jest.fn() } };
     const event = {
       actorType: AuditActorType.FARMER,
+      actorUserId: 'user-1',
       farmerId: 'farmer-1',
       agentId: null,
       farmId: null,
@@ -184,7 +189,7 @@ describe('AuditService', () => {
     };
     await service.record(tx as never, event);
     expect(tx.auditEvent.create).toHaveBeenCalledWith({
-      data: { ...event, sourcingRequestId: null },
+      data: { ...event, sourcingRequestId: null, orderId: null },
     });
   });
 
@@ -192,6 +197,7 @@ describe('AuditService', () => {
     const tx = { auditEvent: { create: jest.fn() } };
     const event = {
       actorType: AuditActorType.BUYER,
+      actorUserId: 'user-2',
       farmerId: null,
       agentId: null,
       farmId: null,
@@ -204,6 +210,75 @@ describe('AuditService', () => {
       sourcingRequestId: 'req-1',
     };
     await service.record(tx as never, event);
-    expect(tx.auditEvent.create).toHaveBeenCalledWith({ data: event });
+    expect(tx.auditEvent.create).toHaveBeenCalledWith({
+      data: { ...event, orderId: null },
+    });
+  });
+
+  it('404s an unknown order', async () => {
+    order.findUnique.mockResolvedValue(null);
+    await expect(service.findForOrder('missing', {})).rejects.toThrow(
+      new NotFoundException('Order not found'),
+    );
+    expect(auditEvent.findMany).not.toHaveBeenCalled();
+  });
+
+  it('lists an order’s rows newest first', async () => {
+    order.findUnique.mockResolvedValue({ id: 'order-1' });
+    auditEvent.findMany.mockResolvedValue([profile]);
+    auditEvent.count.mockResolvedValue(1);
+
+    await service.findForOrder('order-1', {});
+
+    expect(auditEvent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { orderId: 'order-1' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        include: {
+          actorUser: {
+            select: { id: true, firstName: true, lastName: true, role: true },
+          },
+        },
+      }),
+    );
+  });
+
+  it('formats the acting user as a named actor', async () => {
+    order.findUnique.mockResolvedValue({ id: 'order-1' });
+    auditEvent.findMany.mockResolvedValue([
+      {
+        ...profile,
+        actorType: AuditActorType.ADMIN,
+        actorUser: {
+          id: 'u1',
+          firstName: 'Jane',
+          lastName: 'Okafor',
+          role: Role.ADMIN,
+        },
+      },
+    ]);
+    auditEvent.count.mockResolvedValue(1);
+
+    const result = await service.findForOrder('order-1', {});
+
+    expect(result.data[0].actorType).toBe(AuditActorType.ADMIN);
+    expect(result.data[0].actor).toEqual({
+      id: 'u1',
+      name: 'Jane Okafor',
+      role: 'ADMIN',
+    });
+  });
+
+  it('formats a row with no actor user as a null actor', async () => {
+    order.findUnique.mockResolvedValue({ id: 'order-1' });
+    auditEvent.findMany.mockResolvedValue([
+      { ...profile, actorType: AuditActorType.SYSTEM, actorUser: null },
+    ]);
+    auditEvent.count.mockResolvedValue(1);
+
+    const result = await service.findForOrder('order-1', {});
+
+    expect(result.data[0].actor).toBeNull();
+    expect(result.data[0].actorType).toBe(AuditActorType.SYSTEM);
   });
 });

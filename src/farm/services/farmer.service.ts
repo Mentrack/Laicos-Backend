@@ -48,6 +48,7 @@ export class FarmerService {
       });
       await this.audit.record(tx, {
         actorType: AuditActorType.FARMER,
+        actorUserId: user.id,
         farmerId: farmer.id,
         agentId: null,
         farmId: null,
@@ -77,6 +78,7 @@ export class FarmerService {
           });
           await this.audit.record(tx, {
             actorType: AuditActorType.FARMER,
+            actorUserId: user.id,
             farmerId: farmer.id,
             agentId: null,
             farmId: null,

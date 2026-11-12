@@ -41,6 +41,18 @@ export class AdminFarmProduceController {
     const { data, metaData } = await this.produce.findByFarm(farmId, query);
     return { data, message: 'Produce retrieved', metaData };
   }
+
+  @Get('summary')
+  @ApiOperation({
+    summary: 'Count a farm’s produce',
+    description:
+      '{farmId} is Farm.id. The same cards as GET /admin/produce/summary, counted for that farm. participatingFarms and activeClusters are 0 or 1. 404 when the farm does not exist.',
+  })
+  @ApiEnvelope(AdminProduceSummaryDto)
+  async summary(@Param('farmId', ParseUUIDPipe) farmId: string) {
+    const data = await this.produce.summaryForFarm(farmId);
+    return { data, message: 'Produce summary retrieved' };
+  }
 }
 
 @Controller('admin/produce')

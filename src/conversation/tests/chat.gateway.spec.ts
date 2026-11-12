@@ -25,6 +25,7 @@ const buyer = {
 describe('ChatGateway', () => {
   const verifyIdToken = jest.fn();
   const findUnique = jest.fn();
+  const findAgent = jest.fn();
   const emit = jest.fn();
   const namespace = {
     server: { adapter: jest.fn() },
@@ -71,9 +72,13 @@ describe('ChatGateway', () => {
     mockRedis.quit.mockResolvedValue('OK');
     verifyIdToken.mockResolvedValue({ uid: 'uid-1', exp: inSeconds(3600) });
     findUnique.mockResolvedValue(buyer);
+    findAgent.mockResolvedValue({ suspendedAt: null, suspendedUntil: null });
     gateway = new ChatGateway(
       { auth: { verifyIdToken } } as unknown as FirebaseService,
-      { user: { findUnique } } as unknown as PrismaService,
+      {
+        user: { findUnique },
+        agent: { findUnique: findAgent },
+      } as unknown as PrismaService,
       config,
     );
     gateway.afterInit(namespace as unknown as Namespace);
@@ -132,6 +137,41 @@ describe('ChatGateway', () => {
     const error = await connect(socket);
     expect(error).toMatchObject({ data: { code, statusCode: 403 } });
     expect(socket.join).not.toHaveBeenCalled();
+  });
+
+  describe('agent suspension', () => {
+    const agentUser = {
+      ...buyer,
+      id: 'agent-user-1',
+      role: Role.EXTENSION_AGENT,
+      activatedAt: new Date(),
+    };
+    const day = 24 * 60 * 60 * 1000;
+
+    it.each([
+      ['indefinitely', null],
+      ['until a future date', new Date(Date.now() + day)],
+    ])('refuses an agent suspended %s', async (_label, suspendedUntil) => {
+      findUnique.mockResolvedValue(agentUser);
+      findAgent.mockResolvedValue({ suspendedAt: new Date(), suspendedUntil });
+      const socket = fakeSocket();
+      const error = await connect(socket);
+      expect(error).toMatchObject({
+        data: { code: 'ACCOUNT_SUSPENDED', statusCode: 403 },
+      });
+      expect(socket.join).not.toHaveBeenCalled();
+    });
+
+    it('admits an agent whose suspension has ended', async () => {
+      findUnique.mockResolvedValue(agentUser);
+      findAgent.mockResolvedValue({
+        suspendedAt: new Date(Date.now() - 2 * day),
+        suspendedUntil: new Date(Date.now() - day),
+      });
+      const socket = fakeSocket();
+      await expect(connect(socket)).resolves.toBeUndefined();
+      expect(socket.join).toHaveBeenCalledWith('user:agent-user-1');
+    });
   });
 
   it('disconnects when the token expires', async () => {

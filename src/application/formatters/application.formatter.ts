@@ -6,12 +6,19 @@ export async function formatApplication(
   storage: StorageService,
   application: Application,
 ): Promise<ApplicationDto> {
-  const [idDocumentUrl, ownershipDocumentUrl, chiefConfirmationUrl] =
-    await Promise.all([
-      storage.presignedUrlOrNull(application.idDocumentKey),
-      storage.presignedUrlOrNull(application.ownershipDocumentKey),
-      storage.presignedUrlOrNull(application.chiefConfirmationKey),
-    ]);
+  const [
+    idDocumentUrl,
+    ownershipDocumentUrl,
+    chiefConfirmationUrl,
+    professionalCertificateUrl,
+    bankStatementUrl,
+  ] = await Promise.all([
+    storage.presignedUrlOrNull(application.idDocumentKey),
+    storage.presignedUrlOrNull(application.ownershipDocumentKey),
+    storage.presignedUrlOrNull(application.chiefConfirmationKey),
+    storage.presignedUrlOrNull(application.professionalCertificateKey),
+    storage.presignedUrlOrNull(application.bankStatementKey),
+  ]);
   return {
     id: application.id,
     status: application.status,
@@ -31,5 +38,8 @@ export async function formatApplication(
     referralAgentId: application.referralAgentId,
     ownershipDocumentUrl,
     chiefConfirmationUrl,
+    organisation: application.organisation,
+    professionalCertificateUrl,
+    bankStatementUrl,
   };
 }

@@ -1,5 +1,8 @@
 import { ConflictException, HttpException } from '@nestjs/common';
 import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
   CheckoutStatus,
   Currency,
   OrderStatus,
@@ -83,6 +86,8 @@ describe('PaymentService', () => {
       update: jest.fn(),
     },
     order: { updateMany: jest.fn(), findMany: jest.fn() },
+    buyer: { findUniqueOrThrow: jest.fn() },
+    auditEvent: { createMany: jest.fn(), create: jest.fn() },
   };
   let transactionOptions: unknown;
   const buyerModel = { findUnique: jest.fn() };
@@ -120,6 +125,7 @@ describe('PaymentService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     buyerModel.findUnique.mockResolvedValue(buyerProfile('buyer-1'));
+    tx.buyer.findUniqueOrThrow.mockResolvedValue({ userId: buyer.id });
     tx.order.findMany.mockResolvedValue([]);
     notification.notify.mockResolvedValue([]);
     tx.checkout.findFirst.mockResolvedValue(checkout());
@@ -316,6 +322,7 @@ describe('PaymentService', () => {
         {
           id: 'order-1',
           orderNumber: 'ORD-000001',
+          farmId: 'farm-1',
           produceName: 'Maize',
           farm: {
             owner: { userId: 'farmer-user-1' },
@@ -325,6 +332,7 @@ describe('PaymentService', () => {
         {
           id: 'order-2',
           orderNumber: 'ORD-000002',
+          farmId: 'farm-2',
           produceName: 'Yam',
           farm: { owner: { userId: 'farmer-user-2' }, cluster: null },
         },
@@ -421,6 +429,46 @@ describe('PaymentService', () => {
         data: { status: OrderStatus.PENDING },
       });
       expect(refunds.submit).not.toHaveBeenCalled();
+    });
+
+    it('records one paid event per order against the buyer', async () => {
+      await apply();
+      const paid = (n: number) => ({
+        actorType: AuditActorType.BUYER,
+        actorUserId: buyer.id,
+        farmerId: null,
+        agentId: null,
+        farmId: `farm-${n}`,
+        category: AuditCategory.ORDER,
+        title: `Order ORD-00000${n} paid`,
+        summary: 'PAY-000001',
+        actionLabel: 'View order',
+        resource: AuditResource.ORDER,
+        resourceId: `order-${n}`,
+        sourcingRequestId: null,
+        orderId: `order-${n}`,
+      });
+      expect(tx.auditEvent.createMany).toHaveBeenCalledWith({
+        data: [paid(1), paid(2)],
+      });
+    });
+
+    it('records the admin as the payer of each order when they verify', async () => {
+      await apply({}, admin);
+      expect(tx.auditEvent.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            actorType: AuditActorType.ADMIN,
+            actorUserId: admin.id,
+            orderId: 'order-1',
+          }),
+          expect.objectContaining({
+            actorType: AuditActorType.ADMIN,
+            actorUserId: admin.id,
+            orderId: 'order-2',
+          }),
+        ],
+      });
     });
 
     it('records the admin who applied it', async () => {

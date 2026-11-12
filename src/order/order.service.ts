@@ -5,8 +5,6 @@ import {
 } from '@nestjs/common';
 import {
   AuditActorType,
-  AuditCategory,
-  AuditResource,
   OrderStatus,
   Prisma,
   Role,
@@ -37,6 +35,7 @@ import {
   syncSourcingRequest,
 } from '../sourcing-request/utils/sync-sourcing-request';
 import { deriveProduceStatus } from '../produce/utils/produce-status';
+import { orderAuditEvent } from './utils/order-audit';
 import { orderLine, releaseStock, reserveProduce } from './utils/reservation';
 import {
   CancelOrderDto,
@@ -45,15 +44,7 @@ import {
   OrderQueryDto,
   UpdateOrderChecklistDto,
 } from './dto';
-
-// Orders not yet delivered or cancelled.
-const ACTIVE: OrderStatus[] = [
-  OrderStatus.PENDING,
-  OrderStatus.CONFIRMED,
-  OrderStatus.PREPARING,
-  OrderStatus.READY,
-  OrderStatus.SHIPPED,
-];
+import { ACTIVE_STATUSES } from './utils/active-statuses';
 
 // Farmer-cancellable statuses (anything before the hand-over for pickup);
 // buyers may only ever cancel a PENDING order.
@@ -125,6 +116,7 @@ export class OrderService {
           lines: [orderLine(produce, dto.quantity)],
           delivery,
           expectedTotal: dto.expectedTotal,
+          placedBy: { type: AuditActorType.BUYER, userId: user.id },
         },
         this.config,
       );
@@ -177,7 +169,7 @@ export class OrderService {
     const [earnings, activeOrders] = await Promise.all([
       totalEarnings(this.database, user.id),
       this.database.order.count({
-        where: { ...where, status: { in: ACTIVE } },
+        where: { ...where, status: { in: ACTIVE_STATUSES } },
       }),
     ]);
     return { totalEarnings: earnings, activeOrders };
@@ -219,15 +211,9 @@ export class OrderService {
             }),
           },
         });
-        await this.recordFarmerOrder(
-          tx,
-          user,
-          order,
-          `Order ${order.orderNumber} confirmed`,
-          undefined,
-          undefined,
-          true,
-        );
+        await this.recordOrderEvent(tx, user, order, 'confirmed', {
+          linkSourcing: true,
+        });
         return confirmed;
       });
     } catch (error) {
@@ -248,15 +234,9 @@ export class OrderService {
           where: { id, status: OrderStatus.CONFIRMED },
           data: { status: OrderStatus.PREPARING, checklist: { create: {} } },
         });
-        await this.recordFarmerOrder(
-          tx,
-          user,
-          order,
-          `Order ${order.orderNumber} prepared`,
-          undefined,
-          undefined,
-          true,
-        );
+        await this.recordOrderEvent(tx, user, order, 'prepared', {
+          linkSourcing: true,
+        });
         return preparing;
       });
     } catch (error) {
@@ -290,12 +270,7 @@ export class OrderService {
           where: { orderId: id, order: { status: OrderStatus.PREPARING } },
           data: dto,
         });
-        await this.recordFarmerOrder(
-          tx,
-          user,
-          order,
-          `Order ${order.orderNumber} checklist updated`,
-        );
+        await this.recordOrderEvent(tx, user, order, 'checklist updated');
         return checklist;
       });
     } catch (error) {
@@ -343,15 +318,10 @@ export class OrderService {
             handover: { create: { agentId: farm.cluster?.agentId ?? null } },
           },
         });
-        await this.recordFarmerOrder(
-          tx,
-          user,
-          order,
-          `Order ${order.orderNumber} marked ready`,
-          undefined,
+        await this.recordOrderEvent(tx, user, order, 'marked ready', {
           farm,
-          true,
-        );
+          linkSourcing: true,
+        });
         return ready;
       });
     } catch (error) {
@@ -379,23 +349,9 @@ export class OrderService {
           },
           data: { status: OrderStatus.FULFILLED, fulfilledAt: new Date() },
         });
-        const sourcingRequestId = await sourcingRequestIdForOrder(tx, id);
-        await this.audit.record(tx, {
-          actorType: AuditActorType.BUYER,
-          farmerId: null,
-          agentId: null,
-          farmId: order.farmId,
-          category: AuditCategory.ORDER,
-          title: `Order ${order.orderNumber} received`,
-          summary: order.orderNumber,
-          actionLabel: 'View order',
-          resource: AuditResource.ORDER,
-          resourceId: id,
-          sourcingRequestId,
+        await this.recordOrderEvent(tx, user, order, 'received', {
+          linkSourcing: true,
         });
-        if (sourcingRequestId) {
-          await syncSourcingRequest(tx, sourcingRequestId);
-        }
         return fulfilled;
       });
     } catch (error) {
@@ -426,15 +382,10 @@ export class OrderService {
           },
         });
         await releaseStock(tx, order);
-        await this.recordFarmerOrder(
-          tx,
-          user,
-          order,
-          `Order ${order.orderNumber} cancelled`,
-          dto.reason,
-          undefined,
-          true,
-        );
+        await this.recordOrderEvent(tx, user, order, 'cancelled', {
+          summary: dto.reason,
+          linkSourcing: true,
+        });
         return cancelled;
       });
     } catch (error) {
@@ -442,58 +393,53 @@ export class OrderService {
     }
   }
 
-  private async recordFarmerOrder(
+  // Every action lands on the order's timeline. farmerId is set only for
+  // a farmer actor, so the farmer's own log shows only what they did.
+  private async recordOrderEvent(
     tx: Prisma.TransactionClient,
     user: User,
     order: Order,
-    title: string,
-    summary?: string,
-    farm?: { farmCode: string; ownerId: string },
-    linkSourcing = false,
+    verb: string,
+    options: {
+      summary?: string;
+      farm?: { farmCode: string; ownerId: string };
+      linkSourcing?: boolean;
+    } = {},
   ): Promise<void> {
-    const sourcingRequestId = linkSourcing
+    const sourcingRequestId = options.linkSourcing
       ? await sourcingRequestIdForOrder(tx, order.id)
       : null;
     if (user.role === Role.FARMER) {
-      const resolved =
-        farm ??
+      const farm =
+        options.farm ??
         (await tx.farm.findUniqueOrThrow({
           where: { id: order.farmId },
           select: { farmCode: true, ownerId: true },
         }));
-      await this.audit.record(tx, {
-        actorType: AuditActorType.FARMER,
-        farmerId: resolved.ownerId,
-        agentId: null,
-        farmId: order.farmId,
-        category: AuditCategory.ORDER,
-        title,
-        summary: summary ?? resolved.farmCode,
-        actionLabel: 'View order',
-        resource: AuditResource.ORDER,
-        resourceId: order.id,
-        sourcingRequestId,
-      });
-    } else if (
-      sourcingRequestId &&
-      (user.role === Role.ADMIN || user.role === Role.BUYER)
-    ) {
-      await this.audit.record(tx, {
-        actorType:
-          user.role === Role.ADMIN
-            ? AuditActorType.ADMIN
-            : AuditActorType.BUYER,
-        farmerId: null,
-        agentId: null,
-        farmId: order.farmId,
-        category: AuditCategory.ORDER,
-        title,
-        summary: summary ?? order.orderNumber,
-        actionLabel: 'View order',
-        resource: AuditResource.ORDER,
-        resourceId: order.id,
-        sourcingRequestId,
-      });
+      await this.audit.record(
+        tx,
+        orderAuditEvent(
+          order,
+          { type: AuditActorType.FARMER, userId: user.id },
+          verb,
+          options.summary ?? farm.farmCode,
+          { farmerId: farm.ownerId, sourcingRequestId },
+        ),
+      );
+    } else {
+      // scopedTo() treats every non-farmer, non-admin caller as a buyer.
+      const type =
+        user.role === Role.ADMIN ? AuditActorType.ADMIN : AuditActorType.BUYER;
+      await this.audit.record(
+        tx,
+        orderAuditEvent(
+          order,
+          { type, userId: user.id },
+          verb,
+          options.summary ?? order.orderNumber,
+          { sourcingRequestId },
+        ),
+      );
     }
     if (sourcingRequestId) {
       await syncSourcingRequest(tx, sourcingRequestId);
@@ -571,6 +517,7 @@ async function filtered(
   return {
     ...(await scopedTo(database, user)),
     produceId: filter.produceId,
+    farmId: filter.farmId,
     status: filter.status,
     type: filter.type,
   };

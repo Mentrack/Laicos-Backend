@@ -6,6 +6,7 @@ import { FarmerOnboardingService } from '../farmer-onboarding.service';
 
 const agent = {
   id: 'agent-1',
+  userId: 'agent-user-1',
   stateId: 'state-1',
   lgaId: 'lga-1',
   isVerified: true,
@@ -63,6 +64,7 @@ describe('FarmerOnboardingService', () => {
       },
       documents: {},
       preferredAgentId: 'agent-1',
+      agentUserId: 'agent-user-1',
     });
   });
 

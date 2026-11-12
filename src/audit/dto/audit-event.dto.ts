@@ -1,5 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { AuditCategory, AuditResource } from '../../../generated/client';
+import {
+  AuditActorType,
+  AuditCategory,
+  AuditResource,
+  Role,
+} from '../../../generated/client';
 
 export class AuditEventActionDto {
   @ApiProperty({ example: 'View profile' })
@@ -10,6 +15,17 @@ export class AuditEventActionDto {
 
   @ApiProperty({ format: 'uuid' })
   resourceId: string;
+}
+
+export class AuditEventActorDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty({ example: 'Jane Okafor' })
+  name: string;
+
+  @ApiProperty({ enum: Role, enumName: 'Role' })
+  role: Role;
 }
 
 export class AuditEventDto {
@@ -30,4 +46,10 @@ export class AuditEventDto {
 
   @ApiProperty({ type: AuditEventActionDto, nullable: true })
   action: AuditEventActionDto | null;
+
+  @ApiProperty({ enum: AuditActorType, enumName: 'AuditActorType' })
+  actorType: AuditActorType;
+
+  @ApiProperty({ type: AuditEventActorDto, nullable: true })
+  actor: AuditEventActorDto | null;
 }

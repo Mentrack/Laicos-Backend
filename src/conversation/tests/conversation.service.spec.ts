@@ -594,6 +594,7 @@ describe('ConversationService', () => {
       });
       expect(audit.record).toHaveBeenCalledWith(tx, {
         actorType: AuditActorType.EXTENSION_AGENT,
+        actorUserId: agent.id,
         farmerId: null,
         agentId: 'agent-1',
         farmId: 'farm-1',
@@ -629,6 +630,7 @@ describe('ConversationService', () => {
         tx,
         expect.objectContaining({
           actorType: AuditActorType.BUYER,
+          actorUserId: buyer.id,
           title: 'Message sent to agent',
           sourcingRequestId: 'req-1',
         }),
