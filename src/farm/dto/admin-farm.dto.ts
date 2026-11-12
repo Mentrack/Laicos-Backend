@@ -1,4 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  IntersectionType,
+} from '@nestjs/swagger';
 import {
   IsEnum,
   IsOptional,
@@ -17,6 +21,7 @@ import {
   VerificationCheckKey,
   VerificationTaskStatus,
 } from '../../../generated/client';
+import { IdentityDto } from '../../common/dto/identity.dto';
 import { PaginationQueryDto } from '../../common/pagination';
 import { LgaDto, StateDto } from '../../location/dto';
 import { VerificationFindingsDto } from '../../verification/dto/findings.dto';
@@ -79,6 +84,15 @@ export class AdminFarmRowDto {
 
   @ApiProperty({ type: AdminFarmFarmerDto })
   farmer: AdminFarmFarmerDto;
+
+  @ApiProperty({ type: String, nullable: true, example: 'CL-000018' })
+  clusterCode: string | null;
+
+  @ApiProperty({
+    type: 'integer',
+    description: 'Every listing on the farm, any status',
+  })
+  productCount: number;
 }
 
 export class AdminFarmAgentDto {
@@ -327,10 +341,16 @@ export class AdminFarmVerificationDto extends VerificationFindingsDto {
   evidence: AdminFarmEvidenceDto[];
 }
 
+/** The farm page's farmer header, with the ID the farmer or their agent supplied. */
+export class AdminFarmDetailFarmerDto extends IntersectionType(
+  AdminFarmFarmerDto,
+  IdentityDto,
+) {}
+
 /** FarmDto plus the farmer header, sales, cluster, evidence, and verification rounds. */
 export class AdminFarmDetailDto extends FarmDto {
-  @ApiProperty({ type: AdminFarmFarmerDto })
-  farmer: AdminFarmFarmerDto;
+  @ApiProperty({ type: AdminFarmDetailFarmerDto })
+  farmer: AdminFarmDetailFarmerDto;
 
   @ApiProperty({ type: AdminFarmMarketplaceDto })
   marketplace: AdminFarmMarketplaceDto;
@@ -359,7 +379,16 @@ export class AdminFarmDetailDto extends FarmDto {
   assignedAgent: AdminFarmAssignedAgentDto | null;
 }
 
-export class AdminFarmQueryDto extends PaginationQueryDto {
+export enum AdminFarmSort {
+  NEWEST = 'NEWEST',
+  OLDEST = 'OLDEST',
+  FARM_CODE_ASC = 'FARM_CODE_ASC',
+  FARM_CODE_DESC = 'FARM_CODE_DESC',
+  FARMER_NAME_ASC = 'FARMER_NAME_ASC',
+  FARMER_NAME_DESC = 'FARMER_NAME_DESC',
+}
+
+export class AdminFarmFilterDto {
   @ApiPropertyOptional({
     example: 'amina',
     description:
@@ -382,7 +411,22 @@ export class AdminFarmQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(FarmVerificationStatus)
   status?: FarmVerificationStatus;
+
+  @ApiPropertyOptional({
+    enum: AdminFarmSort,
+    enumName: 'AdminFarmSort',
+    default: AdminFarmSort.NEWEST,
+    description: 'FARMER_NAME sorts by last name, then first name',
+  })
+  @IsOptional()
+  @IsEnum(AdminFarmSort)
+  sort?: AdminFarmSort;
 }
+
+export class AdminFarmQueryDto extends IntersectionType(
+  AdminFarmFilterDto,
+  PaginationQueryDto,
+) {}
 
 /** The six cards above the farmers directory. Not affected by list filters. */
 export class AdminFarmSummaryDto {

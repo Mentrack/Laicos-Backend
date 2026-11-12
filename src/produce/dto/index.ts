@@ -1,5 +1,6 @@
 export {
   AdminProduceActionDto,
+  AdminProduceFilterDto,
   AdminProduceQueryDto,
   AdminProduceRowDto,
   AdminProduceSummaryDto,

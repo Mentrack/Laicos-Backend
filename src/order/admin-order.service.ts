@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
-import { toCsv } from '../common/csv';
+import { createdAtAfter, csvLines } from '../common/csv';
 import { lagosDay } from '../common/dates';
 import {
   PaginationQueryDto,
@@ -25,6 +25,7 @@ import {
 } from './formatters/admin-order-detail.formatter';
 import {
   ADMIN_ORDER_INCLUDE,
+  type AdminListedOrder,
   toAdminOrderRow,
 } from './formatters/admin-order.formatter';
 import { adminOrderWhere } from './utils/admin-order-where';
@@ -70,14 +71,21 @@ export class AdminOrderService {
     };
   }
 
-  async exportCsv(query: AdminOrderExportQueryDto): Promise<string> {
-    const orders = await this.database.order.findMany({
-      ...listQuery(query),
-      include: ADMIN_ORDER_INCLUDE,
-    });
-    return toCsv(
+  // Not async: listQuery's range check must throw before streaming starts.
+  exportCsv(query: AdminOrderExportQueryDto): AsyncGenerator<string> {
+    const { where, orderBy, direction } = listQuery(query);
+    return csvLines<AdminListedOrder>(
       CSV_HEADER,
-      orders.map((order) => {
+      (after, take) =>
+        this.database.order.findMany({
+          where: after
+            ? { AND: [where, createdAtAfter(after, direction)] }
+            : where,
+          include: ADMIN_ORDER_INCLUDE,
+          orderBy,
+          take,
+        }),
+      (order) => {
         const row = toAdminOrderRow(order);
         return [
           row.orderNumber,
@@ -94,7 +102,7 @@ export class AdminOrderService {
           row.dispute?.status ?? null,
           lagosDay(row.createdAt),
         ];
-      }),
+      },
     );
   }
 
@@ -134,6 +142,7 @@ function listQuery(query: AdminOrderExportQueryDto) {
   assertRange(query);
   const direction = query.sort ?? 'desc';
   return {
+    direction,
     where: adminOrderWhere(query, query.tab ?? AdminOrderTab.ALL),
     orderBy: [{ createdAt: direction }, { id: direction }],
   };

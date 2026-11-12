@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Header,
-  Param,
-  ParseUUIDPipe,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
 import {
   ApiOkResponse,
   ApiOperation,
@@ -15,6 +8,7 @@ import {
 import { Role } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
 import { AuditEventDto } from '../audit/dto/audit-event.dto';
+import { csvFile } from '../common/csv';
 import { ApiEnvelope } from '../common/dto/envelope';
 import { PaginationQueryDto } from '../common/pagination';
 import { AdminOrderService } from './admin-order.service';
@@ -49,8 +43,6 @@ export class AdminOrderController {
   // Declared before any ':id' route so 'export' is not read as an id.
   // Returns the raw CSV text, not the response envelope.
   @Get('export')
-  @Header('Content-Type', 'text/csv; charset=utf-8')
-  @Header('Content-Disposition', 'attachment; filename="orders.csv"')
   @ApiOperation({
     summary: 'Export orders as CSV',
     description:
@@ -59,7 +51,7 @@ export class AdminOrderController {
   @ApiProduces('text/csv')
   @ApiOkResponse({ schema: { type: 'string' } })
   exportCsv(@Query() query: AdminOrderExportQueryDto) {
-    return this.orders.exportCsv(query);
+    return csvFile(this.orders.exportCsv(query), 'orders.csv');
   }
 
   @Get()

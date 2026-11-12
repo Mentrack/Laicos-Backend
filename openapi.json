@@ -1676,32 +1676,11 @@
         ]
       }
     },
-    "/admin/farms": {
+    "/admin/farms/export": {
       "get": {
-        "description": "One row per farm, newest first. Search matches the farmer name, phone, farmer code, farm code or farm name. Filter with stateId and status. Documents are on GET /admin/farms/{id}.",
-        "operationId": "AdminFarmController_findAll",
+        "description": "Every farm matching the list filters (search, stateId, status, sort), without pagination.",
+        "operationId": "AdminFarmController_exportCsv",
         "parameters": [
-          {
-            "name": "page",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "perPage",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "maximum": 50,
-              "default": 20,
-              "type": "number"
-            }
-          },
           {
             "name": "search",
             "required": false,
@@ -1728,6 +1707,102 @@
             "in": "query",
             "schema": {
               "$ref": "#/components/schemas/FarmVerificationStatus"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "description": "FARMER_NAME sorts by last name, then first name",
+            "schema": {
+              "$ref": "#/components/schemas/AdminFarmSort"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export farms as CSV",
+        "tags": [
+          "Farms"
+        ]
+      }
+    },
+    "/admin/farms": {
+      "get": {
+        "description": "One row per farm, newest first. Search matches the farmer name, phone, farmer code, farm code or farm name. Filter with stateId and status. Documents are on GET /admin/farms/{id}.",
+        "operationId": "AdminFarmController_findAll",
+        "parameters": [
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive match on the farmer name, phone, farmer code, farm code or farm name",
+            "schema": {
+              "maxLength": 120,
+              "example": "amina",
+              "type": "string"
+            }
+          },
+          {
+            "name": "stateId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/FarmVerificationStatus"
+            }
+          },
+          {
+            "name": "sort",
+            "required": false,
+            "in": "query",
+            "description": "FARMER_NAME sorts by last name, then first name",
+            "schema": {
+              "$ref": "#/components/schemas/AdminFarmSort"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
             }
           }
         ],
@@ -1756,7 +1831,7 @@
     },
     "/admin/farms/{id}": {
       "get": {
-        "description": "{id} is the Farm id. The farmer is the page header. Includes listings, sale totals, the five newest sales, the supply cluster, each round’s expected documents and evidence status, issue photos, every verification round and the cluster agent. Document and evidence links expire in 15 minutes. 404 when the farm does not exist.",
+        "description": "{id} is the Farm id. The farmer is the page header, with their ID type, number and a 15-minute link to the ID document. Includes listings, sale totals, the five newest sales, the supply cluster, each round’s expected documents and evidence status, issue photos, every verification round and the cluster agent. Document and evidence links expire in 15 minutes. 404 when the farm does not exist.",
         "operationId": "AdminFarmController_findOne",
         "parameters": [
           {
@@ -2882,32 +2957,11 @@
         ]
       }
     },
-    "/admin/produce": {
+    "/admin/produce/export": {
       "get": {
-        "description": "Newest first, including drafts and listings on farms that are not verified. Search matches the product name, farm name or farm code. Filter with category and status.",
-        "operationId": "AdminProduceController_findAll",
+        "description": "Every listing matching the table filters (search, category, status), newest first, without pagination.",
+        "operationId": "AdminProduceController_exportCsv",
         "parameters": [
-          {
-            "name": "page",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "perPage",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "maximum": 50,
-              "default": 20,
-              "type": "number"
-            }
-          },
           {
             "name": "search",
             "required": false,
@@ -2933,6 +2987,83 @@
             "in": "query",
             "schema": {
               "$ref": "#/components/schemas/ProduceStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export produce listings as CSV",
+        "tags": [
+          "Produce"
+        ]
+      }
+    },
+    "/admin/produce": {
+      "get": {
+        "description": "Newest first, including drafts and listings on farms that are not verified. Search matches the product name, farm name or farm code. Filter with category and status.",
+        "operationId": "AdminProduceController_findAll",
+        "parameters": [
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive match on the product name, farm name or farm code",
+            "schema": {
+              "maxLength": 120,
+              "example": "sesame",
+              "type": "string"
+            }
+          },
+          {
+            "name": "category",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceCategory"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProduceStatus"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
             }
           }
         ],
@@ -3047,27 +3178,6 @@
             }
           },
           {
-            "name": "page",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "default": 1,
-              "type": "number"
-            }
-          },
-          {
-            "name": "perPage",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "minimum": 1,
-              "maximum": 50,
-              "default": 20,
-              "type": "number"
-            }
-          },
-          {
             "name": "search",
             "required": false,
             "in": "query",
@@ -3092,6 +3202,27 @@
             "in": "query",
             "schema": {
               "$ref": "#/components/schemas/ProduceStatus"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
             }
           }
         ],
@@ -5125,6 +5256,22 @@
         "operationId": "AdminSourcingRequestController_findAll",
         "parameters": [
           {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/SourcingRequestStatus"
+            }
+          },
+          {
             "name": "page",
             "required": false,
             "in": "query",
@@ -5143,22 +5290,6 @@
               "maximum": 50,
               "default": 20,
               "type": "number"
-            }
-          },
-          {
-            "name": "search",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "$ref": "#/components/schemas/SourcingRequestStatus"
             }
           }
         ],
@@ -5180,6 +5311,51 @@
           }
         ],
         "summary": "List buyer requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/admin/sourcing-requests/export": {
+      "get": {
+        "description": "Every buyer request matching the list filters (search, status), newest first, without pagination.",
+        "operationId": "AdminSourcingRequestController_exportCsv",
+        "parameters": [
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/SourcingRequestStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export buyer requests as CSV",
         "tags": [
           "Sourcing Requests"
         ]
@@ -9719,6 +9895,17 @@
           "data"
         ]
       },
+      "AdminFarmSort": {
+        "type": "string",
+        "enum": [
+          "NEWEST",
+          "OLDEST",
+          "FARM_CODE_ASC",
+          "FARM_CODE_DESC",
+          "FARMER_NAME_ASC",
+          "FARMER_NAME_DESC"
+        ]
+      },
       "FarmerStatus": {
         "type": "string",
         "enum": [
@@ -9815,6 +10002,15 @@
           },
           "farmer": {
             "$ref": "#/components/schemas/AdminFarmFarmerDto"
+          },
+          "clusterCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "CL-000018"
+          },
+          "productCount": {
+            "type": "integer",
+            "description": "Every listing on the farm, any status"
           }
         },
         "required": [
@@ -9827,7 +10023,9 @@
           "verificationStatus",
           "state",
           "lga",
-          "farmer"
+          "farmer",
+          "clusterCode",
+          "productCount"
         ]
       },
       "AdminFarmRowListResponseDto": {
@@ -9851,6 +10049,70 @@
           "message",
           "data",
           "metaData"
+        ]
+      },
+      "AdminFarmDetailFarmerDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Farmer.id"
+          },
+          "farmerId": {
+            "type": "string",
+            "example": "FRM-000123"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Amina"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Garba"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "+2348012345678"
+          },
+          "status": {
+            "description": "Account standing. New farmers are ACTIVE",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FarmerStatus"
+              }
+            ]
+          },
+          "idType": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IdType"
+              }
+            ]
+          },
+          "idNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "12345678901"
+          },
+          "idDocumentUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "Presigned URL of the uploaded ID document; expires in 15 min"
+          }
+        },
+        "required": [
+          "id",
+          "farmerId",
+          "firstName",
+          "lastName",
+          "phoneNumber",
+          "status",
+          "idType",
+          "idNumber",
+          "idDocumentUrl"
         ]
       },
       "ProduceStatus": {
@@ -10574,7 +10836,7 @@
             "type": "string"
           },
           "farmer": {
-            "$ref": "#/components/schemas/AdminFarmFarmerDto"
+            "$ref": "#/components/schemas/AdminFarmDetailFarmerDto"
           },
           "marketplace": {
             "$ref": "#/components/schemas/AdminFarmMarketplaceDto"

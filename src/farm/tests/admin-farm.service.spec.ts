@@ -1,12 +1,15 @@
 import {
   EvidenceStatus,
   FarmVerificationStatus,
+  IdType,
   OrderStatus,
   ProduceStatus,
   VerificationTaskStatus,
 } from '../../../generated/client';
+import { collect } from '../../common/tests/collect';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StorageService } from '../../storage/storage.service';
+import { AdminFarmSort } from '../dto';
 import { AdminFarmService } from '../services/admin-farm.service';
 
 const created = new Date('2026-09-01');
@@ -38,10 +41,14 @@ function row(overrides: Record<string, unknown> = {}) {
     verifications: [],
     produce: [],
     cluster: null,
+    _count: { produce: 0 },
     owner: {
       id: 'farmer-1',
       farmerId: 'FRM-000001',
       status: 'ACTIVE',
+      idType: null,
+      idNumber: null,
+      idDocumentKey: null,
       user: {
         firstName: 'Amina',
         lastName: 'Garba',
@@ -136,6 +143,8 @@ describe('AdminFarmService', () => {
           state: { id: 'state-1', name: 'Oyo' },
           lga: { id: 'lga-1', stateId: 'state-1', name: 'Ogbomosho North' },
           farmer,
+          clusterCode: null,
+          productCount: 0,
         },
       ],
       metaData: { page: 1, perPage: 20, total: 1, totalPages: 1 },
@@ -213,6 +222,195 @@ describe('AdminFarmService', () => {
         }),
       }),
     );
+  });
+
+  it('shows the cluster code and listing count on a row', async () => {
+    farm.findMany.mockResolvedValue([
+      row({ cluster: { clusterCode: 'CL-000018' }, _count: { produce: 3 } }),
+    ]);
+
+    const { data } = await service.findAll({ page: 1, perPage: 20 });
+
+    expect(data[0]).toMatchObject({
+      clusterCode: 'CL-000018',
+      productCount: 3,
+    });
+  });
+
+  it.each([
+    [AdminFarmSort.NEWEST, [{ createdAt: 'desc' }, { id: 'desc' }]],
+    [AdminFarmSort.OLDEST, [{ createdAt: 'asc' }, { id: 'asc' }]],
+    [AdminFarmSort.FARM_CODE_ASC, [{ farmCode: 'asc' }, { id: 'asc' }]],
+    [AdminFarmSort.FARM_CODE_DESC, [{ farmCode: 'desc' }, { id: 'desc' }]],
+    [
+      AdminFarmSort.FARMER_NAME_ASC,
+      [
+        { owner: { user: { lastName: 'asc' } } },
+        { owner: { user: { firstName: 'asc' } } },
+        { id: 'asc' },
+      ],
+    ],
+    [
+      AdminFarmSort.FARMER_NAME_DESC,
+      [
+        { owner: { user: { lastName: 'desc' } } },
+        { owner: { user: { firstName: 'desc' } } },
+        { id: 'desc' },
+      ],
+    ],
+  ])('sorts by %s', async (sort, orderBy) => {
+    await service.findAll({ page: 1, perPage: 20, sort });
+
+    expect(farm.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy }),
+    );
+  });
+
+  describe('exportCsv', () => {
+    it('writes every matching farm, unpaginated, in list order', async () => {
+      farm.findMany.mockResolvedValue([
+        row({
+          name: '=Green, Acres',
+          cluster: { clusterCode: 'CL-000018' },
+          _count: { produce: 2 },
+          createdAt: new Date('2026-10-09T23:30:00.000Z'),
+        }),
+      ]);
+
+      const csv = await collect(
+        service.exportCsv({
+          status: FarmVerificationStatus.PENDING,
+          sort: AdminFarmSort.FARM_CODE_ASC,
+        }),
+      );
+
+      expect(csv).toBe(
+        'Farm Code,Farm Name,Farmer,Farmer ID,Phone,State,LGA,Main Produce,Size,Unit,Cluster,Products,Verification,Farmer Status,Registered\r\n' +
+          `LF-000001,"'=Green, Acres",Amina Garba,FRM-000001,'+2348012345678,Oyo,Ogbomosho North,Maize,5,ha,CL-000018,2,PENDING,ACTIVE,2026-10-10\r\n`,
+      );
+      const args = farm.findMany.mock.calls[0][0] as object;
+      expect(args).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            verificationStatus: FarmVerificationStatus.PENDING,
+          }),
+          orderBy: [{ farmCode: 'asc' }, { id: 'asc' }],
+          take: 1000,
+        }),
+      );
+    });
+
+    describe('continues after the last row of a full batch', () => {
+      const fullBatch = Array.from({ length: 1000 }, (_, index) =>
+        row({ id: `farm-${String(index).padStart(4, '0')}` }),
+      );
+      const last = fullBatch[999];
+
+      beforeEach(() => {
+        farm.findMany
+          .mockResolvedValueOnce(fullBatch)
+          .mockResolvedValueOnce([]);
+      });
+
+      async function secondWhere(sort: AdminFarmSort) {
+        await collect(
+          service.exportCsv({ status: FarmVerificationStatus.PENDING, sort }),
+        );
+        return (farm.findMany.mock.calls[1][0] as { where: unknown }).where;
+      }
+
+      it('by farmer name, from the last name, first name and id', async () => {
+        expect(await secondWhere(AdminFarmSort.FARMER_NAME_ASC)).toEqual({
+          AND: [
+            expect.objectContaining({
+              verificationStatus: FarmVerificationStatus.PENDING,
+            }),
+            {
+              OR: [
+                { owner: { user: { lastName: { gt: 'Garba' } } } },
+                {
+                  owner: {
+                    user: { lastName: 'Garba', firstName: { gt: 'Amina' } },
+                  },
+                },
+                {
+                  owner: { user: { lastName: 'Garba', firstName: 'Amina' } },
+                  id: { gt: last.id },
+                },
+              ],
+            },
+          ],
+        });
+      });
+
+      it('by farm code, which is unique', async () => {
+        expect(await secondWhere(AdminFarmSort.FARM_CODE_DESC)).toEqual({
+          AND: [
+            expect.anything(),
+            { farmCode: { lt: last.farmCode } },
+          ],
+        });
+      });
+
+      it('newest first, from the creation time and id', async () => {
+        expect(await secondWhere(AdminFarmSort.NEWEST)).toEqual({
+          AND: [
+            expect.anything(),
+            {
+              OR: [
+                { createdAt: { lt: last.createdAt } },
+                { createdAt: last.createdAt, id: { lt: last.id } },
+              ],
+            },
+          ],
+        });
+      });
+    });
+
+    it('writes the farmer name without a trailing space when the last name is blank', async () => {
+      farm.findMany.mockResolvedValue([
+        row({
+          owner: { ...row().owner, user: { ...row().owner.user, lastName: '' } },
+        }),
+      ]);
+
+      const csv = await collect(service.exportCsv({}));
+
+      expect(csv.split('\r\n')[1].split(',')[2]).toBe('Amina');
+    });
+  });
+
+  it("includes the farmer's ID with a presigned document link", async () => {
+    farm.findUnique.mockResolvedValue(
+      row({
+        owner: {
+          ...row().owner,
+          idType: IdType.NIN,
+          idNumber: '12345678901',
+          idDocumentKey: 'farmers/f/id/a.jpg',
+        },
+      }),
+    );
+
+    const result = await service.findOne(farmId);
+
+    expect(result.farmer).toEqual({
+      ...farmer,
+      idType: IdType.NIN,
+      idNumber: '12345678901',
+      idDocumentUrl: 'https://signed/farmers/f/id/a.jpg',
+    });
+  });
+
+  it('returns null ID fields when the farmer has none', async () => {
+    const result = await service.findOne(farmId);
+
+    expect(result.farmer).toEqual({
+      ...farmer,
+      idType: null,
+      idNumber: null,
+      idDocumentUrl: null,
+    });
   });
 
   it('returns the farm with its farmer and presigned documents', async () => {

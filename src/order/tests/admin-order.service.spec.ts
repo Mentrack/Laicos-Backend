@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { BuyerType, OrderStatus, ProduceType } from '../../../generated/client';
 import { AuditService } from '../../audit/audit.service';
+import { collect } from '../../common/tests/collect';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminOrderService } from '../admin-order.service';
 import { AdminOrderTab } from '../dto';
@@ -171,7 +172,9 @@ describe('AdminOrderService', () => {
         }),
       ]);
 
-      const csv = await service.exportCsv({ tab: AdminOrderTab.DELIVERED });
+      const csv = await collect(
+        service.exportCsv({ tab: AdminOrderTab.DELIVERED }),
+      );
 
       expect(csv).toBe(
         'Order ID,Buyer,Buyer ID,Produce,Quantity,Unit,Farm Code,Cluster,Request ID,Total (NGN),Status,Dispute,Date\r\n' +
@@ -182,16 +185,44 @@ describe('AdminOrderService', () => {
         expect.objectContaining({
           where: { AND: [{ status: OrderStatus.FULFILLED }] },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1000,
         }),
       );
-      expect(args).not.toHaveProperty('take');
-      expect(args).not.toHaveProperty('skip');
     });
 
-    it('rejects from after to', async () => {
-      await expect(
+    // Synchronous, so the 400 goes through the exception filter before any
+    // CSV bytes are streamed.
+    it('continues oldest first after the last row of a full batch', async () => {
+      const fullBatch = Array.from({ length: 1000 }, (_, index) =>
+        order(company, { id: `order-${String(index).padStart(4, '0')}` }),
+      );
+      const last = fullBatch[999] as { id: string; createdAt: Date };
+      database.order.findMany
+        .mockResolvedValueOnce(fullBatch)
+        .mockResolvedValueOnce([]);
+
+      await collect(service.exportCsv({ sort: 'asc' }));
+
+      const second = database.order.findMany.mock.calls[1][0] as {
+        where: unknown;
+      };
+      expect(second.where).toEqual({
+        AND: [
+          expect.anything(),
+          {
+            OR: [
+              { createdAt: { gt: last.createdAt } },
+              { createdAt: last.createdAt, id: { gt: last.id } },
+            ],
+          },
+        ],
+      });
+    });
+
+    it('rejects from after to before streaming', () => {
+      expect(() =>
         service.exportCsv({ from: '2026-10-10', to: '2026-10-09' }),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      ).toThrow(BadRequestException);
     });
   });
 

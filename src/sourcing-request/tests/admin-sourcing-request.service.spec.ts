@@ -1,4 +1,6 @@
 import { ConflictException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import {
   AuditActorType,
   BuyerType,
@@ -14,9 +16,11 @@ import {
 } from '../../../generated/client';
 import { AuditService } from '../../audit/audit.service';
 import { addDays, lagosToday } from '../../common/dates';
+import { collect } from '../../common/tests/collect';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminSourcingRequestService } from '../admin-sourcing-request.service';
+import { AdminSourcingFilterDto } from '../dto/admin-sourcing-request.dto';
 
 const admin = { id: 'admin-1' } as User;
 const requestId = '11111111-1111-4111-8111-111111111111';
@@ -249,6 +253,76 @@ describe('AdminSourcingRequestService', () => {
         },
       }),
     );
+  });
+
+  it('maps a list row', async () => {
+    const createdAt = new Date('2026-10-09T23:30:00.000Z');
+    sourcingRequest.findMany.mockResolvedValue([requestRow({ createdAt })]);
+    sourcingRequest.count.mockResolvedValue(1);
+
+    const { data } = await service.findAll({ page: 1, perPage: 20 });
+
+    expect(sourcingRequest.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      }),
+    );
+    expect(data).toEqual([
+      {
+        id: requestId,
+        requestNumber: 'REQ-000001',
+        buyerName: 'Ada Okafor',
+        produceName: 'White maize',
+        quantity: 10,
+        unit: SourcingUnit.BAGS,
+        deliveryDestination: 'Kano',
+        agentName: 'Tunde Bello',
+        agentCode: 'AG-000001',
+        status: SourcingRequestStatus.FINDING_SUPPLY,
+        createdAt,
+        escalated: false,
+        shipment: null,
+      },
+    ]);
+  });
+
+  describe('exportCsv', () => {
+    it('writes every matching request, unpaginated, newest first', async () => {
+      sourcingRequest.findMany.mockResolvedValue([
+        requestRow({
+          status: SourcingRequestStatus.NEW,
+          assignedAgent: null,
+          escalatedAt: new Date('2026-10-09T12:00:00.000Z'),
+          createdAt: new Date('2026-10-09T23:30:00.000Z'),
+        }),
+      ]);
+
+      const csv = await collect(
+        service.exportCsv({ status: SourcingRequestStatus.NEW }),
+      );
+
+      expect(csv).toBe(
+        'Request ID,Buyer,Produce,Quantity,Unit,Destination,Agent,Agent ID,Status,Shipment,Escalated,Date\r\n' +
+          'REQ-000001,Ada Okafor,White maize,10,BAGS,Kano,,,NEW,,Yes,2026-10-10\r\n',
+      );
+      const args = sourcingRequest.findMany.mock.calls[0][0] as object;
+      expect(args).toEqual(
+        expect.objectContaining({
+          where: { status: SourcingRequestStatus.NEW },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1000,
+        }),
+      );
+    });
+
+    it('refuses paging on the export filters', async () => {
+      const dto = plainToInstance(AdminSourcingFilterDto, { page: 2 });
+      const [error] = await validate(dto, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      expect(error?.property).toBe('page');
+    });
   });
 
   it('refuses to replace the selection after a checkout is placed', async () => {

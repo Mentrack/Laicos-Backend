@@ -1,10 +1,17 @@
 import { Controller, Get, Param, ParseUUIDPipe, Query } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
+import { csvFile } from '../common/csv';
 import { ApiEnvelope } from '../common/dto/envelope';
 import {
   AdminFarmDetailDto,
+  AdminFarmFilterDto,
   AdminFarmQueryDto,
   AdminFarmRowDto,
   AdminFarmSummaryDto,
@@ -29,6 +36,20 @@ export class AdminFarmController {
     return { data, message: 'Farm summary retrieved' };
   }
 
+  // Declared before any ':id' route so 'export' is not read as an id.
+  // Returns the raw CSV text, not the response envelope.
+  @Get('export')
+  @ApiOperation({
+    summary: 'Export farms as CSV',
+    description:
+      'Every farm matching the list filters (search, stateId, status, sort), without pagination.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({ schema: { type: 'string' } })
+  exportCsv(@Query() filter: AdminFarmFilterDto) {
+    return csvFile(this.farms.exportCsv(filter), 'farms.csv');
+  }
+
   @Get()
   @ApiOperation({
     summary: 'List farms',
@@ -45,7 +66,7 @@ export class AdminFarmController {
   @ApiOperation({
     summary: 'Get a farm',
     description:
-      '{id} is the Farm id. The farmer is the page header. Includes listings, sale totals, the five newest sales, the supply cluster, each round’s expected documents and evidence status, issue photos, every verification round and the cluster agent. Document and evidence links expire in 15 minutes. 404 when the farm does not exist.',
+      '{id} is the Farm id. The farmer is the page header, with their ID type, number and a 15-minute link to the ID document. Includes listings, sale totals, the five newest sales, the supply cluster, each round’s expected documents and evidence status, issue photos, every verification round and the cluster agent. Document and evidence links expire in 15 minutes. 404 when the farm does not exist.',
   })
   @ApiEnvelope(AdminFarmDetailDto)
   async findOne(@Param('id', ParseUUIDPipe) id: string) {

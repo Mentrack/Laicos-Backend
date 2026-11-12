@@ -8,7 +8,13 @@ import {
   Put,
   Query,
 } from '@nestjs/common';
-import { ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiHeader,
+  ApiOkResponse,
+  ApiOperation,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role, type User } from '../../generated/client';
 import { AuditService } from '../audit/audit.service';
 import { AuditEventDto } from '../audit/dto/audit-event.dto';
@@ -17,11 +23,13 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { CreateCheckoutDto } from '../cart/dto';
 import { CheckoutDto } from '../cart/dto/checkout.dto';
 import { IdempotencyKey, idempotencyKeyPipe } from '../common/idempotency-key';
+import { csvFile } from '../common/csv';
 import { ApiEnvelope } from '../common/dto/envelope';
 import { PaginationQueryDto } from '../common/pagination';
 import { AdminSourcingRequestService } from './admin-sourcing-request.service';
 import {
   AdminAllocationDto,
+  AdminSourcingFilterDto,
   AdminSourcingQueryDto,
   AdminSourcingRowDto,
   AdminSourcingSummaryDto,
@@ -61,6 +69,20 @@ export class AdminSourcingRequestController {
   async findAll(@Query() query: AdminSourcingQueryDto) {
     const { data, metaData } = await this.requests.findAll(query);
     return { data, message: 'Sourcing requests retrieved', metaData };
+  }
+
+  // Declared before any ':id' route so 'export' is not read as an id.
+  // Returns the raw CSV text, not the response envelope.
+  @Get('export')
+  @ApiOperation({
+    summary: 'Export buyer requests as CSV',
+    description:
+      'Every buyer request matching the list filters (search, status), newest first, without pagination.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({ schema: { type: 'string' } })
+  exportCsv(@Query() filter: AdminSourcingFilterDto) {
+    return csvFile(this.requests.exportCsv(filter), 'buyer-requests.csv');
   }
 
   @Get(':id/listings')

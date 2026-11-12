@@ -1,12 +1,16 @@
 import { NotFoundException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import {
   FarmVerificationStatus,
   Prisma,
   ProduceCategory,
   ProduceStatus,
 } from '../../../generated/client';
+import { collect } from '../../common/tests/collect';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminProduceService } from '../admin-produce.service';
+import { AdminProduceFilterDto } from '../dto/admin-produce.dto';
 
 const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const listedAt = new Date('2026-10-09T00:00:00.000Z');
@@ -74,6 +78,43 @@ describe('AdminProduceService', () => {
     });
     produce.delete.mockResolvedValue({ id: produceId });
     order.count.mockResolvedValue(0);
+  });
+
+  describe('exportCsv', () => {
+    it('writes every matching listing, unpaginated, newest first', async () => {
+      produce.findMany.mockResolvedValue([
+        listing({
+          category: null,
+          createdAt: new Date('2026-10-09T23:30:00.000Z'),
+        }),
+      ]);
+
+      const csv = await collect(
+        service.exportCsv({ status: ProduceStatus.DRAFT }),
+      );
+
+      expect(csv).toBe(
+        'Product,Farm Code,Category,Price (NGN),Unit,Available,Status,Listed\r\n' +
+          'Premium Sesame Seeds,LF-000018,,1250.00,kg,2000,PUBLISHED,2026-10-10\r\n',
+      );
+      const args = produce.findMany.mock.calls[0][0] as object;
+      expect(args).toEqual(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: ProduceStatus.DRAFT }),
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1000,
+        }),
+      );
+    });
+
+    it('refuses paging on the export filters', async () => {
+      const dto = plainToInstance(AdminProduceFilterDto, { perPage: 5 });
+      const [error] = await validate(dto, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      expect(error?.property).toBe('perPage');
+    });
   });
 
   it('lists every listing newest first, including drafts', async () => {

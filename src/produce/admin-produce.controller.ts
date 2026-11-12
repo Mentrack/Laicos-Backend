@@ -9,12 +9,19 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiOkResponse,
+  ApiOperation,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Role } from '../../generated/client';
 import { Auth } from '../auth/decorators/auth.decorator';
+import { csvFile } from '../common/csv';
 import { ApiEnvelope } from '../common/dto/envelope';
 import {
   AdminProduceActionDto,
+  AdminProduceFilterDto,
   AdminProduceQueryDto,
   AdminProduceRowDto,
   AdminProduceSummaryDto,
@@ -71,6 +78,19 @@ export class AdminProduceController {
   async summary() {
     const data = await this.produce.summary();
     return { data, message: 'Produce summary retrieved' };
+  }
+
+  // Returns the raw CSV text, not the response envelope.
+  @Get('export')
+  @ApiOperation({
+    summary: 'Export produce listings as CSV',
+    description:
+      'Every listing matching the table filters (search, category, status), newest first, without pagination.',
+  })
+  @ApiProduces('text/csv')
+  @ApiOkResponse({ schema: { type: 'string' } })
+  exportCsv(@Query() filter: AdminProduceFilterDto) {
+    return csvFile(this.produce.exportCsv(filter), 'produce.csv');
   }
 
   @Get()

@@ -25,7 +25,8 @@ import {
   resolveDelivery,
 } from '../cart/utils/place-checkout';
 import { advisoryLock } from '../common/advisory-lock';
-import { fromDateColumn } from '../common/dates';
+import { createdAtAfter, csvLines } from '../common/csv';
+import { fromDateColumn, lagosDay } from '../common/dates';
 import { fullName } from '../common/names';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import { orderLine, tryReserveProduce } from '../order/utils/reservation';
@@ -38,7 +39,9 @@ import {
 import { releaseCheckout } from '../payment/utils/release-checkout';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
+  AdminSourcingFilterDto,
   AdminSourcingQueryDto,
+  AdminSourcingRowDto,
   AdminSourcingSummaryDto,
   AssignAgentDto,
   CloseSourcingRequestDto,
@@ -104,41 +107,54 @@ export class AdminSourcingRequestService {
 
   async findAll(query: AdminSourcingQueryDto) {
     const { page, perPage, skip, take } = resolvePagination(query);
-    const where: Prisma.SourcingRequestWhereInput = {
-      ...searchWhere(query.search),
-      ...(query.status ? { status: query.status } : {}),
-    };
+    const where = listWhere(query);
     const [rows, total] = await this.database.$transaction([
       this.database.sourcingRequest.findMany({
         where,
         include: ROW_INCLUDE,
-        orderBy: { createdAt: 'desc' },
+        orderBy: LIST_ORDER,
         skip,
         take,
       }),
       this.database.sourcingRequest.count({ where }),
     ]);
     return {
-      data: rows.map((row) => ({
-        id: row.id,
-        requestNumber: row.requestNumber,
-        buyerName: buyerDisplayName(row.buyer),
-        produceName: row.produceName,
-        quantity: row.quantity,
-        unit: row.unit,
-        deliveryDestination: row.deliveryDestination,
-        agentName: row.assignedAgent ? fullName(row.assignedAgent.user) : null,
-        agentCode: row.assignedAgent?.agentId ?? null,
-        status: row.status,
-        createdAt: row.createdAt,
-        escalated: row.escalatedAt !== null,
-        shipment:
-          row.status === SourcingRequestStatus.FULFILMENT
-            ? fulfilmentMark(paidOrders(row.checkouts))
-            : null,
-      })),
+      data: rows.map(toRow),
       metaData: paginationMeta(page, perPage, total),
     };
+  }
+
+  exportCsv(filter: AdminSourcingFilterDto): AsyncGenerator<string> {
+    const where = listWhere(filter);
+    return csvLines<ListedRequest>(
+      SOURCING_CSV_HEADER,
+      (after, take) =>
+        this.database.sourcingRequest.findMany({
+          where: after
+            ? { AND: [where, createdAtAfter(after, 'desc')] }
+            : where,
+          include: ROW_INCLUDE,
+          orderBy: LIST_ORDER,
+          take,
+        }),
+      (request) => {
+        const row = toRow(request);
+        return [
+          row.requestNumber,
+          row.buyerName,
+          row.produceName,
+          row.quantity,
+          row.unit,
+          row.deliveryDestination,
+          row.agentName,
+          row.agentCode,
+          row.status,
+          row.shipment,
+          row.escalated ? 'Yes' : 'No',
+          lagosDay(row.createdAt),
+        ];
+      },
+    );
   }
 
   async findOne(id: string) {
@@ -737,6 +753,62 @@ const DETAIL_INCLUDE = {
     },
   },
 } satisfies Prisma.SourcingRequestInclude;
+
+// The id tiebreak keeps paging and export batches stable when two requests
+// share a createdAt.
+const LIST_ORDER: Prisma.SourcingRequestOrderByWithRelationInput[] = [
+  { createdAt: 'desc' },
+  { id: 'desc' },
+];
+
+const SOURCING_CSV_HEADER = [
+  'Request ID',
+  'Buyer',
+  'Produce',
+  'Quantity',
+  'Unit',
+  'Destination',
+  'Agent',
+  'Agent ID',
+  'Status',
+  'Shipment',
+  'Escalated',
+  'Date',
+];
+
+type ListedRequest = Prisma.SourcingRequestGetPayload<{
+  include: typeof ROW_INCLUDE;
+}>;
+
+function listWhere(
+  filter: AdminSourcingFilterDto,
+): Prisma.SourcingRequestWhereInput {
+  return {
+    ...searchWhere(filter.search),
+    ...(filter.status ? { status: filter.status } : {}),
+  };
+}
+
+function toRow(row: ListedRequest): AdminSourcingRowDto {
+  return {
+    id: row.id,
+    requestNumber: row.requestNumber,
+    buyerName: buyerDisplayName(row.buyer),
+    produceName: row.produceName,
+    quantity: row.quantity,
+    unit: row.unit,
+    deliveryDestination: row.deliveryDestination,
+    agentName: row.assignedAgent ? fullName(row.assignedAgent.user) : null,
+    agentCode: row.assignedAgent?.agentId ?? null,
+    status: row.status,
+    createdAt: row.createdAt,
+    escalated: row.escalatedAt !== null,
+    shipment:
+      row.status === SourcingRequestStatus.FULFILMENT
+        ? fulfilmentMark(paidOrders(row.checkouts))
+        : null,
+  };
+}
 
 function paidOrders(
   checkouts: {

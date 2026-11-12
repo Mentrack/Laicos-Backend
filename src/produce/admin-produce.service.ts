@@ -4,6 +4,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, ProduceStatus } from '../../generated/client';
+import { createdAtAfter, csvLines } from '../common/csv';
+import { lagosDay } from '../common/dates';
 import { paginationMeta, resolvePagination } from '../common/pagination';
 import {
   isForeignKeyViolation,
@@ -13,12 +15,24 @@ import { OPEN_PAID_ORDER_STATUSES } from '../order/utils/open-paid';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
   AdminProduceActionDto,
+  AdminProduceFilterDto,
   AdminProduceQueryDto,
   AdminProduceRowDto,
   AdminProduceSummaryDto,
 } from './dto/admin-produce.dto';
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+const PRODUCE_CSV_HEADER = [
+  'Product',
+  'Farm Code',
+  'Category',
+  'Price (NGN)',
+  'Unit',
+  'Available',
+  'Status',
+  'Listed',
+];
 
 const ACTIVE = [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT];
 const INACTIVE = [ProduceStatus.DRAFT, ProduceStatus.DISABLED];
@@ -40,6 +54,35 @@ export class AdminProduceService {
   async findByFarm(farmId: string, query: AdminProduceQueryDto) {
     await this.requireFarm(farmId);
     return this.list(query, farmId);
+  }
+
+  exportCsv(filter: AdminProduceFilterDto): AsyncGenerator<string> {
+    const where = whereFor(filter);
+    return csvLines<Listed>(
+      PRODUCE_CSV_HEADER,
+      (after, take) =>
+        this.database.produce.findMany({
+          where: after
+            ? { AND: [where, createdAtAfter(after, 'desc')] }
+            : where,
+          include: LIST_INCLUDE,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take,
+        }),
+      (listing) => {
+        const row = toRow(listing);
+        return [
+          row.name,
+          row.farmCode,
+          row.category,
+          row.pricePerUnit,
+          row.unit,
+          row.floatingQuantity,
+          row.status,
+          lagosDay(row.createdAt),
+        ];
+      },
+    );
   }
 
   async summary(): Promise<AdminProduceSummaryDto> {
@@ -190,7 +233,7 @@ export class AdminProduceService {
   }
 }
 
-function whereFor(query: AdminProduceQueryDto): Prisma.ProduceWhereInput {
+function whereFor(query: AdminProduceFilterDto): Prisma.ProduceWhereInput {
   const search = query.search?.trim();
   const contains: Prisma.StringFilter = {
     contains: search ?? '',

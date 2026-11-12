@@ -1,4 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  IntersectionType,
+} from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ProduceCategory, ProduceStatus } from '../../../generated/client';
 import { PaginationQueryDto } from '../../common/pagination';
@@ -100,7 +104,7 @@ export class AdminProduceActionDto {
   status: ProduceStatus;
 }
 
-export class AdminProduceQueryDto extends PaginationQueryDto {
+export class AdminProduceFilterDto {
   @ApiPropertyOptional({
     example: 'sesame',
     description:
@@ -124,3 +128,8 @@ export class AdminProduceQueryDto extends PaginationQueryDto {
   @IsEnum(ProduceStatus)
   status?: ProduceStatus;
 }
+
+export class AdminProduceQueryDto extends IntersectionType(
+  AdminProduceFilterDto,
+  PaginationQueryDto,
+) {}

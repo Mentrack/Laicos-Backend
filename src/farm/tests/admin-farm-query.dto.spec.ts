@@ -1,7 +1,7 @@
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { FarmVerificationStatus } from '../../../generated/client';
-import { AdminFarmQueryDto } from '../dto';
+import { AdminFarmFilterDto, AdminFarmQueryDto } from '../dto';
 
 describe('AdminFarmQueryDto', () => {
   it('accepts search, state and status', async () => {
@@ -23,5 +23,25 @@ describe('AdminFarmQueryDto', () => {
     const dto = plainToInstance(AdminFarmQueryDto, { stateId: 'oyo' });
     const [error] = await validate(dto);
     expect(error?.property).toBe('stateId');
+  });
+
+  it('accepts a known sort', async () => {
+    const dto = plainToInstance(AdminFarmQueryDto, { sort: 'FARM_CODE_ASC' });
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  it('refuses an unknown sort', async () => {
+    const dto = plainToInstance(AdminFarmQueryDto, { sort: 'farmCode' });
+    const [error] = await validate(dto);
+    expect(error?.property).toBe('sort');
+  });
+
+  it('refuses paging on the export filters', async () => {
+    const dto = plainToInstance(AdminFarmFilterDto, { page: 2 });
+    const [error] = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+    expect(error?.property).toBe('page');
   });
 });

@@ -11,6 +11,10 @@ import {
   ProduceStatus,
   VerificationTaskStatus,
 } from '../../../generated/client';
+import { beyond, createdAtAfter, csvLines } from '../../common/csv';
+import { lagosDay } from '../../common/dates';
+import { formatIdentity } from '../../common/identity';
+import { fullName } from '../../common/names';
 import {
   type PaginationMetaDto,
   type PaginationQueryDto,
@@ -31,6 +35,7 @@ import type {
   AdminFarmDetailDto,
   AdminFarmEvidenceFileDto,
   AdminFarmFarmerDto,
+  AdminFarmFilterDto,
   AdminFarmMarketplaceDto,
   AdminFarmOrderDto,
   AdminFarmProductDto,
@@ -40,9 +45,28 @@ import type {
   AdminFarmVerificationDto,
   SuspendedFarmerDto,
 } from '../dto/admin-farm.dto';
+import { AdminFarmSort } from '../dto/admin-farm.dto';
 import { FARM_INCLUDE, formatFarm } from '../formatters/farm.formatter';
 
 const RECENT_ORDERS = 5;
+
+const FARM_CSV_HEADER = [
+  'Farm Code',
+  'Farm Name',
+  'Farmer',
+  'Farmer ID',
+  'Phone',
+  'State',
+  'LGA',
+  'Main Produce',
+  'Size',
+  'Unit',
+  'Cluster',
+  'Products',
+  'Verification',
+  'Farmer Status',
+  'Registered',
+];
 
 /** Placed and not cancelled. Unpaid and cancelled orders are not sales. */
 const SALE = {
@@ -52,6 +76,8 @@ const SALE = {
 const LIST_INCLUDE = {
   state: true,
   lga: true,
+  cluster: { select: { clusterCode: true } },
+  _count: { select: { produce: true } },
   owner: {
     select: {
       id: true,
@@ -76,7 +102,14 @@ const CLUSTER_AGENT_SELECT = {
 
 const DETAIL_INCLUDE = {
   ...FARM_INCLUDE,
-  owner: LIST_INCLUDE.owner,
+  owner: {
+    select: {
+      ...LIST_INCLUDE.owner.select,
+      idType: true,
+      idNumber: true,
+      idDocumentKey: true,
+    },
+  },
   produce: {
     orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
   },
@@ -116,15 +149,16 @@ export class AdminFarmService {
   ) {}
 
   findAll(query: AdminFarmQueryDto) {
-    return this.list(whereFor(query), query);
+    return this.list(whereFor(query), orderFor(query.sort), query);
   }
 
   findInCluster(clusterId: string, query: PaginationQueryDto) {
-    return this.list({ clusterId }, query);
+    return this.list({ clusterId }, orderFor(), query);
   }
 
   private async list(
     where: Prisma.FarmWhereInput,
+    orderBy: Prisma.FarmOrderByWithRelationInput[],
     query: PaginationQueryDto,
   ): Promise<{ data: AdminFarmRowDto[]; metaData: PaginationMetaDto }> {
     const { page, perPage, skip, take } = resolvePagination(query);
@@ -132,7 +166,7 @@ export class AdminFarmService {
       this.database.farm.findMany({
         where,
         include: LIST_INCLUDE,
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        orderBy,
         skip,
         take,
       }),
@@ -142,6 +176,42 @@ export class AdminFarmService {
       data: farms.map(toRow),
       metaData: paginationMeta(page, perPage, total),
     };
+  }
+
+  exportCsv(filter: AdminFarmFilterDto): AsyncGenerator<string> {
+    const where = whereFor(filter);
+    const sort = filter.sort ?? AdminFarmSort.NEWEST;
+    const orderBy = orderFor(sort);
+    return csvLines<ListedFarm>(
+      FARM_CSV_HEADER,
+      (after, take) =>
+        this.database.farm.findMany({
+          where: after ? { AND: [where, farmAfter(sort, after)] } : where,
+          include: LIST_INCLUDE,
+          orderBy,
+          take,
+        }),
+      (farm) => {
+        const row = toRow(farm);
+        return [
+          row.farmCode,
+          row.name,
+          fullName(row.farmer),
+          row.farmer.farmerId,
+          row.farmer.phoneNumber,
+          row.state.name,
+          row.lga.name,
+          row.mainProduce,
+          row.size,
+          row.unit,
+          row.clusterCode,
+          row.productCount,
+          row.verificationStatus,
+          row.farmer.status,
+          lagosDay(farm.createdAt),
+        ];
+      },
+    );
   }
 
   async summary(): Promise<AdminFarmSummaryDto> {
@@ -236,14 +306,19 @@ export class AdminFarmService {
     if (!farm) {
       throw new NotFoundException('Farm not found');
     }
-    const [formatted, marketplace, verifications] = await Promise.all([
-      formatFarm(this.storage, farm),
-      this.marketplace(id, farm.produce),
-      Promise.all(farm.verifications.map((round) => this.verification(round))),
-    ]);
+    const [formatted, marketplace, verifications, identity] = await Promise.all(
+      [
+        formatFarm(this.storage, farm),
+        this.marketplace(id, farm.produce),
+        Promise.all(
+          farm.verifications.map((round) => this.verification(round)),
+        ),
+        formatIdentity(this.storage, farm.owner),
+      ],
+    );
     return {
       ...formatted,
-      farmer: toFarmer(farm.owner),
+      farmer: { ...toFarmer(farm.owner), ...identity },
       marketplace,
       verifications,
       cluster: toCluster(farm.cluster),
@@ -336,7 +411,76 @@ export class AdminFarmService {
   }
 }
 
-function whereFor(query: AdminFarmQueryDto): Prisma.FarmWhereInput {
+function orderFor(
+  sort: AdminFarmSort = AdminFarmSort.NEWEST,
+): Prisma.FarmOrderByWithRelationInput[] {
+  switch (sort) {
+    case AdminFarmSort.NEWEST:
+      return [{ createdAt: 'desc' }, { id: 'desc' }];
+    case AdminFarmSort.OLDEST:
+      return [{ createdAt: 'asc' }, { id: 'asc' }];
+    case AdminFarmSort.FARM_CODE_ASC:
+      return [{ farmCode: 'asc' }, { id: 'asc' }];
+    case AdminFarmSort.FARM_CODE_DESC:
+      return [{ farmCode: 'desc' }, { id: 'desc' }];
+    case AdminFarmSort.FARMER_NAME_ASC:
+      return byFarmerName('asc');
+    case AdminFarmSort.FARMER_NAME_DESC:
+      return byFarmerName('desc');
+  }
+}
+
+/** Keyset filter for the farms after `last` in `orderFor(sort)` order. */
+function farmAfter(
+  sort: AdminFarmSort,
+  last: ListedFarm,
+): Prisma.FarmWhereInput {
+  switch (sort) {
+    case AdminFarmSort.NEWEST:
+      return createdAtAfter(last, 'desc');
+    case AdminFarmSort.OLDEST:
+      return createdAtAfter(last, 'asc');
+    case AdminFarmSort.FARM_CODE_ASC:
+      return { farmCode: beyond('asc', last.farmCode) };
+    case AdminFarmSort.FARM_CODE_DESC:
+      return { farmCode: beyond('desc', last.farmCode) };
+    case AdminFarmSort.FARMER_NAME_ASC:
+      return afterFarmerName('asc', last);
+    case AdminFarmSort.FARMER_NAME_DESC:
+      return afterFarmerName('desc', last);
+  }
+}
+
+function afterFarmerName(
+  direction: Prisma.SortOrder,
+  last: ListedFarm,
+): Prisma.FarmWhereInput {
+  const { firstName, lastName } = last.owner.user;
+  return {
+    OR: [
+      { owner: { user: { lastName: beyond(direction, lastName) } } },
+      {
+        owner: { user: { lastName, firstName: beyond(direction, firstName) } },
+      },
+      {
+        owner: { user: { lastName, firstName } },
+        id: beyond(direction, last.id),
+      },
+    ],
+  };
+}
+
+function byFarmerName(
+  direction: Prisma.SortOrder,
+): Prisma.FarmOrderByWithRelationInput[] {
+  return [
+    { owner: { user: { lastName: direction } } },
+    { owner: { user: { firstName: direction } } },
+    { id: direction },
+  ];
+}
+
+function whereFor(query: AdminFarmFilterDto): Prisma.FarmWhereInput {
   const search = query.search?.trim();
   const contains: Prisma.StringFilter = {
     contains: search ?? '',
@@ -370,6 +514,8 @@ function toRow(farm: ListedFarm): AdminFarmRowDto {
     state: { id: farm.state.id, name: farm.state.name },
     lga: { id: farm.lga.id, stateId: farm.lga.stateId, name: farm.lga.name },
     farmer: toFarmer(farm.owner),
+    clusterCode: farm.cluster?.clusterCode ?? null,
+    productCount: farm._count.produce,
   };
 }
 

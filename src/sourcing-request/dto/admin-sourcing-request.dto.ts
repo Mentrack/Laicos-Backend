@@ -1,4 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  IntersectionType,
+} from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -22,7 +26,7 @@ import {
 } from '../../../generated/client';
 import { PaginationQueryDto } from '../../common/pagination';
 
-export class AdminSourcingQueryDto extends PaginationQueryDto {
+export class AdminSourcingFilterDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
@@ -36,6 +40,11 @@ export class AdminSourcingQueryDto extends PaginationQueryDto {
   @IsEnum(SourcingRequestStatus)
   status?: SourcingRequestStatus;
 }
+
+export class AdminSourcingQueryDto extends IntersectionType(
+  AdminSourcingFilterDto,
+  PaginationQueryDto,
+) {}
 
 export class AssignAgentDto {
   @ApiProperty({ format: 'uuid' })
