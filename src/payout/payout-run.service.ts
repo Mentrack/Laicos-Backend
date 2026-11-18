@@ -38,6 +38,7 @@ function orderSelect(kind: PayoutItemKind) {
     agentCommission: true,
     dispute: { select: { status: true, refundPercent: true } },
     handover: { select: { agentId: true } },
+    commissionAgentId: true,
     payoutItems: {
       where: { kind, status: PayoutStatus.REVERSED },
       select: { payout: { select: { updatedAt: true } } },
@@ -153,9 +154,13 @@ export class PayoutRunService {
             ),
           )
           .map((order) => {
-            if (kind === PayoutItemKind.PRODUCE && !order.handover?.agentId) {
+            if (
+              kind === PayoutItemKind.PRODUCE &&
+              !order.commissionAgentId &&
+              !order.handover?.agentId
+            ) {
               this.logger.warn(
-                `Order ${order.orderNumber} has no handover agent; its commission stays with Laicos`,
+                `Order ${order.orderNumber} has no commission or handover agent; its commission stays with Laicos`,
               );
             }
             return {

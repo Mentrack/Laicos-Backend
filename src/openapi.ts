@@ -64,7 +64,7 @@ export function buildOpenApiDocument(
     )
     .addTag(
       'Sourcing Requests',
-      'A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts NEW. Admins match them from /admin/sourcing-requests.',
+      'A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts PENDING. Admins match them from /admin/sourcing-requests.',
     )
     .addTag(
       'Agents',
@@ -80,7 +80,7 @@ export function buildOpenApiDocument(
     )
     .addTag(
       'Messages',
-      "Text conversations between an order's buyer and its agent, one per order. Open from payment until the order is fulfilled or cancelled, then read-only. Live updates arrive over socket.io at /v1/chat (WebSocket transport, auth: { token: <Firebase ID token> }): message.created carries a Message, conversation.read carries a ConversationReadEvent.",
+      'Text conversations between a buyer and an agent: one per order, and one per accepted sourcing request. An order chat is open from payment until the order is fulfilled or cancelled. A sourcing-request chat opens when the agent accepts and stays writable until every order of the paid checkout is closed, including the dispute window; it is closed if the request is closed before payment. Closed chats are read-only. Live updates arrive over socket.io at /v1/chat (WebSocket transport, auth: { token: <Firebase ID token> }): message.created carries a Message, conversation.read carries a ConversationReadEvent.',
     )
     .addTag(
       'Bank accounts',

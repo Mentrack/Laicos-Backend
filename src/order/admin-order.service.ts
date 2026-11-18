@@ -100,6 +100,7 @@ export class AdminOrderService {
           row.totalPrice,
           row.status,
           row.dispute?.status ?? null,
+          row.sourced ? 'Yes' : 'No',
           lagosDay(row.createdAt),
         ];
       },
@@ -134,6 +135,7 @@ const CSV_HEADER = [
   'Total (NGN)',
   'Status',
   'Dispute',
+  'Sourced',
   'Date',
 ];
 

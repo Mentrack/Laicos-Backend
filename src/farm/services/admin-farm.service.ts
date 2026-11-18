@@ -45,6 +45,7 @@ import type {
   AdminFarmVerificationDto,
   SuspendedFarmerDto,
 } from '../dto/admin-farm.dto';
+import { notSourced } from '../../produce/utils/produce-visibility';
 import { AdminFarmSort } from '../dto/admin-farm.dto';
 import { FARM_INCLUDE, formatFarm } from '../formatters/farm.formatter';
 
@@ -77,7 +78,7 @@ const LIST_INCLUDE = {
   state: true,
   lga: true,
   cluster: { select: { clusterCode: true } },
-  _count: { select: { produce: true } },
+  _count: { select: { produce: { where: notSourced } } },
   owner: {
     select: {
       id: true,
@@ -111,6 +112,7 @@ const DETAIL_INCLUDE = {
     },
   },
   produce: {
+    where: notSourced,
     orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
   },
   cluster: {

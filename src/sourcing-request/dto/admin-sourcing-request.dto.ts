@@ -2,29 +2,28 @@ import {
   ApiProperty,
   ApiPropertyOptional,
   IntersectionType,
+  PickType,
 } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize,
-  IsArray,
   IsEnum,
-  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
-  Min,
-  ValidateNested,
 } from 'class-validator';
 import {
   BuyerType,
   CheckoutStatus,
   HandoverStatus,
   OrderStatus,
+  SourcingOfferStatus,
   SourcingRequestStatus,
+  SourcingUnit,
 } from '../../../generated/client';
+import { AuditEventDto } from '../../audit/dto/audit-event.dto';
 import { PaginationQueryDto } from '../../common/pagination';
+import { SourcingRequestDto } from './sourcing-request.dto';
 
 export class AdminSourcingFilterDto {
   @ApiPropertyOptional()
@@ -52,26 +51,6 @@ export class AssignAgentDto {
   agentId: string;
 }
 
-export class AllocationItemDto {
-  @ApiProperty({ format: 'uuid' })
-  @IsUUID()
-  produceId: string;
-
-  @ApiProperty({ minimum: 1 })
-  @IsInt()
-  @Min(1)
-  quantity: number;
-}
-
-export class SaveAllocationsDto {
-  @ApiProperty({ type: [AllocationItemDto] })
-  @IsArray()
-  @ArrayMaxSize(50)
-  @ValidateNested({ each: true })
-  @Type(() => AllocationItemDto)
-  items: AllocationItemDto[];
-}
-
 export class CloseSourcingRequestDto {
   @ApiProperty({ maxLength: 500 })
   @IsString()
@@ -85,25 +64,25 @@ export class AdminSourcingSummaryDto {
   total: number;
 
   @ApiProperty()
-  new: number;
+  pending: number;
 
   @ApiProperty()
-  inReview: number;
+  assigned: number;
 
   @ApiProperty()
   findingSupply: number;
 
   @ApiProperty()
-  awaitingBuyer: number;
+  negotiating: number;
 
   @ApiProperty()
   confirmed: number;
 
   @ApiProperty()
-  fulfilment: number;
+  completed: number;
 
   @ApiProperty()
-  completed: number;
+  fulfilled: number;
 
   @ApiProperty()
   closed: number;
@@ -165,35 +144,6 @@ export class CoverageDto {
 
   @ApiProperty()
   remaining: number;
-}
-
-export class AdminAllocationDto {
-  @ApiProperty({ format: 'uuid' })
-  produceId: string;
-
-  @ApiProperty()
-  name: string;
-
-  @ApiProperty()
-  unit: string;
-
-  @ApiProperty()
-  pricePerUnit: string;
-
-  @ApiProperty()
-  farmCode: string;
-
-  @ApiProperty()
-  farmName: string;
-
-  @ApiProperty()
-  farmerName: string;
-
-  @ApiProperty()
-  floatingQuantity: number;
-
-  @ApiProperty({ type: Number, required: false })
-  selectedQuantity?: number;
 }
 
 export class AdminBuyerCardDto {
@@ -276,9 +226,6 @@ export class AdminSourcingOrderDto {
     nullable: true,
   })
   handoverStatus: HandoverStatus | null;
-
-  @ApiProperty({ type: String, format: 'uuid', nullable: true })
-  conversationId: string | null;
 }
 
 export class AdminLiveCheckoutDto {
@@ -293,4 +240,92 @@ export class AdminLiveCheckoutDto {
 
   @ApiProperty()
   total: string;
+}
+
+export class AdminAllocationDto {
+  @ApiProperty({ format: 'uuid' })
+  id: string;
+
+  @ApiProperty({ enum: SourcingOfferStatus, enumName: 'SourcingOfferStatus' })
+  status: SourcingOfferStatus;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '1200.00',
+    description: 'Per `unit`',
+  })
+  agreedUnitPrice: string | null;
+
+  @ApiProperty({ format: 'uuid' })
+  farmId: string;
+
+  @ApiProperty()
+  farmCode: string;
+
+  @ApiProperty()
+  farmName: string;
+
+  @ApiProperty()
+  farmerName: string;
+
+  @ApiProperty({ description: 'In `unit`' })
+  quantity: number;
+
+  @ApiProperty({ enum: SourcingUnit, enumName: 'SourcingUnit' })
+  unit: SourcingUnit;
+}
+
+export class AdminSourcingDetailDto extends PickType(SourcingRequestDto, [
+  'id',
+  'requestNumber',
+  'produceName',
+  'quantity',
+  'unit',
+  'quality',
+  'packaging',
+  'condition',
+  'additionalSpecs',
+  'deliveryDestination',
+  'requiredDate',
+  'timeline',
+  'logisticsNotes',
+  'status',
+] as const) {
+  @ApiProperty({ type: String, format: 'uuid', nullable: true })
+  conversationId: string | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  escalatedAt: Date | null;
+
+  @ApiProperty({ type: Date, nullable: true })
+  closedAt: Date | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  closeReason: string | null;
+
+  @ApiProperty({ type: AdminBuyerCardDto })
+  buyer: AdminBuyerCardDto;
+
+  @ApiProperty({ type: AdminAssignmentDto, nullable: true })
+  assignment: AdminAssignmentDto | null;
+
+  @ApiProperty({ type: [AdminAllocationDto] })
+  allocations: AdminAllocationDto[];
+
+  @ApiProperty({
+    type: CoverageDto,
+    description:
+      "Counts farmer-accepted offers only, in the request's unit (kg and tonne offers converted)",
+  })
+  coverage: CoverageDto;
+
+  @ApiProperty({ type: AdminLiveCheckoutDto, nullable: true })
+  checkout: AdminLiveCheckoutDto | null;
+
+  @ApiProperty({ type: [AdminSourcingOrderDto] })
+  orders: AdminSourcingOrderDto[];
+
+  @ApiProperty({ type: [AuditEventDto], description: 'The newest five rows' })
+  audit: AuditEventDto[];
 }

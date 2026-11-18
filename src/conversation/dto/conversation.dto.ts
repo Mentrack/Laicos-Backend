@@ -20,14 +20,26 @@ export class ConversationDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty({ format: 'uuid' })
-  orderId: string;
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description: 'Set for an order chat; null for a sourcing chat',
+  })
+  orderId: string | null;
 
-  @ApiProperty({ example: 'ORD-000123' })
-  orderNumber: string;
+  @ApiProperty({
+    format: 'uuid',
+    nullable: true,
+    description:
+      "Set for a sourcing chat, which also serves the request's orders",
+  })
+  sourcingRequestId: string | null;
 
-  @ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus' })
-  orderStatus: OrderStatus;
+  @ApiProperty({ example: 'ORD-000123', nullable: true })
+  orderNumber: string | null;
+
+  @ApiProperty({ enum: OrderStatus, enumName: 'OrderStatus', nullable: true })
+  orderStatus: OrderStatus | null;
 
   @ApiProperty({ example: 'Cassava' })
   produceName: string;
@@ -37,16 +49,17 @@ export class ConversationDto {
 
   @ApiProperty({
     example: 'tonnes',
-    description: "The listing's current unit; orders don't snapshot it",
+    description:
+      "An order chat shows the listing's current unit (orders don't snapshot it); a sourcing chat the request's SourcingUnit",
   })
   unit: string;
 
-  @ApiProperty({ enum: ProduceType, enumName: 'ProduceType' })
-  type: ProduceType;
+  @ApiProperty({ enum: ProduceType, enumName: 'ProduceType', nullable: true })
+  type: ProduceType | null;
 
   @ApiProperty({
     description:
-      'The order is FULFILLED or CANCELLED: readable, but no new messages',
+      'Readable, but no new messages. An order chat closes when the order is cancelled, or fulfilled with its dispute window passed and no open dispute. A sourcing chat closes when the request is CLOSED before payment, or once every paid order is closed that way.',
   })
   isClosed: boolean;
 

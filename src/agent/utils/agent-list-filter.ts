@@ -1,4 +1,5 @@
 import { Prisma, Role } from '../../../generated/client';
+import { searchTokens } from '../../common/search';
 import {
   currentlySuspendedWhere,
   notCurrentlySuspendedWhere,
@@ -72,7 +73,7 @@ export function agentListWhere(
   if (query.lgaId) {
     and.push(locationWhere({ lgaId: query.lgaId }));
   }
-  const terms = query.search?.split(/\s+/).filter(Boolean) ?? [];
+  const terms = searchTokens(query.search);
   and.push(...terms.map(searchTermWhere));
   return { role: Role.EXTENSION_AGENT, AND: and };
 }

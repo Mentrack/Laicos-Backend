@@ -156,6 +156,27 @@ describe('DisputeService', () => {
       );
     });
 
+    it('also tells the sourcing agent of a sourced order', async () => {
+      tx.order.findUniqueOrThrow.mockResolvedValue(
+        orderRow({ commissionAgent: { userId: 'sourcing-user' } }),
+      );
+      await service.raise(buyerUser, 'order-1', raiseDto, [jpeg()]);
+
+      expect(notification.notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userIds: [
+            'admin-a',
+            'admin-b',
+            'farmer-user',
+            'agent-user',
+            'sourcing-user',
+          ],
+          type: NotificationType.DISPUTE_RAISED,
+        }),
+        expect.anything(),
+      );
+    });
+
     it('tells every admin, the farmer and the agent, after commit', async () => {
       await service.raise(buyerUser, 'order-1', raiseDto, [jpeg()]);
 
@@ -389,6 +410,24 @@ describe('DisputeService', () => {
       expect(refunds.submit).not.toHaveBeenCalled();
     });
 
+    it('tells a sourcing agent who also did the handover once', async () => {
+      tx.order.findUniqueOrThrow.mockResolvedValue(
+        orderRow({ commissionAgent: { userId: 'agent-user' } }),
+      );
+      await service.resolve(adminUser, 'dispute-1', {
+        refundPercent: 0,
+        note: 'n',
+      });
+
+      expect(notification.notify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userIds: [buyerUser.id, 'farmer-user', 'agent-user'],
+          type: NotificationType.DISPUTE_RESOLVED,
+        }),
+        expect.anything(),
+      );
+    });
+
     it('tells the buyer, farmer and agent, after commit', async () => {
       await service.resolve(adminUser, 'dispute-1', {
         refundPercent: 0,
@@ -564,6 +603,7 @@ describe('DisputeService', () => {
                 { buyer: { userId: buyerUser.id } },
                 { farm: { owner: { userId: buyerUser.id } } },
                 { handover: { agent: { userId: buyerUser.id } } },
+                { commissionAgent: { userId: buyerUser.id } },
               ],
             },
           },

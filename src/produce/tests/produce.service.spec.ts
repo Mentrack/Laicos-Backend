@@ -29,6 +29,8 @@ const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const farmCode = 'LF-000001';
 const ownedFarm = { id: farmId, farmCode, ownerId: 'farmer-1' };
 const ownedByUser = { owner: { userId: user.id } };
+// SOURCED listings back sourced orders and are never shown, even to the owner.
+const notSourced = { status: { not: ProduceStatus.SOURCED } };
 // Other farmers' produce shows only while it is on sale, on a verified farm.
 const visible = {
   OR: [
@@ -36,7 +38,7 @@ const visible = {
       status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
       farm: { verificationStatus: FarmVerificationStatus.VERIFIED },
     },
-    { farm: ownedByUser },
+    { farm: ownedByUser, ...notSourced },
   ],
 };
 // Buyers get the farm's code and region, never its street address.
@@ -78,8 +80,7 @@ describe('ProduceService', () => {
     update: jest.fn(),
     delete: jest.fn(),
   };
-  const sourcingAllocation = { count: jest.fn() };
-  const tx = { produce, sourcingAllocation };
+  const tx = { produce };
   const database = {
     farm,
     produce,
@@ -228,6 +229,13 @@ describe('ProduceService', () => {
       expect(findManyArgs().where?.status).toBe(ProduceStatus.SOLD_OUT);
     });
 
+    it('never lists a SOURCED listing, not even to its farmer', async () => {
+      await service.findAll(user, {});
+      expect(findManyArgs().where).toMatchObject({
+        OR: [expect.anything(), { farm: ownedByUser, ...notSourced }],
+      });
+    });
+
     it('leaves a farmer’s list unfiltered by status by default', async () => {
       await service.findAll(user, {});
       expect(findManyArgs().where?.status).toBeUndefined();
@@ -327,6 +335,44 @@ describe('ProduceService', () => {
     });
   });
 
+  describe('SOURCED listings', () => {
+    it('404s the detail of a SOURCED listing for a buyer', async () => {
+      produce.findFirst.mockResolvedValue(null);
+      await expect(service.findOne(buyer, produceId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(produce.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: produceId,
+            OR: [
+              expect.anything(),
+              { farm: { owner: { userId: buyer.id } }, ...notSourced },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('404s updating, deleting and attaching an image to one', async () => {
+      produce.findFirst.mockResolvedValue(null);
+      await expect(
+        service.update(user, produceId, { name: 'x' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.remove(user, produceId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(
+        service.attachImage(user, produceId, imageFile),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      for (const [args] of produce.findFirst.mock.calls) {
+        expect(args).toMatchObject({
+          where: { id: produceId, farm: ownedByUser, ...notSourced },
+        });
+      }
+    });
+  });
+
   describe('update', () => {
     // 100 on hand, 30 reserved by orders.
     const current = {
@@ -346,7 +392,7 @@ describe('ProduceService', () => {
         service.update(user, produceId, { name: 'New' }),
       ).rejects.toBeInstanceOf(NotFoundException);
       expect(produce.findFirst).toHaveBeenCalledWith({
-        where: { id: produceId, farm: ownedByUser },
+        where: { id: produceId, farm: ownedByUser, ...notSourced },
         include: { farm: { select: { farmCode: true, ownerId: true } } },
       });
       expect(produce.update).not.toHaveBeenCalled();
@@ -504,20 +550,6 @@ describe('ProduceService', () => {
         ConflictException,
       );
     });
-
-    it('refuses to delete a listing still in a sourcing selection', async () => {
-      produce.findFirst.mockResolvedValue({
-        id: produceId,
-        name: 'Maize',
-        farmId,
-        farm: { farmCode, ownerId: 'farmer-1' },
-      });
-      sourcingAllocation.count.mockResolvedValue(1);
-      await expect(service.remove(user, produceId)).rejects.toThrow(
-        'Produce is part of a sourcing selection and cannot be deleted',
-      );
-      expect(produce.delete).not.toHaveBeenCalled();
-    });
   });
 
   describe('attachImage', () => {
@@ -550,7 +582,7 @@ describe('ProduceService', () => {
         'image/png',
       );
       expect(produce.update).toHaveBeenCalledWith({
-        where: { id: produceId, farm: ownedByUser },
+        where: { id: produceId, farm: ownedByUser, ...notSourced },
         data: { imageUrl },
       });
     });

@@ -1,15 +1,21 @@
 import 'dotenv/config';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import { io, type Socket } from 'socket.io-client';
 import {
+  CheckoutStatus,
   FarmVerificationStatus,
   OrderStatus,
+  PackagingType,
+  ProduceCondition,
   ProduceStatus,
   ProduceType,
+  QualityGrade,
   Role,
+  SourcingRequestStatus,
+  SourcingUnit,
   type Order,
   type User,
 } from '../generated/client';
@@ -18,6 +24,7 @@ import { FirebaseService } from '../src/auth/firebase/firebase.service';
 import { ChatGateway } from '../src/conversation/chat.gateway';
 import { ConversationService } from '../src/conversation/conversation.service';
 import type { MessageDto } from '../src/conversation/dto';
+import { openSourcingConversation } from '../src/conversation/utils/sourcing-conversation';
 import { PayoutConfig } from '../src/payout/payout.config';
 import { PrismaService } from '../src/prisma/prisma.service';
 
@@ -85,10 +92,13 @@ describe('Conversations (real Postgres + Redis)', () => {
   const sockets: Socket[] = [];
   const userIds: string[] = [];
   const orderIds: string[] = [];
+  const checkoutIds: string[] = [];
+  const requestIds: string[] = [];
   let buyer: User;
   // Orders and conversations key on the Buyer profile, not the user.
   let buyerId: string;
   let agentUser: User;
+  let agentId: string;
   let stateId: string;
   let lgaId: string;
   let farmId: string;
@@ -113,6 +123,7 @@ describe('Conversations (real Postgres + Redis)', () => {
 
   async function order(
     status: OrderStatus = OrderStatus.PENDING,
+    extra: { checkoutId?: string; fulfilledAt?: Date } = {},
   ): Promise<Order> {
     const created = await db.order.create({
       data: {
@@ -125,9 +136,58 @@ describe('Conversations (real Postgres + Redis)', () => {
         status,
         produceName: 'Cassava',
         type: ProduceType.LOCAL,
+        ...extra,
       },
     });
     orderIds.push(created.id);
+    return created;
+  }
+
+  async function sourcingRequest(
+    status: SourcingRequestStatus = SourcingRequestStatus.FINDING_SUPPLY,
+  ) {
+    const created = await db.sourcingRequest.create({
+      data: {
+        buyerId,
+        produceName: 'Maize',
+        quantity: 12,
+        unit: SourcingUnit.TONNES,
+        quality: QualityGrade.GRADE_A,
+        packaging: PackagingType.BAGS,
+        condition: ProduceCondition.DRIED,
+        deliveryDestination: 'Lagos',
+        requiredDate: new Date('2027-01-15'),
+        status,
+        assignedAgentId: agentId,
+      },
+    });
+    requestIds.push(created.id);
+    await db.$transaction((tx) =>
+      openSourcingConversation(tx, created, agentUser.id),
+    );
+    return created;
+  }
+
+  async function paidCheckout(sourcingRequestId: string) {
+    const created = await db.checkout.create({
+      data: {
+        buyerId,
+        idempotencyKey: randomUUID(),
+        totalPrice: '1000.00',
+        subtotal: '1000.00',
+        deliveryFee: '0.00',
+        serviceFee: '0.00',
+        agentCommission: '0.00',
+        status: CheckoutStatus.PAID,
+        expiresAt: new Date(),
+        paidAt: new Date(),
+        deliveryDate: new Date('2027-01-15'),
+        deliveryLabel: 'Warehouse',
+        deliveryStreet: '1 Test Road',
+        sourcingRequestId,
+      },
+    });
+    checkoutIds.push(created.id);
     return created;
   }
 
@@ -153,6 +213,7 @@ describe('Conversations (real Postgres + Redis)', () => {
       data: { userId: agentUser.id, isVerified: true, cluster: { create: {} } },
       include: { cluster: true },
     });
+    agentId = agent.id;
     const farmerUser = await user(Role.FARMER, { activatedAt: new Date() });
     const farmer = await db.farmer.create({ data: { userId: farmerUser.id } });
     const farm = await db.farm.create({
@@ -189,8 +250,17 @@ describe('Conversations (real Postgres + Redis)', () => {
     sockets.forEach((socket) => socket.close());
     // Messages, conversations and orders restrict deletes, so they go first.
     await db.message.deleteMany({ where: { senderId: { in: userIds } } });
-    await db.conversation.deleteMany({ where: { orderId: { in: orderIds } } });
+    await db.conversation.deleteMany({
+      where: {
+        OR: [
+          { orderId: { in: orderIds } },
+          { sourcingRequestId: { in: requestIds } },
+        ],
+      },
+    });
     await db.order.deleteMany({ where: { id: { in: orderIds } } });
+    await db.checkout.deleteMany({ where: { id: { in: checkoutIds } } });
+    await db.sourcingRequest.deleteMany({ where: { id: { in: requestIds } } });
     await db.produce.deleteMany({ where: { farmId } });
     // The farm restricts its cluster's delete, which cascades from the agent's user.
     await db.farm.delete({ where: { id: farmId } });
@@ -321,6 +391,97 @@ describe('Conversations (real Postgres + Redis)', () => {
     });
     await expect(a.service.findOne(buyer, thread.id)).resolves.toMatchObject({
       isClosed: true,
+    });
+  });
+
+  describe('sourcing chat', () => {
+    const longAgo = new Date('2020-01-01T00:00:00Z');
+    const say = (body: string) => ({ body, clientMessageId: randomUUID() });
+
+    it('is idempotent when opened twice', async () => {
+      const request = await sourcingRequest();
+      const again = await db.$transaction((tx) =>
+        openSourcingConversation(tx, request, agentUser.id),
+      );
+      const thread = await a.service.findForSourcingRequest(buyer, request.id);
+      expect(again.id).toBe(thread.id);
+      await expect(
+        db.conversation.count({ where: { sourcingRequestId: request.id } }),
+      ).resolves.toBe(1);
+    });
+
+    it('returns the request conversation for a sourced order', async () => {
+      const request = await sourcingRequest(SourcingRequestStatus.COMPLETED);
+      const checkout = await paidCheckout(request.id);
+      const placed = await order(OrderStatus.PREPARING, {
+        checkoutId: checkout.id,
+      });
+      const thread = await a.service.findForSourcingRequest(
+        agentUser,
+        request.id,
+      );
+      await expect(a.service.open(buyer, placed.id)).resolves.toMatchObject({
+        id: thread.id,
+        orderId: null,
+        sourcingRequestId: request.id,
+        unit: SourcingUnit.TONNES,
+        isClosed: false,
+      });
+      await expect(
+        db.conversation.count({ where: { orderId: placed.id } }),
+      ).resolves.toBe(0);
+      const { data } = await a.service.findAll(buyer, { page: 1, perPage: 50 });
+      expect(data.map((c) => c.id)).toContain(thread.id);
+    });
+
+    it('accepts messages while one sourced order is in its dispute window, and refuses once every one is closed', async () => {
+      const request = await sourcingRequest(SourcingRequestStatus.COMPLETED);
+      const checkout = await paidCheckout(request.id);
+      await order(OrderStatus.FULFILLED, {
+        checkoutId: checkout.id,
+        fulfilledAt: longAgo,
+      });
+      const recent = await order(OrderStatus.FULFILLED, {
+        checkoutId: checkout.id,
+        fulfilledAt: new Date(),
+      });
+      const thread = await a.service.findForSourcingRequest(buyer, request.id);
+      await expect(
+        b.service.send(agentUser, thread.id, say('Delivered both lots')),
+      ).resolves.toMatchObject({ body: 'Delivered both lots' });
+
+      await db.order.update({
+        where: { id: recent.id },
+        data: { fulfilledAt: longAgo },
+      });
+      await expect(
+        a.service.send(buyer, thread.id, say('too late')),
+      ).rejects.toBeInstanceOf(ConflictException);
+      await expect(a.service.findOne(buyer, thread.id)).resolves.toMatchObject({
+        isClosed: true,
+      });
+    });
+
+    it('closes the sourcing chat when the request is closed before payment', async () => {
+      const request = await sourcingRequest(SourcingRequestStatus.NEGOTIATING);
+      const thread = await a.service.findForSourcingRequest(buyer, request.id);
+      await a.service.send(buyer, thread.id, say('Any news?'));
+      await db.sourcingRequest.update({
+        where: { id: request.id },
+        data: { status: SourcingRequestStatus.CLOSED, closedAt: new Date() },
+      });
+      await expect(
+        a.service.send(agentUser, thread.id, say('Sorry')),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('404s a buyer who does not own the request', async () => {
+      const request = await sourcingRequest();
+      const stranger = await user(Role.BUYER);
+      await db.buyer.create({ data: { userId: stranger.id } });
+      await expect(
+        a.service.findForSourcingRequest(stranger, request.id),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

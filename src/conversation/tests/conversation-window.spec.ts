@@ -1,6 +1,10 @@
-import { DisputeStatus, OrderStatus } from '../../../generated/client';
+import {
+  DisputeStatus,
+  OrderStatus,
+  SourcingRequestStatus,
+} from '../../../generated/client';
 import { disputeWindowOpen } from '../../payout/utils/dispute-window';
-import { isClosed } from '../utils/conversation-window';
+import { isClosed, sourcingChatClosed } from '../utils/conversation-window';
 
 const now = new Date('2026-11-05T12:00:00Z');
 const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3_600_000);
@@ -60,5 +64,52 @@ describe('isClosed', () => {
         now,
       ),
     ).toBe(false);
+  });
+});
+
+describe('sourcingChatClosed', () => {
+  const order = (status: OrderStatus, hours = 1) => ({
+    status,
+    fulfilledAt: status === OrderStatus.FULFILLED ? hoursAgo(hours) : null,
+    dispute: null,
+  });
+
+  it('stays open before payment', () => {
+    expect(
+      sourcingChatClosed(
+        { status: SourcingRequestStatus.NEGOTIATING },
+        [],
+        24,
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('closes when the request is closed before payment', () => {
+    expect(
+      sourcingChatClosed({ status: SourcingRequestStatus.CLOSED }, [], 24, now),
+    ).toBe(true);
+  });
+
+  it('stays open while one paid order is still open', () => {
+    expect(
+      sourcingChatClosed(
+        { status: SourcingRequestStatus.COMPLETED },
+        [order(OrderStatus.CANCELLED), order(OrderStatus.FULFILLED, 1)],
+        24,
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it('closes once every paid order is closed', () => {
+    expect(
+      sourcingChatClosed(
+        { status: SourcingRequestStatus.FULFILLED },
+        [order(OrderStatus.CANCELLED), order(OrderStatus.FULFILLED, 25)],
+        24,
+        now,
+      ),
+    ).toBe(true);
   });
 });

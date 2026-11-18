@@ -59,7 +59,7 @@ export class DisputeController {
   @ApiOperation({
     summary: "Get an order's dispute",
     description:
-      'For the buyer, the farm owner, the handover agent or an admin. Photo URLs are presigned. 404 DISPUTE_NOT_FOUND when there is none or the order is not yours.',
+      'For the buyer, the farm owner, the handover agent, the sourcing agent or an admin. Photo URLs are presigned. 404 DISPUTE_NOT_FOUND when there is none or the order is not yours.',
   })
   @Auth()
   @ApiEnvelope(DisputeDto)

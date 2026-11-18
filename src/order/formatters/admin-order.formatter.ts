@@ -50,5 +50,6 @@ export function toAdminOrderRow(order: AdminListedOrder): AdminOrderRowDto {
     sourcingRequest: order.checkout?.sourcingRequest ?? null,
     totalPrice: order.totalPrice.toFixed(2),
     dispute: order.dispute,
+    sourced: order.sourced,
   };
 }

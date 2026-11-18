@@ -4,6 +4,7 @@ import { advisoryLock } from '../../common/advisory-lock';
 export const PAYEE_SELECT = {
   farm: { select: { owner: { select: { userId: true } } } },
   handover: { select: { agent: { select: { userId: true } } } },
+  commissionAgent: { select: { userId: true } },
 } satisfies Prisma.OrderSelect;
 
 type PayeeRow = Prisma.OrderGetPayload<{ select: typeof PAYEE_SELECT }>;
@@ -15,7 +16,7 @@ export function payeeUserId(
 ): string | null {
   return kind === PayoutItemKind.PRODUCE
     ? order.farm.owner.userId
-    : (order.handover?.agent?.userId ?? null);
+    : (order.commissionAgent?.userId ?? order.handover?.agent?.userId ?? null);
 }
 
 // Every path that creates payout items or refunds a whole checkout takes

@@ -159,6 +159,30 @@ describe('AdminFarmService', () => {
     );
   });
 
+  it('counts and lists only non-SOURCED produce on a farm', async () => {
+    await service.findAll({ page: 1, perPage: 20 });
+    await service.findOne(farmId);
+
+    expect(farm.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: {
+            select: { produce: { where: { status: { not: 'SOURCED' } } } },
+          },
+        }),
+      }),
+    );
+    expect(farm.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          produce: expect.objectContaining({
+            where: { status: { not: 'SOURCED' } },
+          }),
+        }),
+      }),
+    );
+  });
+
   it("lists a cluster's farms, newest first", async () => {
     const result = await service.findInCluster('cluster-1', {
       page: 2,

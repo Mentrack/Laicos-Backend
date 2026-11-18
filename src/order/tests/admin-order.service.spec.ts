@@ -26,6 +26,7 @@ function order(buyer: object, overrides: object = {}) {
     },
     checkout: { sourcingRequest: { id: 'sr-1', requestNumber: 'REQ-000001' } },
     dispute: null,
+    sourced: false,
     ...overrides,
   };
 }
@@ -79,7 +80,11 @@ describe('AdminOrderService', () => {
   it('maps rows and names COMPANY and individual buyers differently', async () => {
     database.order.findMany.mockResolvedValue([
       order(company),
-      order(person, { checkout: null, dispute: { id: 'd-1', status: 'OPEN' } }),
+      order(person, {
+        checkout: null,
+        dispute: { id: 'd-1', status: 'OPEN' },
+        sourced: true,
+      }),
     ]);
     database.order.count.mockResolvedValue(2);
 
@@ -94,8 +99,10 @@ describe('AdminOrderService', () => {
       farm: { clusterCode: 'CL-000001' },
       sourcingRequest: { id: 'sr-1', requestNumber: 'REQ-000001' },
       dispute: null,
+      sourced: false,
     });
     expect(data[1].buyer.name).toBe('Ada Obi');
+    expect(data[1].sourced).toBe(true);
     expect(data[1].sourcingRequest).toBeNull();
     expect(data[1].dispute).toEqual({ id: 'd-1', status: 'OPEN' });
     expect(metaData).toEqual({ page: 1, perPage: 20, total: 2, totalPages: 1 });
@@ -177,8 +184,8 @@ describe('AdminOrderService', () => {
       );
 
       expect(csv).toBe(
-        'Order ID,Buyer,Buyer ID,Produce,Quantity,Unit,Farm Code,Cluster,Request ID,Total (NGN),Status,Dispute,Date\r\n' +
-          'ORD-000001,Acme Ltd,BYR-000001,"Maize, white",5,kg,LF-000001,CL-000001,REQ-000001,1000.00,PENDING,,2026-10-10\r\n',
+        'Order ID,Buyer,Buyer ID,Produce,Quantity,Unit,Farm Code,Cluster,Request ID,Total (NGN),Status,Dispute,Sourced,Date\r\n' +
+          'ORD-000001,Acme Ltd,BYR-000001,"Maize, white",5,kg,LF-000001,CL-000001,REQ-000001,1000.00,PENDING,,No,2026-10-10\r\n',
       );
       const args = database.order.findMany.mock.calls[0][0] as object;
       expect(args).toEqual(

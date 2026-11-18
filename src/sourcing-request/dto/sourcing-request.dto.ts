@@ -1,10 +1,14 @@
 import { ApiProperty, OmitType } from '@nestjs/swagger';
-import { SourcingRequestStatus } from '../../../generated/client';
+import {
+  SourcingRequestStatus,
+  SourcingTimeline,
+} from '../../../generated/client';
 import { CreateSourcingRequestDto } from './create-sourcing-request.dto';
 
 export class SourcingRequestDto extends OmitType(CreateSourcingRequestDto, [
   'additionalSpecs',
   'logisticsNotes',
+  'timeline',
 ] as const) {
   @ApiProperty({ format: 'uuid' })
   id: string;
@@ -17,6 +21,14 @@ export class SourcingRequestDto extends OmitType(CreateSourcingRequestDto, [
 
   @ApiProperty({ type: String, nullable: true })
   logisticsNotes: string | null;
+
+  // Buyers no longer send it; only pre-redesign requests have a value.
+  @ApiProperty({
+    enum: SourcingTimeline,
+    enumName: 'SourcingTimeline',
+    nullable: true,
+  })
+  timeline: SourcingTimeline | null;
 
   @ApiProperty({
     enum: SourcingRequestStatus,

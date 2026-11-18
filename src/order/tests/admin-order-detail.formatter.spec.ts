@@ -58,11 +58,7 @@ const checkout = {
     produceName: 'Maize',
     quantity: 500,
     unit: 'KG',
-    allocations: [
-      { produce: { farmId: 'f-1' } },
-      { produce: { farmId: 'f-1' } },
-      { produce: { farmId: 'f-2' } },
-    ],
+    allocations: [{ farmId: 'f-1' }, { farmId: 'f-2' }],
   },
 };
 
@@ -84,6 +80,7 @@ function order(overrides: object = {}) {
     farm,
     checkout,
     dispute: null,
+    sourced: false,
     ...overrides,
   } as unknown as AdminDetailedOrder;
 }
@@ -94,6 +91,13 @@ describe('toAdminOrderDetail', () => {
     expect(detail.payment).toBeNull();
     expect(detail.sourcingRequest).toBeNull();
     expect(detail.buyer.deliveryDestination).toBeNull();
+  });
+
+  it('flags a sourced order', () => {
+    expect(toAdminOrderDetail(order()).order.sourced).toBe(false);
+    expect(toAdminOrderDetail(order({ sourced: true })).order.sourced).toBe(
+      true,
+    );
   });
 
   it('names a COMPANY buyer by legalName and prefers its contactPhone', () => {

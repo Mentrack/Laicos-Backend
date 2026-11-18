@@ -36,6 +36,9 @@ function listing(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// SOURCED listings back sourced orders and stay out of every admin view.
+const notSourced = { status: { not: ProduceStatus.SOURCED } };
+
 describe('AdminProduceService', () => {
   const produce = {
     findMany: jest.fn(),
@@ -100,7 +103,10 @@ describe('AdminProduceService', () => {
       const args = produce.findMany.mock.calls[0][0] as object;
       expect(args).toEqual(
         expect.objectContaining({
-          where: expect.objectContaining({ status: ProduceStatus.DRAFT }),
+          where: expect.objectContaining({
+            status: ProduceStatus.DRAFT,
+            AND: [notSourced],
+          }),
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1000,
         }),
@@ -156,7 +162,7 @@ describe('AdminProduceService', () => {
     expect(result.data[0].farmId).toBe('farm-1');
     expect(produce.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { farmId },
+        where: { AND: [notSourced], farmId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       }),
     );
@@ -187,6 +193,7 @@ describe('AdminProduceService', () => {
     expect(produce.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
+          AND: [notSourced],
           category: 'OILSEEDS',
           status: ProduceStatus.DRAFT,
           OR: [
@@ -226,11 +233,11 @@ describe('AdminProduceService', () => {
       recentListings: 1,
     });
     expect(cluster.count).toHaveBeenCalledWith({
-      where: { farms: { some: { produce: { some: {} } } } },
+      where: { farms: { some: { produce: { some: notSourced } } } },
     });
     expect(produce.groupBy).toHaveBeenCalledWith({
       by: ['category'],
-      where: { category: { not: null } },
+      where: { category: { not: null }, ...notSourced },
       _count: { _all: true },
     });
     const recent = produce.count.mock.calls[1] as [
@@ -241,6 +248,7 @@ describe('AdminProduceService', () => {
     expect(age).toBeLessThan(7 * 24 * 60 * 60 * 1000 + 5_000);
     const [sql] = database.$queryRaw.mock.calls[0] as [TemplateStringsArray];
     expect(sql.join(' ')).toContain(`lower(btrim(unit)) = 'kg'`);
+    expect(sql.join(' ')).toContain(`status <> 'SOURCED'`);
   });
 
   describe('summaryForFarm', () => {
@@ -286,14 +294,18 @@ describe('AdminProduceService', () => {
         activeClusters: 1,
         recentListings: 1,
       });
-      expect(produce.count).toHaveBeenNthCalledWith(1, { where: { farmId } });
+      expect(produce.count).toHaveBeenNthCalledWith(1, {
+        where: { farmId, ...notSourced },
+      });
       expect(produce.groupBy).toHaveBeenCalledWith({
         by: ['category'],
-        where: { category: { not: null }, farmId },
+        where: { category: { not: null }, farmId, ...notSourced },
         _count: { _all: true },
       });
       expect(cluster.count).toHaveBeenCalledWith({
-        where: { farms: { some: { id: farmId, produce: { some: {} } } } },
+        where: {
+          farms: { some: { id: farmId, produce: { some: notSourced } } },
+        },
       });
       const { sql, values } = flattenQuery(database.$queryRaw.mock.calls[0]);
       expect(sql).toContain('"farmId"');
@@ -358,6 +370,21 @@ describe('AdminProduceService', () => {
       where: { id: produceId },
       data: { status: ProduceStatus.DISABLED },
     });
+  });
+
+  it('looks up only non-SOURCED listings to disable or remove', async () => {
+    produce.findUnique.mockResolvedValue(null);
+
+    await expect(service.disable(produceId)).rejects.toThrow(
+      'Produce not found',
+    );
+    await expect(service.remove(produceId)).rejects.toThrow(
+      'Produce not found',
+    );
+    for (const [args] of produce.findUnique.mock.calls) {
+      expect(args).toMatchObject({ where: { id: produceId, ...notSourced } });
+    }
+    expect(produce.update).not.toHaveBeenCalled();
   });
 
   it('does not disable a listing with an order the buyer has paid for', async () => {

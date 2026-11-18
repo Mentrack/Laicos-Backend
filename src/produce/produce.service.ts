@@ -32,7 +32,7 @@ import {
   UpdateProduceDto,
 } from './dto';
 import { deriveProduceStatus } from './utils/produce-status';
-import { visibleTo } from './utils/produce-visibility';
+import { notSourced, visibleTo } from './utils/produce-visibility';
 
 /** Writes are scoped to the owning farmer; reads hide other farmers' drafts. */
 @Injectable()
@@ -95,7 +95,7 @@ export class ProduceService {
 
   async attachImage(user: User, id: string, file: StorageUploadFile) {
     const current = await this.database.produce.findFirst({
-      where: { id, farm: farmOwnedBy(user) },
+      where: { id, farm: farmOwnedBy(user), ...notSourced },
       select: { id: true },
     });
     if (!current) {
@@ -109,7 +109,7 @@ export class ProduceService {
       // Prisma throws P2025, which mapProduceWriteError turns into a 404
       // instead of an unhandled 500.
       return await this.database.produce.update({
-        where: { id, farm: farmOwnedBy(user) },
+        where: { id, farm: farmOwnedBy(user), ...notSourced },
         data: { imageUrl },
       });
     } catch (error) {
@@ -166,7 +166,7 @@ export class ProduceService {
 
   async update(user: User, id: string, dto: UpdateProduceDto) {
     const current = await this.database.produce.findFirst({
-      where: { id, farm: farmOwnedBy(user) },
+      where: { id, farm: farmOwnedBy(user), ...notSourced },
       include: { farm: { select: { farmCode: true, ownerId: true } } },
     });
     if (!current) {
@@ -231,7 +231,7 @@ export class ProduceService {
 
   async remove(user: User, id: string) {
     const current = await this.database.produce.findFirst({
-      where: { id, farm: farmOwnedBy(user) },
+      where: { id, farm: farmOwnedBy(user), ...notSourced },
       select: {
         name: true,
         farmId: true,
@@ -243,16 +243,8 @@ export class ProduceService {
     }
     try {
       return await this.database.$transaction(async (tx) => {
-        const selected = await tx.sourcingAllocation.count({
-          where: { produceId: id },
-        });
-        if (selected > 0) {
-          throw new ConflictException(
-            'Produce is part of a sourcing selection and cannot be deleted',
-          );
-        }
         const deleted = await tx.produce.delete({
-          where: { id, farm: farmOwnedBy(user) },
+          where: { id, farm: farmOwnedBy(user), ...notSourced },
         });
         await this.audit.record(tx, {
           actorType: AuditActorType.FARMER,

@@ -355,6 +355,18 @@ describe('CartService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
+    it('treats a SOURCED listing as not found', async () => {
+      cartItem.findUnique.mockResolvedValue(null);
+      cartItem.count.mockResolvedValue(0);
+      tx.produce.findUnique.mockResolvedValue({
+        ...produce,
+        status: ProduceStatus.SOURCED,
+      });
+      await expect(
+        service.addItem(buyer, { produceId, quantity: 1 }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
     it('caps the cart at 50 distinct items', async () => {
       cartItem.findUnique.mockResolvedValue(null);
       cartItem.count.mockResolvedValue(50);

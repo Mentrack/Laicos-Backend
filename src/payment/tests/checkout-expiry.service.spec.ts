@@ -4,6 +4,7 @@ import {
   OrderStatus,
   ProduceStatus,
 } from '../../../generated/client';
+import * as sync from '../../sourcing-request/utils/sync-sourcing-request';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckoutExpiryService } from '../checkout-expiry.service';
 
@@ -47,7 +48,7 @@ describe('CheckoutExpiryService', () => {
         status: CheckoutStatus.AWAITING_PAYMENT,
         expiresAt: { lt: now },
       },
-      select: { id: true },
+      select: { id: true, sourcingRequestId: true },
       orderBy: { expiresAt: 'asc' },
       take: 100,
     });
@@ -141,5 +142,58 @@ describe('CheckoutExpiryService', () => {
         expiresAt: past,
       });
     await expect(service.expireOverdue(now)).resolves.toBe(1);
+  });
+
+  describe('sourced checkouts', () => {
+    const lapse = jest
+      .spyOn(sync, 'lapseSourcedCheckout')
+      .mockResolvedValue(undefined);
+    const syncSpy = jest.spyOn(sync, 'syncSourcingRequest');
+
+    it('lapses the request, taking the sourcing lock before the checkout lock', async () => {
+      database.checkout.findMany.mockResolvedValue([
+        { id: 'a', sourcingRequestId: 'r1' },
+      ]);
+      tx.checkout.findUnique.mockResolvedValue({
+        id: 'a',
+        status: CheckoutStatus.AWAITING_PAYMENT,
+        expiresAt: past,
+        sourcingRequestId: 'r1',
+      });
+      await expect(service.expireOverdue(now)).resolves.toBe(1);
+      expect(tx.$executeRaw.mock.calls.map((call) => call[1])).toEqual([
+        'sourcing:r1',
+        'checkout:a',
+      ]);
+      expect(lapse).toHaveBeenCalledWith(tx, 'r1', {
+        actorType: AuditActorType.SYSTEM,
+        actorUserId: null,
+        title: 'Payment window lapsed',
+        summary: 'Payment not received',
+      });
+      expect(syncSpy).not.toHaveBeenCalled();
+      expect(tx.checkout.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: CheckoutStatus.EXPIRED } }),
+      );
+      expect(tx.order.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { checkoutId: 'a', status: OrderStatus.AWAITING_PAYMENT },
+        }),
+      );
+    });
+
+    it('does not lapse a cart checkout', async () => {
+      database.checkout.findMany.mockResolvedValue([
+        { id: 'a', sourcingRequestId: null },
+      ]);
+      tx.checkout.findUnique.mockResolvedValue({
+        id: 'a',
+        status: CheckoutStatus.AWAITING_PAYMENT,
+        expiresAt: past,
+        sourcingRequestId: null,
+      });
+      await service.expireOverdue(now);
+      expect(lapse).not.toHaveBeenCalled();
+    });
   });
 });

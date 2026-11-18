@@ -42,6 +42,12 @@ describe('CreateSourcingRequestDto', () => {
     ).resolves.toEqual([]);
   });
 
+  it('accepts a request without timeline', async () => {
+    await expect(invalidProperties({ timeline: undefined })).resolves.toEqual(
+      [],
+    );
+  });
+
   it('trims the free-text fields', () => {
     const dto = plainToInstance(CreateSourcingRequestDto, {
       ...body,

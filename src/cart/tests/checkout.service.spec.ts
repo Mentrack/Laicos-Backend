@@ -13,6 +13,7 @@ import {
 import { buyerProfile } from '../../buyer/tests/buyer.fixture';
 import { addDays, lagosToday } from '../../common/dates';
 import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
+import * as sync from '../../sourcing-request/utils/sync-sourcing-request';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CheckoutService } from '../checkout.service';
 
@@ -181,6 +182,21 @@ describe('CheckoutService', () => {
     // A refilled cart is left alone by a replay.
     expect(tx.cartItem.findMany).not.toHaveBeenCalled();
     expect(tx.cartItem.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('names the end of a delivery window deliveryDateTo, beside deliveryDate', async () => {
+    tx.checkout.findUnique.mockResolvedValue(
+      checkoutRow({
+        deliveryDateTo: new Date('2026-10-12T00:00:00.000Z'),
+        deliveryCountry: 'Nigeria',
+      }),
+    );
+    const placed = await service.checkout(buyer, key, body(1 + 3500));
+    expect(placed).toMatchObject({
+      deliveryDate: '2026-10-10',
+      deliveryDateTo: '2026-10-12',
+    });
+    expect(placed).not.toHaveProperty('dateTo');
   });
 
   it('refuses an empty cart', async () => {
@@ -482,6 +498,50 @@ describe('CheckoutService', () => {
           }),
         ],
       });
+    });
+
+    it('lapses a sourced checkout, locking the request before the checkout', async () => {
+      const lapse = jest
+        .spyOn(sync, 'lapseSourcedCheckout')
+        .mockResolvedValue(undefined);
+      const syncSpy = jest.spyOn(sync, 'syncSourcingRequest');
+      tx.checkout.findFirst.mockResolvedValue(
+        checkoutRow({ sourcingRequestId: 'r1' }),
+      );
+      tx.order.findMany.mockResolvedValue([]);
+      tx.checkout.update.mockResolvedValue(
+        checkoutRow({ status: CheckoutStatus.CANCELLED }),
+      );
+      await service.cancel(buyer, checkoutId);
+      expect(tx.$executeRaw.mock.calls.map((call) => call[1])).toEqual([
+        'sourcing:r1',
+        `checkout:${checkoutId}`,
+      ]);
+      expect(lapse).toHaveBeenCalledWith(tx, 'r1', {
+        actorType: AuditActorType.BUYER,
+        actorUserId: buyer.id,
+        title: 'Checkout cancelled by buyer',
+        summary: 'Cancelled by buyer',
+      });
+      expect(syncSpy).not.toHaveBeenCalled();
+    });
+
+    it('does not lapse or take a sourcing lock for a cart checkout', async () => {
+      const lapse = jest
+        .spyOn(sync, 'lapseSourcedCheckout')
+        .mockResolvedValue(undefined);
+      tx.checkout.findFirst.mockResolvedValue(
+        checkoutRow({ sourcingRequestId: null }),
+      );
+      tx.order.findMany.mockResolvedValue([]);
+      tx.checkout.update.mockResolvedValue(
+        checkoutRow({ status: CheckoutStatus.CANCELLED }),
+      );
+      await service.cancel(buyer, checkoutId);
+      expect(tx.$executeRaw.mock.calls.map((call) => call[1])).toEqual([
+        `checkout:${checkoutId}`,
+      ]);
+      expect(lapse).not.toHaveBeenCalled();
     });
 
     it('asks the buyer to retry when the transaction times out', async () => {

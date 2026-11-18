@@ -13,6 +13,7 @@ import {
 } from '../common/prisma-errors';
 import { OPEN_PAID_ORDER_STATUSES } from '../order/utils/open-paid';
 import { PrismaService } from '../prisma/prisma.service';
+import { notSourced, ON_SALE_STATUSES } from './utils/produce-visibility';
 import type {
   AdminProduceActionDto,
   AdminProduceFilterDto,
@@ -34,7 +35,7 @@ const PRODUCE_CSV_HEADER = [
   'Listed',
 ];
 
-const ACTIVE = [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT];
+const ACTIVE = ON_SALE_STATUSES;
 const INACTIVE = [ProduceStatus.DRAFT, ProduceStatus.DISABLED];
 
 const LIST_INCLUDE = {
@@ -134,32 +135,39 @@ export class AdminProduceService {
       activeClusters,
       recentListings,
     ] = await Promise.all([
-      this.database.produce.count({ where: { farmId } }),
+      this.database.produce.count({ where: { farmId, ...notSourced } }),
       this.database.produce.groupBy({
         by: ['status'],
-        where: { farmId },
+        where: { farmId, ...notSourced },
         _count: { _all: true },
       }),
       this.database.produce.groupBy({
         by: ['category'],
-        where: { category: { not: null }, farmId },
+        where: { category: { not: null }, farmId, ...notSourced },
         _count: { _all: true },
       }),
-      this.database.produce.groupBy({ by: ['farmId'], where: { farmId } }),
+      this.database.produce.groupBy({
+        by: ['farmId'],
+        where: { farmId, ...notSourced },
+      }),
       // Units are free text, so only kilograms can be added into one figure.
       this.database.$queryRaw<{ sum: number }[]>`
         SELECT COALESCE(SUM("floatingQuantity"), 0)::int AS sum
         FROM "Produce"
         WHERE lower(btrim(unit)) = 'kg'
+        AND status <> 'SOURCED'
         ${farmId ? Prisma.sql`AND "farmId" = ${farmId}` : Prisma.empty}
       `,
       this.database.cluster.count({
-        where: { farms: { some: { id: farmId, produce: { some: {} } } } },
+        where: {
+          farms: { some: { id: farmId, produce: { some: notSourced } } },
+        },
       }),
       this.database.produce.count({
-        where: { createdAt: { gte: since }, farmId },
+        where: { createdAt: { gte: since }, farmId, ...notSourced },
       }),
     ]);
+    // No SOURCED key: those rows are filtered out of the groupBy above.
     const byStatus = {
       [ProduceStatus.DRAFT]: 0,
       [ProduceStatus.PUBLISHED]: 0,
@@ -187,7 +195,7 @@ export class AdminProduceService {
   async disable(id: string): Promise<AdminProduceActionDto> {
     return this.database.$transaction(async (tx) => {
       const listing = await tx.produce.findUnique({
-        where: { id },
+        where: { id, ...notSourced },
         select: { id: true },
       });
       if (!listing) {
@@ -209,7 +217,7 @@ export class AdminProduceService {
 
   async remove(id: string): Promise<AdminProduceActionDto> {
     const listing = await this.database.produce.findUnique({
-      where: { id },
+      where: { id, ...notSourced },
       select: { id: true, status: true },
     });
     if (!listing) {
@@ -240,6 +248,7 @@ function whereFor(query: AdminProduceFilterDto): Prisma.ProduceWhereInput {
     mode: 'insensitive',
   };
   return {
+    AND: [notSourced],
     category: query.category,
     status: query.status,
     OR: search

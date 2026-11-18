@@ -1,4 +1,5 @@
-import { ProduceStatus, type Prisma } from '../../../generated/client';
+import type { Prisma } from '../../../generated/client';
+import { ON_SALE_STATUSES } from '../../produce/utils/produce-visibility';
 import type { FarmProfileDto } from '../dto';
 
 export const FARM_PROFILE_SELECT = {
@@ -10,9 +11,7 @@ export const FARM_PROFILE_SELECT = {
   state: { select: { id: true, name: true } },
   lga: { select: { id: true, stateId: true, name: true } },
   produce: {
-    where: {
-      status: { in: [ProduceStatus.PUBLISHED, ProduceStatus.SOLD_OUT] },
-    },
+    where: { status: { in: ON_SALE_STATUSES } },
     select: { name: true },
     orderBy: { createdAt: 'asc' },
   },

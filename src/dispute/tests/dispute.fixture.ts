@@ -38,6 +38,7 @@ export function orderRow(overrides: Record<string, unknown> = {}) {
     buyer: { userId: buyerUser.id },
     farm: { owner: { userId: 'farmer-user' } },
     handover: { agent: { userId: 'agent-user' } },
+    commissionAgent: null as { userId: string } | null,
     dispute: null as { id: string } | null,
     payoutItems: [] as { id: string }[],
     ...overrides,

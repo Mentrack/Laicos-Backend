@@ -38,7 +38,7 @@ function row() {
     additionalSpecs: null,
     logisticsNotes: null,
     requiredDate: new Date('2026-11-15T00:00:00.000Z'),
-    status: SourcingRequestStatus.NEW,
+    status: SourcingRequestStatus.PENDING,
     createdAt: new Date('2026-10-08T09:00:00.000Z'),
     updatedAt: new Date('2026-10-08T09:00:00.000Z'),
   };
@@ -96,7 +96,7 @@ describe('SourcingRequestService', () => {
       );
       expect(result).toMatchObject({
         requestNumber: 'REQ-000015',
-        status: SourcingRequestStatus.NEW,
+        status: SourcingRequestStatus.PENDING,
         checkoutId: null,
         requiredDate: '2026-11-15',
       });

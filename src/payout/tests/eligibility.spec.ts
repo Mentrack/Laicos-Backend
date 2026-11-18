@@ -75,11 +75,21 @@ describe('eligibleItems', () => {
     });
   });
 
-  it('pays the handover agent the commission, and only when there is one', () => {
+  it('pays the commission agent, else the handover agent, and only when there is one', () => {
     expect(eligibleItems(now, 24, PayoutItemKind.COMMISSION)).toEqual({
       ...common(PayoutItemKind.COMMISSION),
       agentCommission: { gt: 0 },
-      handover: { is: { agent: { is: { user: accountPastHold } } } },
+      AND: [
+        {
+          OR: [
+            { commissionAgent: { is: { user: accountPastHold } } },
+            {
+              commissionAgentId: null,
+              handover: { is: { agent: { is: { user: accountPastHold } } } },
+            },
+          ],
+        },
+      ],
     });
   });
 

@@ -1,15 +1,16 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import {
   AuditActorType,
+  AuditCategory,
   BuyerType,
   CheckoutStatus,
-  FarmVerificationStatus,
+  NotificationType,
   OrderStatus,
   Prisma,
   ProduceStatus,
-  ProduceType,
+  SourcingOfferStatus,
   SourcingRequestStatus,
   SourcingUnit,
   type User,
@@ -17,37 +18,22 @@ import {
 import { AuditService } from '../../audit/audit.service';
 import { addDays, lagosToday } from '../../common/dates';
 import { collect } from '../../common/tests/collect';
-import { testCheckoutConfig } from '../../payment/tests/checkout-config.fixture';
+import { NotificationService } from '../../notifications/notification.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminSourcingRequestService } from '../admin-sourcing-request.service';
 import { AdminSourcingFilterDto } from '../dto/admin-sourcing-request.dto';
 
 const admin = { id: 'admin-1' } as User;
 const requestId = '11111111-1111-4111-8111-111111111111';
-const produceId = '0b7f5a52-6f3c-4f1e-9a57-2f7d8b3c1e22';
 const buyerId = 'buyer-1';
 const agentId = 'agent-1';
 const idempotencyKey = '22222222-2222-4222-8222-222222222222';
 
-function listing(quantity = 20) {
+function offerFarm() {
   return {
-    id: produceId,
-    name: 'White maize',
-    unit: 'bags',
-    status: ProduceStatus.PUBLISHED,
-    floatingQuantity: quantity,
-    actualQuantity: quantity,
-    farmId: 'farm-1',
-    type: ProduceType.LOCAL,
-    pricePerUnit: new Prisma.Decimal('100.00'),
-    farm: {
-      farmCode: 'LF-000001',
-      name: 'Green Farm',
-      clusterId: 'cluster-1',
-      verificationStatus: FarmVerificationStatus.VERIFIED,
-      cluster: { id: 'cluster-1' },
-      owner: { user: { firstName: 'Ada', lastName: 'Okafor' } },
-    },
+    farmCode: 'LF-000001',
+    name: 'Green Farm',
+    owner: { user: { firstName: 'Ada', lastName: 'Okafor' } },
   };
 }
 
@@ -74,9 +60,13 @@ function requestRow(overrides: Record<string, unknown> = {}, selected = 10) {
     closeReason: null,
     allocations: [
       {
-        produceId,
+        id: 'offer-0',
+        farmId: 'farm-1',
         quantity: selected,
-        produce: listing(),
+        unit: SourcingUnit.BAGS,
+        status: SourcingOfferStatus.ACCEPTED,
+        agreedUnitPrice: null,
+        farm: offerFarm(),
       },
     ],
     checkouts: [],
@@ -161,6 +151,7 @@ describe('AdminSourcingRequestService', () => {
   const payment = { updateMany: jest.fn() };
   const cartItem = { deleteMany: jest.fn() };
   const auditEvent = { createMany: jest.fn() };
+  const sourcingContract = { updateMany: jest.fn() };
   const tx = {
     $executeRaw: jest.fn(),
     sourcingRequest,
@@ -173,6 +164,7 @@ describe('AdminSourcingRequestService', () => {
     payment,
     cartItem,
     auditEvent,
+    sourcingContract,
   };
   const database = {
     ...tx,
@@ -182,15 +174,17 @@ describe('AdminSourcingRequestService', () => {
     ) => (typeof arg === 'function' ? arg(tx) : Promise.all(arg)),
   };
   const audit = { record: jest.fn(), findForRequest: jest.fn() };
+  const notifications = { notify: jest.fn(), dispatch: jest.fn() };
   const service = new AdminSourcingRequestService(
     database as unknown as PrismaService,
     audit as unknown as AuditService,
-    testCheckoutConfig(),
+    notifications as unknown as NotificationService,
   );
 
   beforeEach(() => {
     jest.resetAllMocks();
     audit.findForRequest.mockResolvedValue({ data: [], metaData: {} });
+    notifications.notify.mockResolvedValue(['delivery-1']);
     order.findMany.mockResolvedValue([]);
     sourcingRequest.findUnique.mockImplementation(
       (args: { include?: { buyer?: unknown }; select?: unknown }) => {
@@ -211,6 +205,81 @@ describe('AdminSourcingRequestService', () => {
     );
   });
 
+  it('exposes the request-level conversation id', async () => {
+    sourcingRequest.findUnique.mockImplementation(() =>
+      requestRow({ conversation: { id: 'conversation-1' } }),
+    );
+    const detail = await service.findOne(requestId);
+    expect(detail.conversationId).toBe('conversation-1');
+    expect(detail.orders).toEqual([]);
+  });
+
+  it('has a null conversation id before the agent accepts', async () => {
+    const detail = await service.findOne(requestId);
+    expect(detail.conversationId).toBeNull();
+  });
+
+  it('counts only accepted offers towards coverage and shows each offer state', async () => {
+    const offer = (
+      id: string,
+      quantity: number,
+      status: SourcingOfferStatus,
+      agreedUnitPrice: Prisma.Decimal | null,
+    ) => ({
+      id,
+      farmId: 'farm-1',
+      quantity,
+      unit: SourcingUnit.BAGS,
+      status,
+      agreedUnitPrice,
+      farm: offerFarm(),
+    });
+    sourcingRequest.findUnique.mockImplementation(() =>
+      requestRow({
+        allocations: [
+          offer(
+            'offer-1',
+            4,
+            SourcingOfferStatus.ACCEPTED,
+            new Prisma.Decimal('120'),
+          ),
+          offer('offer-2', 5, SourcingOfferStatus.OFFERED, null),
+          offer('offer-3', 6, SourcingOfferStatus.REJECTED, null),
+        ],
+      }),
+    );
+
+    const detail = await service.findOne(requestId);
+
+    expect(detail.coverage).toEqual({
+      requested: 10,
+      selected: 4,
+      remaining: 6,
+    });
+    expect(detail.allocations).toEqual([
+      {
+        id: 'offer-1',
+        status: SourcingOfferStatus.ACCEPTED,
+        agreedUnitPrice: '120.00',
+        farmId: 'farm-1',
+        farmCode: 'LF-000001',
+        farmName: 'Green Farm',
+        farmerName: 'Ada Okafor',
+        quantity: 4,
+        unit: SourcingUnit.BAGS,
+      },
+      expect.objectContaining({
+        id: 'offer-2',
+        status: SourcingOfferStatus.OFFERED,
+        agreedUnitPrice: null,
+      }),
+      expect.objectContaining({
+        id: 'offer-3',
+        status: SourcingOfferStatus.REJECTED,
+      }),
+    ]);
+  });
+
   it("exposes the assigned agent's cluster code", async () => {
     const detail = await service.findOne(requestId);
 
@@ -218,28 +287,6 @@ describe('AdminSourcingRequestService', () => {
       clusterName: 'Kano',
       clusterCode: 'CL-000001',
     });
-  });
-
-  it('drops a listing whose name is not the requested produce', async () => {
-    agent.findUnique.mockResolvedValue({
-      id: agentId,
-      cluster: { id: 'cluster-1' },
-    });
-    produce.findMany.mockResolvedValue([
-      listing(),
-      { ...listing(), id: 'other', name: 'White maize flour' },
-    ]);
-    const rows = await service.listings(requestId);
-    expect(rows.map((row) => row.name)).toEqual(['White maize']);
-  });
-
-  it('refuses matching before an agent is assigned', async () => {
-    sourcingRequest.findUnique.mockResolvedValue(
-      requestRow({ assignedAgentId: null }),
-    );
-    await expect(service.listings(requestId)).rejects.toThrow(
-      'Assign an agent before matching listings',
-    );
   });
 
   it('requires every search token to match', async () => {
@@ -290,7 +337,7 @@ describe('AdminSourcingRequestService', () => {
     it('writes every matching request, unpaginated, newest first', async () => {
       sourcingRequest.findMany.mockResolvedValue([
         requestRow({
-          status: SourcingRequestStatus.NEW,
+          status: SourcingRequestStatus.PENDING,
           assignedAgent: null,
           escalatedAt: new Date('2026-10-09T12:00:00.000Z'),
           createdAt: new Date('2026-10-09T23:30:00.000Z'),
@@ -298,17 +345,17 @@ describe('AdminSourcingRequestService', () => {
       ]);
 
       const csv = await collect(
-        service.exportCsv({ status: SourcingRequestStatus.NEW }),
+        service.exportCsv({ status: SourcingRequestStatus.PENDING }),
       );
 
       expect(csv).toBe(
         'Request ID,Buyer,Produce,Quantity,Unit,Destination,Agent,Agent ID,Status,Shipment,Escalated,Date\r\n' +
-          'REQ-000001,Ada Okafor,White maize,10,BAGS,Kano,,,NEW,,Yes,2026-10-10\r\n',
+          'REQ-000001,Ada Okafor,White maize,10,BAGS,Kano,,,PENDING,,Yes,2026-10-10\r\n',
       );
       const args = sourcingRequest.findMany.mock.calls[0][0] as object;
       expect(args).toEqual(
         expect.objectContaining({
-          where: { status: SourcingRequestStatus.NEW },
+          where: { status: SourcingRequestStatus.PENDING },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 1000,
         }),
@@ -323,171 +370,6 @@ describe('AdminSourcingRequestService', () => {
       });
       expect(error?.property).toBe('page');
     });
-  });
-
-  it('refuses to replace the selection after a checkout is placed', async () => {
-    sourcingRequest.findUnique.mockResolvedValue(
-      requestRow({ status: SourcingRequestStatus.AWAITING_BUYER }),
-    );
-    await expect(
-      service.save(admin, requestId, { items: [] }),
-    ).rejects.toBeInstanceOf(ConflictException);
-    expect(sourcingAllocation.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('writes one audit row when the saved group changes', async () => {
-    agent.findUniqueOrThrow.mockResolvedValue({
-      id: agentId,
-      cluster: { id: 'cluster-1' },
-    });
-    sourcingAllocation.findMany.mockResolvedValue([]);
-    produce.findUnique.mockResolvedValue(listing());
-    await service.save(admin, requestId, {
-      items: [{ produceId, quantity: 10 }],
-    });
-    expect(sourcingAllocation.deleteMany).toHaveBeenCalled();
-    expect(sourcingAllocation.createMany).toHaveBeenCalledWith({
-      data: [{ sourcingRequestId: requestId, produceId, quantity: 10 }],
-    });
-    expect(audit.record).toHaveBeenCalledTimes(1);
-    expect(audit.record).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        actorUserId: 'admin-1',
-        title: 'Supply selection updated',
-      }),
-    );
-  });
-
-  it('writes nothing when the saved group is unchanged', async () => {
-    agent.findUniqueOrThrow.mockResolvedValue({
-      id: agentId,
-      cluster: { id: 'cluster-1' },
-    });
-    sourcingAllocation.findMany.mockResolvedValue([
-      { produceId, quantity: 10 },
-    ]);
-    produce.findUnique.mockResolvedValue(listing());
-    await service.save(admin, requestId, {
-      items: [{ produceId, quantity: 10 }],
-    });
-    expect(audit.record).not.toHaveBeenCalled();
-  });
-
-  it('does not reserve stock when the selection is short', async () => {
-    sourcingRequest.findUnique.mockImplementation(
-      (args: { include?: { allocations?: unknown }; select?: unknown }) => {
-        if (args.include?.allocations) {
-          return requestRow({}, 4);
-        }
-        if (args.select) {
-          return {
-            closedAt: null,
-            closeReason: null,
-            assignedAgentId: agentId,
-            _count: { allocations: 1 },
-            checkouts: [],
-          };
-        }
-        return requestRow({}, 4);
-      },
-    );
-    checkout.findUnique.mockResolvedValue(null);
-    await expect(
-      service.confirm(admin, requestId, idempotencyKey, {
-        addressId: 'address-1',
-        deliveryDate: addDays(lagosToday(), 2),
-        expectedTotal: 4500,
-      }),
-    ).rejects.toThrow('The selection does not cover the request');
-    expect(produce.updateMany).not.toHaveBeenCalled();
-    expect(checkout.create).not.toHaveBeenCalled();
-    expect(cartItem.deleteMany).not.toHaveBeenCalled();
-  });
-
-  it('places one checkout for the saved group and leaves the cart', async () => {
-    sourcingRequest.findUnique.mockImplementation(
-      (args: {
-        include?: { allocations?: unknown; buyer?: unknown };
-        select?: unknown;
-      }) => {
-        if (args.select) {
-          return {
-            closedAt: null,
-            closeReason: null,
-            assignedAgentId: agentId,
-            _count: { allocations: 1 },
-            checkouts: [
-              { status: CheckoutStatus.AWAITING_PAYMENT, orders: [] },
-            ],
-          };
-        }
-        if (args.include?.buyer) {
-          return requestRow();
-        }
-        if (args.include?.allocations) {
-          return requestRow();
-        }
-        return requestRow();
-      },
-    );
-    checkout.findUnique.mockResolvedValue(null);
-    address.findFirst.mockResolvedValue({
-      id: 'address-1',
-      label: 'HQ',
-      street: '1 Road',
-      contactName: null,
-      contactPhone: null,
-      state: { name: 'Lagos' },
-      lga: { name: 'Ikeja' },
-    });
-    produce.updateMany.mockResolvedValue({ count: 1 });
-    produce.findUnique.mockResolvedValue(listing());
-    checkout.create.mockResolvedValue(placedCheckout());
-    const result = await service.confirm(admin, requestId, idempotencyKey, {
-      addressId: 'address-1',
-      deliveryDate: addDays(lagosToday(), 2),
-      expectedTotal: 4500,
-    });
-    expect(result.id).toBe('checkout-1');
-    expect(checkout.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ sourcingRequestId: requestId }),
-      }),
-    );
-    expect(cartItem.deleteMany).not.toHaveBeenCalled();
-    expect(audit.record).toHaveBeenCalledWith(
-      tx,
-      expect.objectContaining({
-        actorUserId: 'admin-1',
-        title: 'Supply confirmed',
-      }),
-    );
-  });
-
-  it('replays a confirm that already belongs to this request', async () => {
-    checkout.findUnique.mockResolvedValue(placedCheckout());
-    const result = await service.confirm(admin, requestId, idempotencyKey, {
-      addressId: 'address-1',
-      deliveryDate: addDays(lagosToday(), 2),
-      expectedTotal: 4500,
-    });
-    expect(result.checkoutNumber).toBe('CHK-000001');
-    expect(produce.updateMany).not.toHaveBeenCalled();
-  });
-
-  it('rejects an idempotency key that belongs to another checkout', async () => {
-    checkout.findUnique.mockResolvedValue({
-      ...placedCheckout(),
-      sourcingRequestId: 'other-request',
-    });
-    await expect(
-      service.confirm(admin, requestId, idempotencyKey, {
-        addressId: 'address-1',
-        deliveryDate: addDays(lagosToday(), 2),
-        expectedTotal: 4500,
-      }),
-    ).rejects.toThrow('Idempotency-Key already belongs to another checkout');
   });
 
   it('releases an unpaid checkout when the request is closed', async () => {
@@ -508,7 +390,7 @@ describe('AdminSourcingRequestService', () => {
             checkouts: [],
           };
         }
-        return requestRow({ status: SourcingRequestStatus.AWAITING_BUYER });
+        return requestRow({ status: SourcingRequestStatus.CONFIRMED });
       },
     );
     checkout.findFirst.mockResolvedValue({
@@ -557,6 +439,200 @@ describe('AdminSourcingRequestService', () => {
         summary: 'Buyer withdrew. Unpaid checkout released',
       }),
     );
+  });
+
+  describe('assign', () => {
+    const asAgent = (isVerified = true) =>
+      agent.findUnique.mockResolvedValue({
+        id: agentId,
+        userId: 'agent-user-1',
+        agentId: 'AG-000001',
+        isVerified,
+        user: { firstName: 'Tunde', lastName: 'Bello' },
+      });
+    const withStatus = (
+      status: SourcingRequestStatus,
+      assignedAgentId = null,
+    ) =>
+      sourcingRequest.findUnique.mockImplementation(() =>
+        requestRow({ status, assignedAgentId }),
+      );
+
+    it('assigns a PENDING request, starts the window and notifies the agent', async () => {
+      asAgent();
+      withStatus(SourcingRequestStatus.PENDING);
+      await service.assign(admin, requestId, { agentId });
+      expect(sourcingRequest.update).toHaveBeenCalledWith({
+        where: { id: requestId },
+        data: { status: SourcingRequestStatus.ASSIGNED },
+      });
+      expect(sourcingRequest.update).toHaveBeenCalledWith({
+        where: { id: requestId },
+        data: { assignedAgentId: agentId, assignedAt: expect.any(Date) },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          category: AuditCategory.ASSIGNMENT,
+          title: 'Agent assigned',
+        }),
+      );
+      expect(notifications.notify).toHaveBeenCalledWith(
+        {
+          userIds: ['agent-user-1'],
+          type: NotificationType.SOURCING_ASSIGNED,
+          params: {
+            requestId,
+            requestNumber: 'REQ-000001',
+            produceName: 'White maize',
+          },
+        },
+        tx,
+      );
+      expect(notifications.dispatch).toHaveBeenCalledWith(['delivery-1']);
+    });
+
+    it('resets assignedAt on a reassignment from ASSIGNED', async () => {
+      asAgent();
+      withStatus(SourcingRequestStatus.ASSIGNED, 'agent-0' as never);
+      await service.assign(admin, requestId, { agentId });
+      expect(sourcingRequest.update).toHaveBeenCalledWith({
+        where: { id: requestId },
+        data: { assignedAgentId: agentId, assignedAt: expect.any(Date) },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({ title: 'Agent reassigned' }),
+      );
+    });
+
+    it.each([
+      SourcingRequestStatus.FINDING_SUPPLY,
+      SourcingRequestStatus.NEGOTIATING,
+      SourcingRequestStatus.CONFIRMED,
+      SourcingRequestStatus.COMPLETED,
+    ])('refuses %s with 409', async (status) => {
+      asAgent();
+      withStatus(status);
+      await expect(
+        service.assign(admin, requestId, { agentId }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(notifications.dispatch).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unverified agent with 409', async () => {
+      asAgent(false);
+      withStatus(SourcingRequestStatus.PENDING);
+      await expect(
+        service.assign(admin, requestId, { agentId }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(sourcingRequest.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses an unknown agent with 404', async () => {
+      agent.findUnique.mockResolvedValue(null);
+      withStatus(SourcingRequestStatus.PENDING);
+      await expect(
+        service.assign(admin, requestId, { agentId }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('close', () => {
+    const withStatus = (status: SourcingRequestStatus) =>
+      sourcingRequest.findUnique.mockImplementation(() =>
+        requestRow({ status }),
+      );
+
+    it.each([
+      SourcingRequestStatus.COMPLETED,
+      SourcingRequestStatus.FULFILLED,
+      SourcingRequestStatus.CLOSED,
+    ])('refuses %s with 409', async (status) => {
+      withStatus(status);
+      await expect(
+        service.close(admin, requestId, { reason: 'x' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(sourcingRequest.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      SourcingRequestStatus.PENDING,
+      SourcingRequestStatus.ASSIGNED,
+      SourcingRequestStatus.FINDING_SUPPLY,
+      SourcingRequestStatus.NEGOTIATING,
+      SourcingRequestStatus.CONFIRMED,
+    ])('closes from %s', async (status) => {
+      withStatus(status);
+      checkout.findFirst.mockResolvedValue(null);
+      await service.close(admin, requestId, { reason: 'x' });
+      expect(sourcingRequest.update).toHaveBeenCalledWith({
+        where: { id: requestId },
+        data: { status: SourcingRequestStatus.CLOSED },
+      });
+    });
+
+    it('voids the live contract when closing a CONFIRMED request', async () => {
+      withStatus(SourcingRequestStatus.CONFIRMED);
+      checkout.findFirst.mockResolvedValue(null);
+      await service.close(admin, requestId, { reason: 'x' });
+      expect(sourcingContract.updateMany).toHaveBeenCalledWith({
+        where: { sourcingRequestId: requestId, voidedAt: null },
+        data: { voidedAt: expect.any(Date) },
+      });
+    });
+
+    it('takes the sourcing lock, then the checkout lock, before writing the request', async () => {
+      // The payment webhook locks the checkout and then writes the request
+      // row; taking the checkout lock first here avoids a deadlock with it.
+      withStatus(SourcingRequestStatus.CONFIRMED);
+      checkout.findFirst.mockResolvedValue({
+        id: 'checkout-1',
+        status: CheckoutStatus.AWAITING_PAYMENT,
+      });
+      checkout.update.mockResolvedValue(placedCheckout());
+      order.findMany.mockResolvedValue([]);
+      await service.close(admin, requestId, { reason: 'x' });
+
+      const lockKeys = tx.$executeRaw.mock.calls.map(
+        (call: unknown[]) => call[1],
+      );
+      expect(lockKeys).toEqual([
+        `sourcing:${requestId}`,
+        'checkout:checkout-1',
+      ]);
+      const checkoutLockAt = tx.$executeRaw.mock.invocationCallOrder[1];
+      const firstRequestWrite = Math.min(
+        ...sourcingRequest.update.mock.invocationCallOrder,
+      );
+      expect(checkoutLockAt).toBeLessThan(firstRequestWrite);
+    });
+  });
+
+  describe('escalate', () => {
+    const withStatus = (status: SourcingRequestStatus) =>
+      sourcingRequest.findUnique.mockImplementation(() =>
+        requestRow({ status }),
+      );
+
+    it.each([SourcingRequestStatus.FULFILLED, SourcingRequestStatus.CLOSED])(
+      'refuses %s',
+      async (status) => {
+        withStatus(status);
+        await expect(service.escalate(admin, requestId)).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+      },
+    );
+
+    it('allows a COMPLETED request', async () => {
+      withStatus(SourcingRequestStatus.COMPLETED);
+      await service.escalate(admin, requestId);
+      expect(sourcingRequest.update).toHaveBeenCalledWith({
+        where: { id: requestId },
+        data: { escalatedAt: expect.any(Date) },
+      });
+    });
   });
 
   it('does not write a second escalate row', async () => {

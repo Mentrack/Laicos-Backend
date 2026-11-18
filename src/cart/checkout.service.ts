@@ -5,12 +5,11 @@ import {
 } from '@nestjs/common';
 import {
   AuditActorType,
-  AuditCategory,
-  AuditResource,
   CheckoutStatus,
   Role,
   type User,
 } from '../../generated/client';
+import { advisoryLock } from '../common/advisory-lock';
 import { requireBuyer } from '../buyer/utils/require-buyer';
 import {
   orderLine,
@@ -26,10 +25,7 @@ import {
 } from '../payment/utils/checkout-transaction';
 import { releaseCheckout } from '../payment/utils/release-checkout';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  recordLinkedAudit,
-  syncSourcingRequest,
-} from '../sourcing-request/utils/sync-sourcing-request';
+import { lapseSourcedCheckout } from '../sourcing-request/utils/sync-sourcing-request';
 import { CreateCheckoutDto } from './dto';
 import { CART_ITEM_INCLUDE } from './formatters/cart.formatter';
 import {
@@ -161,6 +157,15 @@ export class CheckoutService {
 
   private release(userId: string, buyerId: string, id: string) {
     return this.database.$transaction(async (tx) => {
+      // Sourcing flows lock the request, then its checkouts; match that
+      // order. The request id never changes on a checkout, so read it first.
+      const owned = await tx.checkout.findFirst({
+        where: { id, buyerId },
+        select: { sourcingRequestId: true },
+      });
+      if (owned?.sourcingRequestId) {
+        await advisoryLock(tx, `sourcing:${owned.sourcingRequestId}`);
+      }
       await lockCheckout(tx, id);
       const checkout = await tx.checkout.findFirst({
         where: { id, buyerId },
@@ -182,20 +187,11 @@ export class CheckoutService {
         { type: AuditActorType.BUYER, userId },
       );
       if (checkout.sourcingRequestId) {
-        await syncSourcingRequest(tx, checkout.sourcingRequestId);
-        await recordLinkedAudit(tx, {
+        await lapseSourcedCheckout(tx, checkout.sourcingRequestId, {
           actorType: AuditActorType.BUYER,
           actorUserId: userId,
-          farmerId: null,
-          agentId: null,
-          farmId: null,
-          category: AuditCategory.ORDER,
-          title: 'Checkout cancelled',
+          title: 'Checkout cancelled by buyer',
           summary: 'Cancelled by buyer',
-          actionLabel: 'View request',
-          resource: AuditResource.SOURCING_REQUEST,
-          resourceId: checkout.sourcingRequestId,
-          sourcingRequestId: checkout.sourcingRequestId,
         });
       }
       return formatCheckout(released);

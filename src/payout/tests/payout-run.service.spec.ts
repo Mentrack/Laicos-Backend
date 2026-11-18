@@ -23,6 +23,7 @@ type FakeOrder = {
   id: string;
   farmer: string;
   agent: string | null;
+  sourcingAgent?: string;
   totalPrice: Prisma.Decimal;
   agentCommission: Prisma.Decimal;
   refundPercent?: string;
@@ -44,10 +45,10 @@ function payeeOf(where: Record<string, unknown>): string {
   if (farm) {
     return farm.owner.user.id;
   }
-  const handover = where.handover as {
-    is: { agent: { is: { user: { id: string } } } };
-  };
-  return handover.is.agent.is.user.id;
+  const [{ OR }] = where.AND as [
+    { OR: [{ commissionAgent: { is: { user: { id: string } } } }] },
+  ];
+  return OR[0].commissionAgent.is.user.id;
 }
 
 function prismaError(code: string) {
@@ -89,7 +90,9 @@ describe('PayoutRunService', () => {
   let created: number;
 
   function payeeOfOrder(order: FakeOrder, kind: PayoutItemKind) {
-    return kind === PayoutItemKind.PRODUCE ? order.farmer : order.agent;
+    return kind === PayoutItemKind.PRODUCE
+      ? order.farmer
+      : (order.sourcingAgent ?? order.agent);
   }
 
   beforeEach(() => {
@@ -119,7 +122,9 @@ describe('PayoutRunService', () => {
     );
     database.order.findMany.mockImplementation(
       ({ where }: { where: Where }) => {
-        if (!where.AND) {
+        // Discovery passes eligibleItems alone; the per-payee read wraps it
+        // with payeeIs in a two-entry AND.
+        if (where.AND?.length !== 2) {
           const kind = kindOf(where);
           return Promise.resolve(
             orders
@@ -128,6 +133,9 @@ describe('PayoutRunService', () => {
                 farm: { owner: { userId: order.farmer } },
                 handover: order.agent
                   ? { agent: { userId: order.agent } }
+                  : null,
+                commissionAgent: order.sourcingAgent
+                  ? { userId: order.sourcingAgent }
                   : null,
               })),
           );
@@ -151,6 +159,9 @@ describe('PayoutRunService', () => {
                 : null,
               handover: order.agent
                 ? { agentId: `agent-${order.agent}` }
+                : null,
+              commissionAgentId: order.sourcingAgent
+                ? `agent-${order.sourcingAgent}`
                 : null,
               payoutItems: (order.reversedAt ?? []).map((updatedAt) => ({
                 payout: { updatedAt },
@@ -253,6 +264,48 @@ describe('PayoutRunService', () => {
       expect.objectContaining({ amount: 900_000, recipient: 'RCP_user-f' }),
       expect.objectContaining({ amount: 20_000, recipient: 'RCP_user-g' }),
     ]);
+  });
+
+  it('pays a sourced order commission to the sourcing agent, not the handover agent', async () => {
+    orders = [
+      {
+        id: 'o1',
+        farmer: 'user-f',
+        agent: 'user-h',
+        sourcingAgent: 'user-s',
+        totalPrice: d('4000.00'),
+        agentCommission: d('200.00'),
+      },
+    ];
+    await service.run(now);
+    const commission = createdData().filter(
+      (data) => data.payeeRole === PayeeRole.AGENT,
+    );
+    expect(commission).toHaveLength(1);
+    expect(commission[0]).toMatchObject({
+      payeeId: 'user-s',
+      amount: d('200.00'),
+    });
+    expect(Logger.prototype.warn).not.toHaveBeenCalled();
+  });
+
+  it('pays a sourced order with no handover to the sourcing agent without warning', async () => {
+    orders = [
+      {
+        id: 'o1',
+        farmer: 'user-f',
+        agent: null,
+        sourcingAgent: 'user-s',
+        totalPrice: d('4000.00'),
+        agentCommission: d('200.00'),
+      },
+    ];
+    await service.run(now);
+    expect(createdData().map((data) => data.payeeId)).toEqual([
+      'user-f',
+      'user-s',
+    ]);
+    expect(Logger.prototype.warn).not.toHaveBeenCalled();
   });
 
   it('takes each payee lock in its own transaction, in sorted user id order', async () => {

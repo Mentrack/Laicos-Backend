@@ -193,6 +193,7 @@ model Farm {
   referralAgent        Agent?                 @relation("FarmReferral", fields: [referralAgentId], references: [id], onDelete: SetNull)
   produce              Produce[]
   orders               Order[]
+  sourcingAllocations  SourcingAllocation[]
   verifications        FarmVerification[]
   auditEvents          AuditEvent[]
   createdAt            DateTime               @default(now())
@@ -204,24 +205,26 @@ model Farm {
 }
 
 model State {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  lgas      Lga[]
-  farms     Farm[]
-  agents    Agent[]
-  buyers    Buyer[]
-  addresses Address[]
+  id               String            @id @default(uuid())
+  name             String            @unique
+  lgas             Lga[]
+  farms            Farm[]
+  agents           Agent[]
+  buyers           Buyer[]
+  addresses        Address[]
+  sourcingRequests SourcingRequest[]
 }
 
 model Lga {
-  id        String    @id @default(uuid())
-  stateId   String
-  state     State     @relation(fields: [stateId], references: [id], onDelete: Restrict)
-  name      String
-  farms     Farm[]
-  agents    Agent[]
-  buyers    Buyer[]
-  addresses Address[]
+  id               String            @id @default(uuid())
+  stateId          String
+  state            State             @relation(fields: [stateId], references: [id], onDelete: Restrict)
+  name             String
+  farms            Farm[]
+  agents           Agent[]
+  buyers           Buyer[]
+  addresses        Address[]
+  sourcingRequests SourcingRequest[]
 
   @@unique([stateId, name])
 }
@@ -265,6 +268,8 @@ model Agent {
   referredFarms              Farm[]              @relation("FarmReferral")
   auditEvents                AuditEvent[]
   assignedSourcingRequests   SourcingRequest[]
+  sourcingDeclines           SourcingDecline[]
+  commissionOrders           Order[]             @relation("OrderCommissionAgent")
   createdAt                  DateTime            @default(now())
   updatedAt                  DateTime            @updatedAt
 
@@ -472,8 +477,14 @@ model Order {
   handover           OrderHandover?
   // AGENT_COMMISSION_PERCENT of totalPrice, snapshotted at checkout.
   agentCommission    Decimal         @db.Decimal(12, 2)
+  // Sourcing orders only: the agent who earns the commission, since the
+  // farm's cluster agent isn't the one who sourced it.
+  commissionAgentId  String?
+  commissionAgent    Agent?          @relation("OrderCommissionAgent", fields: [commissionAgentId], references: [id], onDelete: Restrict)
   // Set when the buyer confirms delivery (placeholder until logistics); starts the dispute window.
   fulfilledAt        DateTime?
+  // Points at a hidden SOURCED listing; set only by a sourcing checkout.
+  sourced            Boolean         @default(false)
   payoutItems        PayoutItem[]
   refunds            Refund[]
   auditEvents        AuditEvent[]
@@ -486,6 +497,7 @@ model Order {
   @@index([produceId])
   @@index([buyerId])
   @@index([checkoutId])
+  @@index([commissionAgentId])
 }
 
 model OrderChecklist {
@@ -593,11 +605,15 @@ model Checkout {
   expiresAt            DateTime
   paidAt               DateTime?
   deliveryDate         DateTime         @db.Date
+  // End of the delivery window; null for a single-day delivery.
+  deliveryDateTo       DateTime?        @db.Date
   // Snapshot of the chosen Address, as names, so later edits don't rewrite history.
   deliveryLabel        String
   deliveryStreet       String
-  deliveryState        String
-  deliveryLga          String
+  deliveryCountry      String           @default("Nigeria")
+  // Null for sourcing deliveries outside Nigeria.
+  deliveryState        String?
+  deliveryLga          String?
   deliveryContactName  String?
   deliveryContactPhone String?
   payments             Payment[]
@@ -864,75 +880,138 @@ model DisputePhoto {
 // A buyer's request for produce they couldn't find listed. An admin assigns
 // an agent, saves a group of listings, and confirm places one checkout.
 model SourcingRequest {
-  id                  String                @id @default(uuid())
+  id                   String                @id @default(uuid())
   // Public code (REQ-000123), backed by a hand-made sequence like Order.orderNumber.
-  requestNumber       String                @unique @default(dbgenerated("('REQ-'::text || lpad((nextval('\"SourcingRequest_requestNumber_seq\"'::regclass))::text, 6, '0'::text))"))
-  buyerId             String
+  requestNumber        String                @unique @default(dbgenerated("('REQ-'::text || lpad((nextval('\"SourcingRequest_requestNumber_seq\"'::regclass))::text, 6, '0'::text))"))
+  buyerId              String
   // Requests are history, like orders.
-  buyer               Buyer                 @relation(fields: [buyerId], references: [id], onDelete: Restrict)
+  buyer                Buyer                 @relation(fields: [buyerId], references: [id], onDelete: Restrict)
   // Free text: sourcing can be anything a farm produces.
-  produceName         String
-  quantity            Float
-  unit                SourcingUnit
-  quality             QualityGrade
-  packaging           PackagingType
-  condition           ProduceCondition
-  additionalSpecs     String?
-  deliveryDestination String
-  requiredDate        DateTime              @db.Date
-  timeline            SourcingTimeline
-  logisticsNotes      String?
-  status              SourcingRequestStatus @default(NEW)
-  assignedAgentId     String?
-  assignedAgent       Agent?                @relation(fields: [assignedAgentId], references: [id], onDelete: Restrict)
-  escalatedAt         DateTime?
-  closedAt            DateTime?
-  closeReason         String?
-  allocations         SourcingAllocation[]
-  checkouts           Checkout[]
-  auditEvents         AuditEvent[]
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
+  produceName          String
+  quantity             Float
+  unit                 SourcingUnit
+  quality              QualityGrade
+  packaging            PackagingType
+  condition            ProduceCondition
+  additionalSpecs      String?
+  deliveryDestination  String
+  requiredDate         DateTime              @db.Date
+  // No longer asked of buyers; kept for requests created before the redesign.
+  timeline             SourcingTimeline?
+  logisticsNotes       String?
+  status               SourcingRequestStatus @default(PENDING)
+  assignedAgentId      String?
+  assignedAgent        Agent?                @relation(fields: [assignedAgentId], references: [id], onDelete: Restrict)
+  // Starts the agent's 24h response window.
+  assignedAt           DateTime?
+  // The buyer total, set when the agent confirms.
+  agreedPrice          Decimal?              @db.Decimal(12, 2)
+  deliveryCountry      String?
+  deliveryAddress      String?
+  deliveryRegion       String?
+  deliveryStateId      String?
+  deliveryState        State?                @relation(fields: [deliveryStateId], references: [id], onDelete: Restrict)
+  deliveryLgaId        String?
+  deliveryLga          Lga?                  @relation(fields: [deliveryLgaId], references: [id], onDelete: Restrict)
+  deliveryContactName  String?
+  deliveryContactPhone String?
+  deliveryFrom         DateTime?             @db.Date
+  deliveryTo           DateTime?             @db.Date
+  escalatedAt          DateTime?
+  closedAt             DateTime?
+  closeReason          String?
+  allocations          SourcingAllocation[]
+  checkouts            Checkout[]
+  declines             SourcingDecline[]
+  contracts            SourcingContract[]
+  conversation         Conversation?
+  auditEvents          AuditEvent[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
 
   @@index([buyerId, createdAt])
   @@index([status, createdAt])
   @@index([assignedAgentId])
 }
 
-// One chosen listing on a request. Quantity is in that listing's unit.
-// Saving it does not reserve stock; confirm does.
+// An offer to a farm. Listing stock plays no part: the farm says what it can
+// deliver, in its own unit.
 model SourcingAllocation {
-  id                String          @id @default(uuid())
+  id                String              @id @default(uuid())
   sourcingRequestId String
-  sourcingRequest   SourcingRequest @relation(fields: [sourcingRequestId], references: [id], onDelete: Cascade)
-  produceId         String
-  produce           Produce         @relation(fields: [produceId], references: [id], onDelete: Restrict)
+  sourcingRequest   SourcingRequest     @relation(fields: [sourcingRequestId], references: [id], onDelete: Cascade)
+  farmId            String
+  farm              Farm                @relation(fields: [farmId], references: [id], onDelete: Restrict)
   quantity          Int
+  unit              SourcingUnit
+  status            SourcingOfferStatus @default(OFFERED)
+  respondedAt       DateTime?
+  rejectReason      String?
+  // Per offer unit, as agreed with the farmer.
+  agreedUnitPrice   Decimal?            @db.Decimal(12, 2)
+  // The hidden SOURCED listing the second contract signature creates to back
+  // this offer's order.
+  produceId         String?
+  produce           Produce?            @relation(fields: [produceId], references: [id], onDelete: Restrict)
 
-  @@unique([sourcingRequestId, produceId])
+  @@unique([sourcingRequestId, farmId])
+  @@index([farmId])
   @@index([produceId])
 }
 
-// One per order, opened on first use by either side. The buyer side is Buyer;
+// An agent turning a request down. A null reason means the 24h window expired.
+model SourcingDecline {
+  id                String          @id @default(uuid())
+  sourcingRequestId String
+  sourcingRequest   SourcingRequest @relation(fields: [sourcingRequestId], references: [id], onDelete: Cascade)
+  agentId           String
+  agent             Agent           @relation(fields: [agentId], references: [id], onDelete: Restrict)
+  reason            String?
+  createdAt         DateTime        @default(now())
+
+  @@index([sourcingRequestId])
+  @@index([agentId])
+}
+
+// At most one live (voidedAt IS NULL) contract per request: the hand-written
+// partial unique index SourcingContract_live_key.
+model SourcingContract {
+  id                String          @id @default(uuid())
+  sourcingRequestId String
+  sourcingRequest   SourcingRequest @relation(fields: [sourcingRequestId], references: [id], onDelete: Restrict)
+  // Snapshot of parties, produce, delivery and farm lines at generation time.
+  terms             Json
+  agreedPrice       Decimal         @db.Decimal(12, 2)
+  buyerSignedAt     DateTime?
+  agentSignedAt     DateTime?
+  voidedAt          DateTime?
+  createdAt         DateTime        @default(now())
+}
+
+// One per order or per sourcing request (exactly one of the two is set: the
+// hand-written Conversation_subject_check CHECK), opened on first use by
+// either side. The buyer side is Buyer;
 // the agent side is the agent's User. Socket rooms still use User.id.
 model Conversation {
-  id              String    @id @default(uuid())
-  orderId         String    @unique
+  id                String           @id @default(uuid())
+  orderId           String?          @unique
   // Conversations are history, like orders.
-  order           Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  buyerId         String
-  buyer           Buyer     @relation("ConversationBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
+  order             Order?           @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  sourcingRequestId String?          @unique
+  sourcingRequest   SourcingRequest? @relation(fields: [sourcingRequestId], references: [id], onDelete: Restrict)
+  buyerId           String
+  buyer             Buyer            @relation("ConversationBuyer", fields: [buyerId], references: [id], onDelete: Restrict)
   // Fixed when the conversation opens and never re-resolved: a later cluster
   // agent doesn't inherit a history they weren't part of.
-  agentUserId     String
-  agentUser       User      @relation("ConversationAgent", fields: [agentUserId], references: [id], onDelete: Restrict)
-  buyerLastReadAt DateTime?
-  agentLastReadAt DateTime?
+  agentUserId       String
+  agentUser         User             @relation("ConversationAgent", fields: [agentUserId], references: [id], onDelete: Restrict)
+  buyerLastReadAt   DateTime?
+  agentLastReadAt   DateTime?
   // Null until the first message; lists sort on it without joining Message.
-  lastMessageAt   DateTime?
-  messages        Message[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  lastMessageAt     DateTime?
+  messages          Message[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([buyerId, lastMessageAt])
   @@index([agentUserId, lastMessageAt])
@@ -999,14 +1078,20 @@ enum BuyerType {
 }
 
 enum SourcingRequestStatus {
-  NEW
-  IN_REVIEW
+  PENDING
+  ASSIGNED
   FINDING_SUPPLY
-  AWAITING_BUYER
+  NEGOTIATING
   CONFIRMED
-  FULFILMENT
   COMPLETED
+  FULFILLED
   CLOSED
+}
+
+enum SourcingOfferStatus {
+  OFFERED
+  ACCEPTED
+  REJECTED
 }
 
 enum HandoverStatus {
@@ -1136,6 +1221,8 @@ enum ProduceStatus {
   PUBLISHED
   SOLD_OUT
   DISABLED
+  // Backs a sourced order. Never shown, listed, edited or carted.
+  SOURCED
 }
 
 enum ProduceCategory {
@@ -1205,6 +1292,12 @@ enum NotificationType {
   DISPUTE_RESOLVED
   REFUND_PROCESSED
   PAYOUT_PAID
+  SOURCING_ASSIGNED
+  SOURCING_UNANSWERED
+  SOURCING_OFFER
+  SOURCING_OFFER_WITHDRAWN
+  SOURCING_CONTRACT_READY
+  SOURCING_PAYMENT_READY
 }
 
 enum NotificationChannel {

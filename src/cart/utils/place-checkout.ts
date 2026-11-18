@@ -8,6 +8,7 @@ import { orderAuditEvent } from '../../order/utils/order-audit';
 import type { OrderLine } from '../../order/utils/reservation';
 import type { CheckoutConfig } from '../../payment/checkout-config';
 import { commissionFor } from '../../payment/utils/order-share';
+import type { sourcedFigures } from '../../sourcing-request/utils/sourcing-pricing';
 import {
   CHECKOUT_INCLUDE,
   type CheckoutRow,
@@ -17,8 +18,10 @@ export type DeliverySnapshot = {
   deliveryDate: Date;
   deliveryLabel: string;
   deliveryStreet: string;
-  deliveryState: string;
-  deliveryLga: string;
+  deliveryState: string | null;
+  deliveryLga: string | null;
+  deliveryCountry: string;
+  deliveryDateTo: Date | null;
   deliveryContactName: string | null;
   deliveryContactPhone: string | null;
 };
@@ -30,6 +33,12 @@ export type CheckoutDraft = {
   delivery: DeliverySnapshot;
   expectedTotal: number;
   sourcingRequestId?: string;
+  /** Agent-agreed prices: used as given instead of pricing from config. */
+  sourced?: {
+    figures: ReturnType<typeof sourcedFigures>;
+    holdMs: number;
+    commissionAgentId: string;
+  };
   placedBy: AuditActor;
 };
 
@@ -78,23 +87,14 @@ export async function resolveDelivery(
     deliveryStreet: address.street,
     deliveryState: address.state.name,
     deliveryLga: address.lga.name,
+    deliveryCountry: 'Nigeria',
+    deliveryDateTo: null,
     deliveryContactName: address.contactName,
     deliveryContactPhone: address.contactPhone,
   };
 }
 
-/**
- * Prices the reserved lines plus delivery, the service fee and the agent
- * commission and places them awaiting payment, recording each order placed.
- * The lines must come from rows the caller has just reserved (and so
- * locked), so a farmer's price edit can't slip in after the check.
- */
-export async function createCheckout(
-  tx: Prisma.TransactionClient,
-  draft: CheckoutDraft,
-  config: CheckoutConfig,
-  now: Date = new Date(),
-): Promise<CheckoutRow> {
+function cartFigures(draft: CheckoutDraft, config: CheckoutConfig) {
   const subtotal = draft.lines.reduce(
     (sum, line) => sum.add(line.totalPrice),
     new Prisma.Decimal(0),
@@ -118,17 +118,48 @@ export async function createCheckout(
       code: 'CART_PRICE_CHANGED',
     });
   }
-  const checkout = await tx.checkout.create({
-    data: {
-      buyerId: draft.buyerId,
-      idempotencyKey: draft.idempotencyKey,
-      status: CheckoutStatus.AWAITING_PAYMENT,
+  return {
+    figures: {
       subtotal,
       deliveryFee: config.deliveryFee,
       serviceFee,
       agentCommission,
       totalPrice,
-      expiresAt: new Date(now.getTime() + config.holdMinutes * 60_000),
+    },
+    commissions,
+  };
+}
+
+/**
+ * Prices the lines plus delivery, service fee and agent commission (or takes a
+ * sourced checkout's agreed figures) and places them awaiting payment.
+ * The lines must come from rows just reserved or created in this transaction,
+ * so a price edit can't slip in after the check.
+ */
+export async function createCheckout(
+  tx: Prisma.TransactionClient,
+  draft: CheckoutDraft,
+  config: CheckoutConfig,
+  now: Date = new Date(),
+): Promise<CheckoutRow> {
+  const { figures, commissions } = draft.sourced
+    ? {
+        figures: draft.sourced.figures,
+        commissions: draft.sourced.figures.commissions,
+      }
+    : cartFigures(draft, config);
+  const holdMs = draft.sourced?.holdMs ?? config.holdMinutes * 60_000;
+  const checkout = await tx.checkout.create({
+    data: {
+      buyerId: draft.buyerId,
+      idempotencyKey: draft.idempotencyKey,
+      status: CheckoutStatus.AWAITING_PAYMENT,
+      subtotal: figures.subtotal,
+      deliveryFee: figures.deliveryFee,
+      serviceFee: figures.serviceFee,
+      agentCommission: figures.agentCommission,
+      totalPrice: figures.totalPrice,
+      expiresAt: new Date(now.getTime() + holdMs),
       ...(draft.sourcingRequestId
         ? { sourcingRequestId: draft.sourcingRequestId }
         : {}),
@@ -138,6 +169,10 @@ export async function createCheckout(
           ...line,
           buyerId: draft.buyerId,
           agentCommission: commissions[index],
+          sourced: draft.sourced !== undefined,
+          ...(draft.sourced
+            ? { commissionAgentId: draft.sourced.commissionAgentId }
+            : {}),
           status: OrderStatus.AWAITING_PAYMENT,
         })),
       },

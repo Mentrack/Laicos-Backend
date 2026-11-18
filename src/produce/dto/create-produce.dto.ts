@@ -11,6 +11,7 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  NotEquals,
 } from 'class-validator';
 import {
   ProduceCategory,
@@ -62,6 +63,7 @@ export class CreateProduceDto {
   })
   @IsOptional()
   @IsEnum(ProduceStatus)
+  @NotEquals(ProduceStatus.SOURCED)
   status?: ProduceStatus;
 
   @ApiPropertyOptional({

@@ -447,6 +447,11 @@ describe('RefundService', () => {
           farm: { owner: { userId: 'user-c' } },
           handover: { agent: null },
         },
+        {
+          farm: { owner: { userId: 'user-b' } },
+          handover: { agent: { userId: 'user-x' } },
+          commissionAgent: { userId: 'user-d' },
+        },
       ]);
       const order: string[] = [];
       tx.$executeRaw.mockImplementation((_sql: unknown, key: string) => {
@@ -463,6 +468,7 @@ describe('RefundService', () => {
         select: {
           farm: { select: { owner: { select: { userId: true } } } },
           handover: { select: { agent: { select: { userId: true } } } },
+          commissionAgent: { select: { userId: true } },
         },
       });
       expect(order).toEqual([
@@ -470,6 +476,7 @@ describe('RefundService', () => {
         'payout:user:user-a',
         'payout:user:user-b',
         'payout:user:user-c',
+        'payout:user:user-d',
         'payout check',
       ]);
     });

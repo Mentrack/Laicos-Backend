@@ -34,7 +34,7 @@ export class ConversationController {
   @ApiOperation({
     summary: 'Open the conversation for an order',
     description:
-      "Between the order's buyer and its agent (the handover agent once READY, else the farm's cluster agent). Returns the existing conversation if there is one. 403 NOT_A_PARTICIPANT; 409 CONVERSATION_NOT_OPEN while unpaid, NO_AGENT_ASSIGNED when the farm is in no cluster, CONVERSATION_CLOSED when the order is already fulfilled or cancelled.",
+      "Between the order's buyer and its agent (the handover agent once READY, else the farm's cluster agent). Returns the existing conversation if there is one. An order from a sourcing request returns the request's chat and never opens a new one (409 CONVERSATION_NOT_OPEN if the request has none). 403 NOT_A_PARTICIPANT; 409 CONVERSATION_NOT_OPEN while unpaid, NO_AGENT_ASSIGNED when the farm is in no cluster, CONVERSATION_CLOSED when the order is already fulfilled or cancelled.",
   })
   @ApiEnvelope(ConversationDto)
   async open(
@@ -43,6 +43,23 @@ export class ConversationController {
   ) {
     const data = await this.conversations.open(user, orderId);
     return { data, message: 'Conversation opened' };
+  }
+
+  // Here rather than in the sourcing module: this controller already serves
+  // both roles, and ConversationService stays out of SourcingRequestModule.
+  @Get('sourcing-requests/:id/conversation')
+  @ApiOperation({
+    summary: 'Get the chat for a sourcing request',
+    description:
+      "Between the request's buyer and its agent, opened when the agent accepts the request, and reused for the request's orders. 404 SOURCING_REQUEST_NOT_FOUND unless I am the buyer or the assigned agent; 409 CONVERSATION_NOT_OPEN until the agent accepts.",
+  })
+  @ApiEnvelope(ConversationDto)
+  async findForSourcingRequest(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.conversations.findForSourcingRequest(user, id);
+    return { data, message: 'Conversation retrieved' };
   }
 
   @Get('conversations')
@@ -87,7 +104,7 @@ export class ConversationController {
   @ApiOperation({
     summary: 'Send a message',
     description:
-      'Both participants also get it as the message.created socket event. Retrying with the same clientMessageId returns the original. 409 CONVERSATION_CLOSED once the order is fulfilled or cancelled; 409 CLIENT_MESSAGE_ID_REUSED if the clientMessageId was used in another conversation.',
+      'Both participants also get it as the message.created socket event. Retrying with the same clientMessageId returns the original. 409 CONVERSATION_CLOSED once the chat is closed (see ConversationDto.isClosed); 409 CLIENT_MESSAGE_ID_REUSED if the clientMessageId was used in another conversation.',
   })
   @ApiEnvelope(MessageDto, { status: HttpStatus.CREATED })
   async send(

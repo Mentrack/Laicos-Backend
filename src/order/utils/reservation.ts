@@ -89,11 +89,12 @@ export function isOrderable(
 }
 
 export function orderRefusal(produce: ReservableProduce | null) {
-  // Drafts and unverified farms' listings are hidden, so ordering one reads
-  // as not found.
+  // Drafts, SOURCED listings and unverified farms' listings are hidden, so
+  // ordering one reads as not found.
   if (
     !produce ||
     produce.status === ProduceStatus.DRAFT ||
+    produce.status === ProduceStatus.SOURCED ||
     produce.farm.verificationStatus !== FarmVerificationStatus.VERIFIED
   ) {
     return new NotFoundException({

@@ -25,11 +25,15 @@ export function formatCheckout(checkout: CheckoutRow) {
     expiresAt: checkout.expiresAt,
     paidAt: checkout.paidAt,
     deliveryDate: fromDateColumn(checkout.deliveryDate),
+    deliveryDateTo: checkout.deliveryDateTo
+      ? fromDateColumn(checkout.deliveryDateTo)
+      : null,
     shippingTo: {
       label: checkout.deliveryLabel,
       street: checkout.deliveryStreet,
       state: checkout.deliveryState,
       lga: checkout.deliveryLga,
+      country: checkout.deliveryCountry,
       contactName: checkout.deliveryContactName,
       contactPhone: checkout.deliveryContactPhone,
     },

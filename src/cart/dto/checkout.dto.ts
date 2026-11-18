@@ -10,11 +10,14 @@ export class ShippingToDto {
   @ApiProperty({ example: '12, Bompai Industrial Area' })
   street: string;
 
-  @ApiProperty({ example: 'Kano' })
-  state: string;
+  @ApiProperty({ type: String, nullable: true, example: 'Kano' })
+  state: string | null;
 
-  @ApiProperty({ example: 'Nassarawa' })
-  lga: string;
+  @ApiProperty({ type: String, nullable: true, example: 'Nassarawa' })
+  lga: string | null;
+
+  @ApiProperty({ example: 'Nigeria' })
+  country: string;
 
   @ApiProperty({ type: String, nullable: true })
   contactName: string | null;
@@ -76,6 +79,14 @@ export class CheckoutDto {
 
   @ApiProperty({ format: 'date', example: '2026-10-10' })
   deliveryDate: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date',
+    nullable: true,
+    description: 'End of a delivery window; null for a single date',
+  })
+  deliveryDateTo: string | null;
 
   @ApiProperty({ type: ShippingToDto })
   shippingTo: ShippingToDto;

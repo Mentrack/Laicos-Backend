@@ -559,3 +559,132 @@ export function payoutPaidEmail(input: {
     lines: [payoutPaidLine(input.reference, input.amount)],
   });
 }
+
+export function sourcingAssignedLine(
+  requestNumber: string,
+  produceName: string,
+): string {
+  return `Sourcing request ${requestNumber} for ${produceName} was assigned to you.`;
+}
+
+export function sourcingAssignedEmail(input: {
+  firstName: string;
+  requestNumber: string;
+  produceName: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'New sourcing request',
+    subject: `Sourcing request ${input.requestNumber} assigned to you`,
+    lines: [
+      sourcingAssignedLine(input.requestNumber, input.produceName),
+      'Open LAICOS to review it and find matching supply.',
+    ],
+  });
+}
+
+export function sourcingUnansweredLine(requestNumber: string): string {
+  return `We’re sorry, the agent assigned to request ${requestNumber} couldn’t take it.`;
+}
+
+export function sourcingUnansweredEmail(input: {
+  firstName: string;
+  requestNumber: string;
+  responseHours: number;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Your sourcing request is being reassigned',
+    subject: `Update on sourcing request ${input.requestNumber}`,
+    lines: [
+      sourcingUnansweredLine(input.requestNumber),
+      `It may take another ${input.responseHours} hours to hear back. A new agent is being assigned to your request.`,
+    ],
+  });
+}
+
+export function sourcingOfferLine(
+  produceName: string,
+  quantity: string,
+  unit: string,
+): string {
+  return `You have an offer to supply ${quantity} ${unit} of ${produceName}.`;
+}
+
+export function sourcingOfferEmail(input: {
+  firstName: string;
+  produceName: string;
+  quantity: string;
+  unit: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'New supply offer',
+    subject: `Supply offer for ${input.produceName}`,
+    lines: [
+      sourcingOfferLine(input.produceName, input.quantity, input.unit),
+      'Open LAICOS to accept or decline it.',
+    ],
+  });
+}
+
+export function sourcingOfferWithdrawnLine(produceName: string): string {
+  return `The offer to supply ${produceName} was withdrawn.`;
+}
+
+export function sourcingOfferWithdrawnEmail(input: {
+  firstName: string;
+  produceName: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Offer withdrawn',
+    subject: `Offer for ${input.produceName} withdrawn`,
+    lines: [
+      sourcingOfferWithdrawnLine(input.produceName),
+      'You don’t need to do anything.',
+    ],
+  });
+}
+
+export function sourcingContractReadyLine(requestNumber: string): string {
+  return `The contract for request ${requestNumber} is ready to review.`;
+}
+
+export function sourcingContractReadyEmail(input: {
+  firstName: string;
+  requestNumber: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Your contract is ready',
+    subject: `Contract ready for request ${input.requestNumber}`,
+    lines: [
+      sourcingContractReadyLine(input.requestNumber),
+      'Open LAICOS to review and sign it.',
+    ],
+  });
+}
+
+export function sourcingPaymentReadyLine(
+  requestNumber: string,
+  amount: string,
+): string {
+  return `Request ${requestNumber} is ready for payment of NGN ${amount}.`;
+}
+
+export function sourcingPaymentReadyEmail(input: {
+  firstName: string;
+  requestNumber: string;
+  amount: string;
+}): RenderedEmail {
+  return simpleEmail({
+    firstName: input.firstName,
+    title: 'Ready for payment',
+    subject: `Payment ready for request ${input.requestNumber}`,
+    lines: [
+      sourcingPaymentReadyLine(input.requestNumber, input.amount),
+      'Open LAICOS to complete your payment.',
+    ],
+  });
+}

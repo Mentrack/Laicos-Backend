@@ -186,6 +186,9 @@ export class AdminOrderRowDto {
 
   @ApiProperty({ type: AdminOrderDisputeDto, nullable: true })
   dispute: AdminOrderDisputeDto | null;
+
+  @ApiProperty({ description: 'True when an agent sourced this order' })
+  sourced: boolean;
 }
 
 export class AdminOrderCountsDto {
@@ -241,6 +244,9 @@ class AdminOrderDetailOrderDto {
 
   @ApiProperty({ type: Date, nullable: true })
   fulfilledAt: Date | null;
+
+  @ApiProperty({ description: 'True when an agent sourced this order' })
+  sourced: boolean;
 }
 
 class AdminOrderDetailBuyerDto extends AdminOrderBuyerDto {

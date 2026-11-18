@@ -5,10 +5,19 @@ export class OrderDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
+  @ApiProperty({
+    description: 'True when an agent sourced this order from a farm offer',
+  })
+  sourced: boolean;
+
   @ApiProperty({ example: 'ORD-000123', description: 'Human-readable code' })
   orderNumber: string;
 
-  @ApiProperty({ format: 'uuid' })
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'On sourced orders (`sourced: true`) this is a hidden listing that is not browsable.',
+  })
   produceId: string;
 
   @ApiProperty({

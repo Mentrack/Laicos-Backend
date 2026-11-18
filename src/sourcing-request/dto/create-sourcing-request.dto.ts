@@ -72,9 +72,10 @@ export class CreateSourcingRequestDto {
   @IsDateOnly()
   requiredDate: string;
 
-  @ApiProperty({ enum: SourcingTimeline, enumName: 'SourcingTimeline' })
+  @ApiPropertyOptional({ enum: SourcingTimeline, enumName: 'SourcingTimeline' })
+  @IsOptional()
   @IsEnum(SourcingTimeline)
-  timeline: SourcingTimeline;
+  timeline?: SourcingTimeline;
 
   @ApiPropertyOptional({
     example: 'Heavy truck offloading at dock 3',

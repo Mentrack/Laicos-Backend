@@ -7,6 +7,8 @@ import {
   Prisma,
   ProduceType,
   Role,
+  SourcingRequestStatus,
+  SourcingUnit,
   type User,
 } from '../../../generated/client';
 import { ConfigService } from '@nestjs/config';
@@ -47,6 +49,7 @@ function conversationRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'conv-1',
     orderId: 'order-1',
+    sourcingRequestId: null,
     buyerId: buyer.id,
     agentUserId: agent.id,
     buyerLastReadAt: null,
@@ -64,6 +67,7 @@ function conversationRow(overrides: Record<string, unknown> = {}) {
       type: ProduceType.LOCAL,
       produce: { unit: 'tonnes' },
     },
+    sourcingRequest: null,
     buyer: {
       userId: buyer.id,
       user: {
@@ -96,16 +100,18 @@ async function errorBody(promise: Promise<unknown>) {
 describe('ConversationService', () => {
   const tx = {
     $queryRaw: jest.fn(),
+    $executeRaw: jest.fn(),
     message: { create: jest.fn() },
     conversation: { update: jest.fn() },
     agent: { findUnique: jest.fn() },
     order: { findUnique: jest.fn() },
-    sourcingRequest: { findUnique: jest.fn(), update: jest.fn() },
+    sourcingRequest: { findUniqueOrThrow: jest.fn() },
   };
   const buyerModel = { findUnique: jest.fn() };
   const database = {
     buyer: buyerModel,
     order: { findUnique: jest.fn() },
+    sourcingRequest: { findUnique: jest.fn() },
     conversation: {
       findUnique: jest.fn(),
       findUniqueOrThrow: jest.fn(),
@@ -379,6 +385,14 @@ describe('ConversationService', () => {
     createdAt: created,
   };
   const send = { body: 'Hello', clientMessageId: 'client-1' };
+  const lockedOrder = {
+    status: OrderStatus.PREPARING,
+    fulfilledAt: null,
+    disputeStatus: null,
+    orderNumber: 'ORD-000001',
+    farmId: 'farm-1',
+    sourcingRequestId: null,
+  };
 
   describe('listMessages', () => {
     beforeEach(() => {
@@ -462,13 +476,7 @@ describe('ConversationService', () => {
     beforeEach(() => {
       database.conversation.findUnique.mockResolvedValue(conversation);
       database.message.findUnique.mockResolvedValue(null);
-      tx.$queryRaw.mockResolvedValue([
-        {
-          status: OrderStatus.PREPARING,
-          fulfilledAt: null,
-          disputeStatus: null,
-        },
-      ]);
+      tx.$queryRaw.mockResolvedValue([lockedOrder]);
       tx.message.create.mockResolvedValue(message);
     });
 
@@ -583,10 +591,6 @@ describe('ConversationService', () => {
 
     it('records an agent message and cuts the body at 120 characters', async () => {
       tx.agent.findUnique.mockResolvedValue({ id: 'agent-1' });
-      tx.order.findUnique.mockResolvedValue({
-        orderNumber: 'ORD-000001',
-        farmId: 'farm-1',
-      });
       const body = 'a'.repeat(150);
       await service.send(agent, conversation.id, {
         body,
@@ -617,11 +621,9 @@ describe('ConversationService', () => {
     });
 
     it('records a buyer message when the order came from a sourcing request', async () => {
-      tx.order.findUnique
-        .mockResolvedValueOnce({
-          checkout: { sourcingRequestId: 'req-1' },
-        })
-        .mockResolvedValueOnce({ orderNumber: 'ORD-000001' });
+      tx.$queryRaw.mockResolvedValue([
+        { ...lockedOrder, sourcingRequestId: 'req-1' },
+      ]);
       await service.send(buyer, conversation.id, {
         body: 'hello',
         clientMessageId: 'msg-3',
@@ -647,6 +649,193 @@ describe('ConversationService', () => {
         clientMessageId: 'msg-1',
       });
       expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sourcing chat', () => {
+    const sourcingConversation = {
+      ...conversation,
+      orderId: null,
+      sourcingRequestId: 'req-1',
+    };
+    const sourcingRow = () =>
+      conversationRow({
+        orderId: null,
+        order: null,
+        sourcingRequestId: 'req-1',
+        sourcingRequest: {
+          status: SourcingRequestStatus.NEGOTIATING,
+          produceName: 'Maize',
+          quantity: 12,
+          unit: SourcingUnit.TONNES,
+          checkouts: [],
+        },
+      });
+    const paidRequest = (...orders: Record<string, unknown>[]) => ({
+      requestNumber: 'REQ-000007',
+      status: SourcingRequestStatus.COMPLETED,
+      checkouts: [{ orders }],
+    });
+    const fulfilledOrder = (fulfilledAt: Date) => ({
+      status: OrderStatus.FULFILLED,
+      fulfilledAt,
+      dispute: null,
+    });
+    const cancelledOrder = {
+      status: OrderStatus.CANCELLED,
+      fulfilledAt: null,
+      dispute: null,
+    };
+
+    it('returns the request conversation for a sourced order', async () => {
+      database.conversation.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(sourcingRow());
+      database.order.findUnique.mockResolvedValue(
+        orderRow({ checkout: { sourcingRequestId: 'req-1' } }),
+      );
+      await expect(service.open(buyer, 'order-1')).resolves.toMatchObject({
+        orderId: null,
+        sourcingRequestId: 'req-1',
+        produceName: 'Maize',
+      });
+      expect(database.conversation.findUnique).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: { sourcingRequestId: 'req-1' } }),
+      );
+      expect(database.conversation.create).not.toHaveBeenCalled();
+    });
+
+    it('never creates a chat for a sourced order before the agent accepts', async () => {
+      database.order.findUnique.mockResolvedValue(
+        orderRow({ checkout: { sourcingRequestId: 'req-1' } }),
+      );
+      await expect(
+        errorBody(service.open(buyer, 'order-1')),
+      ).resolves.toMatchObject({
+        status: 409,
+        body: { code: 'CONVERSATION_NOT_OPEN' },
+      });
+      expect(database.conversation.create).not.toHaveBeenCalled();
+    });
+
+    it('returns the chat to the buyer and the assigned agent', async () => {
+      database.sourcingRequest.findUnique.mockResolvedValue({
+        buyerId: buyer.id,
+        assignedAgent: { userId: agent.id },
+      });
+      database.conversation.findUnique.mockResolvedValue(sourcingRow());
+      await expect(
+        service.findForSourcingRequest(buyer, 'req-1'),
+      ).resolves.toMatchObject({ sourcingRequestId: 'req-1' });
+      await expect(
+        service.findForSourcingRequest(agent, 'req-1'),
+      ).resolves.toMatchObject({ sourcingRequestId: 'req-1' });
+    });
+
+    it('404s a buyer who does not own the request', async () => {
+      database.sourcingRequest.findUnique.mockResolvedValue({
+        buyerId: 'someone-else',
+        assignedAgent: { userId: agent.id },
+      });
+      database.conversation.findUnique.mockResolvedValue(sourcingRow());
+      await expect(
+        errorBody(service.findForSourcingRequest(buyer, 'req-1')),
+      ).resolves.toMatchObject({
+        status: 404,
+        body: { code: 'SOURCING_REQUEST_NOT_FOUND' },
+      });
+      await expect(
+        errorBody(service.findForSourcingRequest(otherAgent, 'req-1')),
+      ).resolves.toMatchObject({ status: 404 });
+    });
+
+    it('409s before the agent has accepted', async () => {
+      database.sourcingRequest.findUnique.mockResolvedValue({
+        buyerId: buyer.id,
+        assignedAgent: null,
+      });
+      await expect(
+        errorBody(service.findForSourcingRequest(buyer, 'req-1')),
+      ).resolves.toMatchObject({
+        status: 409,
+        body: { code: 'CONVERSATION_NOT_OPEN' },
+      });
+    });
+
+    describe('send', () => {
+      beforeEach(() => {
+        database.conversation.findUnique.mockResolvedValue(
+          sourcingConversation,
+        );
+        database.message.findUnique.mockResolvedValue(null);
+        tx.message.create.mockResolvedValue(message);
+      });
+
+      it('refuses a message once every sourced order is closed', async () => {
+        tx.sourcingRequest.findUniqueOrThrow.mockResolvedValue(
+          paidRequest(cancelledOrder, fulfilledOrder(longAgo)),
+        );
+        await expect(
+          errorBody(service.send(buyer, 'conv-1', send)),
+        ).resolves.toMatchObject({
+          status: 409,
+          body: { code: 'CONVERSATION_CLOSED' },
+        });
+        expect(tx.$executeRaw).toHaveBeenCalled();
+        expect(tx.$queryRaw).not.toHaveBeenCalled();
+        expect(tx.message.create).not.toHaveBeenCalled();
+      });
+
+      it('accepts messages while one sourced order is in its dispute window', async () => {
+        tx.sourcingRequest.findUniqueOrThrow.mockResolvedValue(
+          paidRequest(fulfilledOrder(longAgo), fulfilledOrder(new Date())),
+        );
+        await expect(service.send(buyer, 'conv-1', send)).resolves.toEqual(
+          message,
+        );
+      });
+
+      it('closes the sourcing chat when the request is closed before payment', async () => {
+        tx.sourcingRequest.findUniqueOrThrow.mockResolvedValue({
+          requestNumber: 'REQ-000007',
+          status: SourcingRequestStatus.CLOSED,
+          checkouts: [],
+        });
+        await expect(
+          errorBody(service.send(buyer, 'conv-1', send)),
+        ).resolves.toMatchObject({
+          status: 409,
+          body: { code: 'CONVERSATION_CLOSED' },
+        });
+      });
+
+      it('records messages from both sides against the request', async () => {
+        tx.agent.findUnique.mockResolvedValue({ id: 'agent-1' });
+        tx.sourcingRequest.findUniqueOrThrow.mockResolvedValue({
+          requestNumber: 'REQ-000007',
+          status: SourcingRequestStatus.NEGOTIATING,
+          checkouts: [],
+        });
+        await service.send(agent, 'conv-1', send);
+        expect(audit.record).toHaveBeenLastCalledWith(
+          tx,
+          expect.objectContaining({
+            actorType: AuditActorType.EXTENSION_AGENT,
+            farmId: null,
+            summary: 'REQ-000007. Hello',
+            sourcingRequestId: 'req-1',
+          }),
+        );
+        await service.send(buyer, 'conv-1', send);
+        expect(audit.record).toHaveBeenLastCalledWith(
+          tx,
+          expect.objectContaining({
+            actorType: AuditActorType.BUYER,
+            summary: 'REQ-000007. Hello',
+            sourcingRequestId: 'req-1',
+          }),
+        );
+      });
     });
   });
 

@@ -62,6 +62,8 @@ describe('resolveDelivery', () => {
       deliveryStreet: '12, Bompai Industrial Area',
       deliveryState: 'Kano',
       deliveryLga: 'Nassarawa',
+      deliveryCountry: 'Nigeria',
+      deliveryDateTo: null,
       deliveryContactName: 'Musa',
       deliveryContactPhone: '+2348012345678',
     });
@@ -123,6 +125,8 @@ describe('createCheckout', () => {
     deliveryStreet: '12, Bompai Industrial Area',
     deliveryState: 'Kano',
     deliveryLga: 'Nassarawa',
+    deliveryCountry: 'Nigeria',
+    deliveryDateTo: null,
     deliveryContactName: null,
     deliveryContactPhone: null,
   };
@@ -222,6 +226,67 @@ describe('createCheckout', () => {
         status: OrderStatus.AWAITING_PAYMENT,
       }),
     ]);
+  });
+
+  it('prices a sourced checkout from the given figures', async () => {
+    const agreed = new Prisma.Decimal('60000.00');
+    await createCheckout(
+      tx as unknown as Prisma.TransactionClient,
+      {
+        buyerId: 'buyer-1',
+        idempotencyKey: key,
+        lines: [line('a', '45000.00'), line('b', '9000.00')],
+        delivery,
+        placedBy,
+        expectedTotal: 0,
+        sourced: {
+          figures: {
+            subtotal: new Prisma.Decimal('54000.00'),
+            serviceFee: new Prisma.Decimal('3300.00'),
+            agentCommission: new Prisma.Decimal('2700.00'),
+            commissions: [
+              new Prisma.Decimal('2250.00'),
+              new Prisma.Decimal('450.00'),
+            ],
+            deliveryFee: new Prisma.Decimal(0),
+            totalPrice: agreed,
+          },
+          holdMs: 48 * 3_600_000,
+          commissionAgentId: 'agent-1',
+        },
+      },
+      config,
+      now,
+    );
+    const [{ data }] = tx.checkout.create.mock.calls[0] as [
+      { data: Record<string, unknown> & { orders: { create: unknown[] } } },
+    ];
+    expect((data.totalPrice as Prisma.Decimal).toFixed(2)).toBe('60000.00');
+    expect((data.deliveryFee as Prisma.Decimal).toFixed(2)).toBe('0.00');
+    expect((data.serviceFee as Prisma.Decimal).toFixed(2)).toBe('3300.00');
+    expect(data.expiresAt).toEqual(new Date('2026-10-10T09:00:00Z'));
+    expect(data.orders.create).toEqual([
+      expect.objectContaining({
+        commissionAgentId: 'agent-1',
+        agentCommission: new Prisma.Decimal('2250.00'),
+        sourced: true,
+      }),
+      expect.objectContaining({
+        commissionAgentId: 'agent-1',
+        agentCommission: new Prisma.Decimal('450.00'),
+        sourced: true,
+      }),
+    ]);
+  });
+
+  it('keeps cart checkouts unchanged', async () => {
+    await create(57500);
+    const [{ data }] = tx.checkout.create.mock.calls[0] as [
+      { data: Record<string, unknown> & { orders: { create: object[] } } },
+    ];
+    expect(data.deliveryCountry).toBe('Nigeria');
+    expect(data.orders.create[0]).not.toHaveProperty('commissionAgentId');
+    expect(data.orders.create[0]).toMatchObject({ sourced: false });
   });
 
   it('adds a service fee on the subtotal to the total', async () => {

@@ -19,6 +19,18 @@ import {
   refundProcessedEmail,
   refundProcessedLine,
   RenderedEmail,
+  sourcingAssignedEmail,
+  sourcingAssignedLine,
+  sourcingContractReadyEmail,
+  sourcingContractReadyLine,
+  sourcingOfferEmail,
+  sourcingOfferLine,
+  sourcingOfferWithdrawnEmail,
+  sourcingOfferWithdrawnLine,
+  sourcingPaymentReadyEmail,
+  sourcingPaymentReadyLine,
+  sourcingUnansweredEmail,
+  sourcingUnansweredLine,
 } from '../mail/templates';
 
 export interface Recipient {
@@ -45,6 +57,35 @@ export interface NotificationParams {
   };
   REFUND_PROCESSED: { refundId: string; amount: string; currency: Currency };
   PAYOUT_PAID: { payoutId: string; reference: string; amount: string };
+  SOURCING_ASSIGNED: {
+    requestId: string;
+    requestNumber: string;
+    produceName: string;
+  };
+  SOURCING_UNANSWERED: {
+    requestId: string;
+    requestNumber: string;
+    responseHours: number;
+  };
+  SOURCING_OFFER: {
+    requestId: string;
+    offerId: string;
+    produceName: string;
+    quantity: string;
+    unit: string;
+  };
+  SOURCING_OFFER_WITHDRAWN: {
+    requestId: string;
+    offerId: string;
+    produceName: string;
+  };
+  SOURCING_CONTRACT_READY: { requestId: string; requestNumber: string };
+  SOURCING_PAYMENT_READY: {
+    requestId: string;
+    requestNumber: string;
+    checkoutId: string;
+    amount: string;
+  };
 }
 
 export interface RenderedNotification {
@@ -60,6 +101,19 @@ export interface NotificationTypeDefinition<P> {
 }
 
 const PUSH_AND_EMAIL = [NotificationChannel.PUSH, NotificationChannel.EMAIL];
+const EMAIL_ONLY = [NotificationChannel.EMAIL];
+
+function sourcingData(
+  requestId: string,
+  offerId?: string,
+): Prisma.InputJsonObject {
+  return {
+    resource: 'SOURCING_REQUEST',
+    resourceId: requestId,
+    requestId,
+    ...(offerId ? { offerId } : {}),
+  };
+}
 
 // Keyed by NotificationType so a new enum value without a renderer fails to compile.
 export const NOTIFICATION_TYPES: {
@@ -151,6 +205,95 @@ export const NOTIFICATION_TYPES: {
         email: payoutPaidEmail({
           firstName: recipient.firstName,
           reference,
+          amount,
+        }),
+      };
+    },
+  },
+  SOURCING_ASSIGNED: {
+    channels: PUSH_AND_EMAIL,
+    render({ requestId, requestNumber, produceName }, recipient) {
+      return {
+        title: 'New sourcing request',
+        body: sourcingAssignedLine(requestNumber, produceName),
+        data: sourcingData(requestId),
+        email: sourcingAssignedEmail({
+          firstName: recipient.firstName,
+          requestNumber,
+          produceName,
+        }),
+      };
+    },
+  },
+  SOURCING_UNANSWERED: {
+    channels: EMAIL_ONLY,
+    render({ requestId, requestNumber, responseHours }, recipient) {
+      return {
+        title: 'Sourcing request update',
+        body: sourcingUnansweredLine(requestNumber),
+        data: sourcingData(requestId),
+        email: sourcingUnansweredEmail({
+          firstName: recipient.firstName,
+          requestNumber,
+          responseHours,
+        }),
+      };
+    },
+  },
+  SOURCING_OFFER: {
+    channels: PUSH_AND_EMAIL,
+    render({ requestId, offerId, produceName, quantity, unit }, recipient) {
+      return {
+        title: 'New supply offer',
+        body: sourcingOfferLine(produceName, quantity, unit),
+        data: sourcingData(requestId, offerId),
+        email: sourcingOfferEmail({
+          firstName: recipient.firstName,
+          produceName,
+          quantity,
+          unit,
+        }),
+      };
+    },
+  },
+  SOURCING_OFFER_WITHDRAWN: {
+    channels: PUSH_AND_EMAIL,
+    render({ requestId, offerId, produceName }, recipient) {
+      return {
+        title: 'Offer withdrawn',
+        body: sourcingOfferWithdrawnLine(produceName),
+        data: sourcingData(requestId, offerId),
+        email: sourcingOfferWithdrawnEmail({
+          firstName: recipient.firstName,
+          produceName,
+        }),
+      };
+    },
+  },
+  SOURCING_CONTRACT_READY: {
+    channels: PUSH_AND_EMAIL,
+    render({ requestId, requestNumber }, recipient) {
+      return {
+        title: 'Contract ready',
+        body: sourcingContractReadyLine(requestNumber),
+        data: sourcingData(requestId),
+        email: sourcingContractReadyEmail({
+          firstName: recipient.firstName,
+          requestNumber,
+        }),
+      };
+    },
+  },
+  SOURCING_PAYMENT_READY: {
+    channels: PUSH_AND_EMAIL,
+    render({ requestId, requestNumber, checkoutId, amount }, recipient) {
+      return {
+        title: 'Ready for payment',
+        body: sourcingPaymentReadyLine(requestNumber, amount),
+        data: { ...sourcingData(requestId), checkoutId },
+        email: sourcingPaymentReadyEmail({
+          firstName: recipient.firstName,
+          requestNumber,
           amount,
         }),
       };

@@ -1,15 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  AuditActorType,
-  AuditCategory,
-  AuditResource,
-  CheckoutStatus,
-} from '../../generated/client';
+import { AuditActorType, CheckoutStatus } from '../../generated/client';
+import { advisoryLock } from '../common/advisory-lock';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  recordLinkedAudit,
-  syncSourcingRequest,
-} from '../sourcing-request/utils/sync-sourcing-request';
+import { lapseSourcedCheckout } from '../sourcing-request/utils/sync-sourcing-request';
 import { lockCheckout } from './utils/checkout-lock';
 import { CHECKOUT_TRANSACTION } from './utils/checkout-transaction';
 import { releaseCheckout } from './utils/release-checkout';
@@ -30,15 +23,15 @@ export class CheckoutExpiryService {
         status: CheckoutStatus.AWAITING_PAYMENT,
         expiresAt: { lt: now },
       },
-      select: { id: true },
+      select: { id: true, sourcingRequestId: true },
       orderBy: { expiresAt: 'asc' },
       take: SWEEP_BATCH,
     });
     let expired = 0;
-    for (const { id } of overdue) {
+    for (const { id, sourcingRequestId } of overdue) {
       // One bad checkout mustn't hold every other buyer's stock hostage.
       try {
-        if (await this.expire(id, now)) {
+        if (await this.expire(id, sourcingRequestId, now)) {
           expired++;
         }
       } catch (error) {
@@ -51,8 +44,14 @@ export class CheckoutExpiryService {
     return expired;
   }
 
-  private expire(id: string, now: Date) {
+  private expire(id: string, sourcingRequestId: string | null, now: Date) {
     return this.database.$transaction(async (tx) => {
+      // Sourcing flows (sign, back) lock the request and then touch its
+      // checkouts, so take the locks in that order or the two can deadlock.
+      // The request id comes from the scan: it never changes on a checkout.
+      if (sourcingRequestId) {
+        await advisoryLock(tx, `sourcing:${sourcingRequestId}`);
+      }
       await lockCheckout(tx, id);
       // Re-read under the lock: it may have been paid or cancelled since the
       // scan.
@@ -72,20 +71,11 @@ export class CheckoutExpiryService {
         { type: AuditActorType.SYSTEM, userId: null },
       );
       if (checkout.sourcingRequestId) {
-        await syncSourcingRequest(tx, checkout.sourcingRequestId);
-        await recordLinkedAudit(tx, {
+        await lapseSourcedCheckout(tx, checkout.sourcingRequestId, {
           actorType: AuditActorType.SYSTEM,
           actorUserId: null,
-          farmerId: null,
-          agentId: null,
-          farmId: null,
-          category: AuditCategory.ORDER,
-          title: 'Checkout expired',
+          title: 'Payment window lapsed',
           summary: 'Payment not received',
-          actionLabel: 'View request',
-          resource: AuditResource.SOURCING_REQUEST,
-          resourceId: checkout.sourcingRequestId,
-          sourcingRequestId: checkout.sourcingRequestId,
         });
       }
       return true;

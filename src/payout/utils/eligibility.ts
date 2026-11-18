@@ -21,8 +21,21 @@ const PAYEE: Record<
   (user: Prisma.UserWhereInput) => Prisma.OrderWhereInput
 > = {
   [PayoutItemKind.PRODUCE]: (user) => ({ farm: { owner: { user } } }),
+  // Wrapped in AND so its OR can't replace eligibleItems' dispute OR. A
+  // commission agent (sourced order) wins over the handover agent, so an order
+  // never has two commission payees.
   [PayoutItemKind.COMMISSION]: (user) => ({
-    handover: { is: { agent: { is: { user } } } },
+    AND: [
+      {
+        OR: [
+          { commissionAgent: { is: { user } } },
+          {
+            commissionAgentId: null,
+            handover: { is: { agent: { is: { user } } } },
+          },
+        ],
+      },
+    ],
   }),
 };
 

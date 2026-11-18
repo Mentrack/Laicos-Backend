@@ -47,6 +47,17 @@ describe('CreateProduceDto', () => {
     expect(errors.map((error) => error.property)).toContain('imageUrl');
   });
 
+  it('refuses a farmer-set SOURCED status', async () => {
+    const dto = plainToInstance(CreateProduceDto, {
+      ...multipartBody,
+      status: 'SOURCED',
+    });
+
+    const errors = await validate(dto, pipeOptions);
+
+    expect(errors.map((error) => error.property)).toContain('status');
+  });
+
   it('accepts an optional category', async () => {
     const dto = plainToInstance(CreateProduceDto, {
       ...multipartBody,

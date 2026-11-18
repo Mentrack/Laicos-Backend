@@ -51,6 +51,12 @@ describe('reservation', () => {
     ).toBeInstanceOf(NotFoundException);
   });
 
+  it('refuses a SOURCED listing as not found', () => {
+    const sourced = { ...produce, status: ProduceStatus.SOURCED };
+    expect(isOrderable(sourced, 1)).toBe(false);
+    expect(orderRefusal(sourced)).toBeInstanceOf(NotFoundException);
+  });
+
   it('refuses a sold-out listing as a conflict', () => {
     const refusal = orderRefusal({
       ...produce,

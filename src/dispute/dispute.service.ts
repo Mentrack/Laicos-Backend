@@ -13,7 +13,6 @@ import {
   NotificationType,
   OrderStatus,
   PaymentStatus,
-  PayoutItemKind,
   Prisma,
   Role,
   type Refund,
@@ -34,11 +33,7 @@ import { RefundService } from '../payment/refund.service';
 import { PayoutConfig } from '../payout/payout.config';
 import { disputeWindowOpen } from '../payout/utils/dispute-window';
 import { LIVE_PAYOUT_STATUSES } from '../payout/utils/eligibility';
-import {
-  PAYEE_SELECT,
-  lockPayees,
-  payeeUserId,
-} from '../payout/utils/payee-locks';
+import { PAYEE_SELECT, lockPayees } from '../payout/utils/payee-locks';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import {
@@ -427,9 +422,15 @@ export class DisputeService {
   }
 }
 
+// Everyone who can see the dispute besides the buyer. Not payeeUserId: a
+// sourced order's handover agent is no payee but still sees the dispute.
 function payees(order: DisputeOrder): string[] {
-  return Object.values(PayoutItemKind).flatMap(
-    (kind) => payeeUserId(order, kind) ?? [],
+  return unique(
+    [
+      order.farm.owner.userId,
+      order.handover?.agent?.userId,
+      order.commissionAgent?.userId,
+    ].filter((id): id is string => !!id),
   );
 }
 
@@ -437,7 +438,7 @@ function unique(ids: string[]): string[] {
   return [...new Set(ids)];
 }
 
-/** The buyer, the farm owner and the handover agent see an order's dispute. */
+/** The buyer, the farm owner, the handover agent and the sourcing agent see an order's dispute. */
 function orderVisibleTo(user: User): Prisma.OrderWhereInput {
   if (user.role === Role.ADMIN) {
     return {};
@@ -447,6 +448,7 @@ function orderVisibleTo(user: User): Prisma.OrderWhereInput {
       { buyer: { userId: user.id } },
       { farm: farmOwnedBy(user) },
       { handover: { agent: { userId: user.id } } },
+      { commissionAgent: { userId: user.id } },
     ],
   };
 }

@@ -5101,7 +5101,7 @@
     },
     "/sourcing-requests": {
       "post": {
-        "description": "Starts NEW while an admin matches it with farms.",
+        "description": "Starts PENDING until an admin assigns an agent.",
         "operationId": "SourcingRequestController_create",
         "parameters": [],
         "requestBody": {
@@ -5217,6 +5217,88 @@
           }
         ],
         "summary": "Get one of my sourcing requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/sourcing-requests/{id}/contract": {
+      "get": {
+        "description": "The latest one, which may be voided. 404 before the agent confirms, and for another buyer’s request.",
+        "operationId": "SourcingRequestController_contract",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingContractResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the contract for one of my requests",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/sourcing-requests/{id}/contract/sign": {
+      "post": {
+        "description": "Signing twice is a no-op. The second signature creates a hidden SOURCED listing per accepted offer, never touching the farms’ own listings, and places the buyer’s checkout at the agreed prices, held for SOURCING_CHECKOUT_HOLD_HOURS; the same Idempotency-Key then returns that checkout’s contract. 409 SOURCING_NOT_CONFIRMED when no contract is waiting. 409 IDEMPOTENCY_KEY_REUSED when the key placed the checkout of an earlier contract.",
+        "operationId": "SourcingRequestController_sign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingContractResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sign the contract for one of my requests",
         "tags": [
           "Sourcing Requests"
         ]
@@ -5361,43 +5443,6 @@
         ]
       }
     },
-    "/admin/sourcing-requests/{id}/listings": {
-      "get": {
-        "description": "Published listings on verified farms in the assigned agent’s cluster whose name and unit match. 409 before an agent is assigned. 404 when the request is missing.",
-        "operationId": "AdminSourcingRequestController_listings",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminAllocationArrayResponseDto"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List eligible listings for a request",
-        "tags": [
-          "Sourcing Requests"
-        ]
-      }
-    },
     "/admin/sourcing-requests/{id}/audit": {
       "get": {
         "description": "{id} is the sourcing request. Newest first. 404 when it is missing.",
@@ -5458,7 +5503,7 @@
     },
     "/admin/sourcing-requests/{id}": {
       "get": {
-        "description": "The request, the buyer, the assigned agent, the saved group, coverage, the live checkout, its orders, and the newest five audit rows. 404 when it is missing.",
+        "description": "The request, the buyer, the assigned agent, the buyer-agent conversation id (null until the agent accepts), the offers, the live checkout, its orders, and the newest five audit rows. 404 when it is missing.",
         "operationId": "AdminSourcingRequestController_findOne",
         "parameters": [
           {
@@ -5472,7 +5517,14 @@
         ],
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSourcingDetailResponseDto"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5488,7 +5540,7 @@
     },
     "/admin/sourcing-requests/{id}/assignment": {
       "post": {
-        "description": "The agent must be verified. Refused once a checkout exists, or when the saved listings sit outside the new agent’s cluster.",
+        "description": "The agent must be verified. Only from PENDING or ASSIGNED (409 otherwise); a reassignment restarts the response window.",
         "operationId": "AdminSourcingRequestController_assign",
         "parameters": [
           {
@@ -5511,100 +5563,12 @@
           }
         },
         "responses": {
-          "201": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Assign or reassign the agent",
-        "tags": [
-          "Sourcing Requests"
-        ]
-      }
-    },
-    "/admin/sourcing-requests/{id}/allocations": {
-      "put": {
-        "description": "Does not reserve stock. An empty list clears the group. Refused once a checkout is awaiting payment or paid.",
-        "operationId": "AdminSourcingRequestController_save",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveAllocationsDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Replace the saved listing group",
-        "tags": [
-          "Sourcing Requests"
-        ]
-      }
-    },
-    "/admin/sourcing-requests/{id}/confirm": {
-      "post": {
-        "description": "One order per selected listing, at that listing’s price. The buyer’s cart is left alone. The same Idempotency-Key returns the original checkout.",
-        "operationId": "AdminSourcingRequestController_confirm",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateCheckoutDto"
-              }
-            }
-          }
-        },
-        "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CheckoutResponseDto"
+                  "$ref": "#/components/schemas/AdminSourcingDetailResponseDto"
                 }
               }
             }
@@ -5618,7 +5582,7 @@
             "bearer": []
           }
         ],
-        "summary": "Confirm the group and place one checkout",
+        "summary": "Assign or reassign the agent",
         "tags": [
           "Sourcing Requests"
         ]
@@ -5639,6 +5603,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSourcingDetailResponseDto"
+                }
+              }
+            }
+          },
           "201": {
             "description": ""
           }
@@ -5679,6 +5653,16 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminSourcingDetailResponseDto"
+                }
+              }
+            }
+          },
           "201": {
             "description": ""
           }
@@ -5689,6 +5673,742 @@
           }
         ],
         "summary": "Close a request",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests": {
+      "get": {
+        "description": "Newest first. Only requests currently assigned to me.",
+        "operationId": "AgentSourcingRequestController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the buyer requests assigned to me",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}": {
+      "get": {
+        "description": "Includes the offers and the latest contract. Another agent’s request is 404, the same as a missing one.",
+        "operationId": "AgentSourcingRequestController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get a buyer request assigned to me",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/accept": {
+      "post": {
+        "description": "Moves it to FINDING_SUPPLY and opens the chat with the buyer. 409 unless it is waiting for my answer.",
+        "operationId": "AgentSourcingRequestController_accept",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Accept an assigned request",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/decline": {
+      "post": {
+        "description": "Returns it to PENDING for an admin to reassign and tells the buyer. 409 unless it is waiting for my answer.",
+        "operationId": "AgentSourcingRequestController_decline",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclineSourcingRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Decline an assigned request",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/farms": {
+      "get": {
+        "description": "Verified farms anywhere whose main produce, or any listing's name, contains the requested produce. Listing stock plays no part. A `search` replaces that filter and matches the farm name, farm code, farmer name, farmer code, main produce or listing names. State and LGA filters apply either way. `offerId` is this request's existing offer to the farm. 409 unless FINDING_SUPPLY.",
+        "operationId": "AgentSourcingRequestController_farms",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Replaces the default match on the request's produce name: matches the farm name, farm code, farmer name, farmer code, main produce or listing names.",
+            "schema": {
+              "maxLength": 120,
+              "example": "musa",
+              "type": "string"
+            }
+          },
+          {
+            "name": "stateId",
+            "required": false,
+            "in": "query",
+            "description": "The farm's state",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "lgaId",
+            "required": false,
+            "in": "query",
+            "description": "The farm's LGA",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingFarmRowListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Search farms to offer",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/offers": {
+      "put": {
+        "description": "Sends the whole set of offers, one per farm, each a quantity in the farm's own unit. The unit must be comparable with the request's: kg and tonnes for a weight request, otherwise the same unit (400 SOURCING_UNIT_MISMATCH). New offers and changed quantities or units go to the farmer to accept again; offers left out are withdrawn and the farmer told. New and changed offers must be to a verified farm (409 SOURCING_FARM_UNVERIFIED); unchanged offers are not re-checked. No stock is checked. 409 unless FINDING_SUPPLY.",
+        "operationId": "AgentSourcingRequestController_setOffers",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSourcingOffersDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Replace the supply pool",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/offers/{offerId}/price": {
+      "put": {
+        "description": "Per unit of the offer's own unit. Needs no farmer sign-off. 409 unless FINDING_SUPPLY.",
+        "operationId": "AgentSourcingRequestController_setOfferPrice",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offerId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceSourcingOfferDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Set the agreed farmer price of an offer",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/supply-complete": {
+      "post": {
+        "description": "Moves FINDING_SUPPLY to NEGOTIATING. Accepted offers must cover the request (409 SOURCING_NOT_COVERED) and each have a price (409 SOURCING_UNPRICED); pending and rejected offers are ignored.",
+        "operationId": "AgentSourcingRequestController_supplyComplete",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mark supply complete",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/back": {
+      "post": {
+        "description": "NEGOTIATING returns to FINDING_SUPPLY. CONFIRMED returns to NEGOTIATING and voids the contract, unless both parties have signed it (409 SOURCING_CONTRACT_SIGNED).",
+        "operationId": "AgentSourcingRequestController_back",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSourcingRequestResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Step back a stage",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/quote": {
+      "get": {
+        "description": "Computed from the priced, accepted offers. The suggested price is the floor for the agreed price.",
+        "operationId": "AgentSourcingRequestController_quote",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingQuoteResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the suggested price",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/confirm": {
+      "post": {
+        "description": "Moves NEGOTIATING to CONFIRMED (409 SOURCING_NOT_NEGOTIATING otherwise) and tells the buyer the contract is ready. The accepted offers must still cover the request (409 SOURCING_NOT_COVERED) and every accepted farm still be verified (409 SOURCING_FARM_UNVERIFIED); either way nothing changes. No stock is checked. The agreed price must be at least the suggested price (409 SOURCING_PRICE_BELOW_FLOOR).",
+        "operationId": "AgentSourcingRequestController_confirm",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmSourcingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingContractResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Confirm the deal and issue the contract",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/contract": {
+      "get": {
+        "description": "The latest one, which may be voided. 404 before confirm.",
+        "operationId": "AgentSourcingRequestController_contract",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingContractResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the contract",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/agents/me/sourcing-requests/{id}/contract/sign": {
+      "post": {
+        "description": "Signing twice is a no-op. The second signature creates a hidden SOURCED listing per accepted offer, never touching the farms’ own listings, and places the buyer’s checkout at the agreed prices, held for SOURCING_CHECKOUT_HOLD_HOURS; the same Idempotency-Key then returns that checkout’s contract. 409 SOURCING_NOT_CONFIRMED when no contract is waiting. 409 IDEMPOTENCY_KEY_REUSED when the key placed the checkout of an earlier contract.",
+        "operationId": "AgentSourcingRequestController_sign",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcingContractResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Sign the contract",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/farmers/me/sourcing-offers": {
+      "get": {
+        "description": "Newest first, across all my farms. requestStatus lets the app hide offers on closed requests.",
+        "operationId": "FarmerSourcingOfferController_findAll",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "perPage",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20,
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FarmerSourcingOfferListResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List the offers made to me",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/farmers/me/sourcing-offers/{id}/accept": {
+      "post": {
+        "description": "Only while the request is finding supply (409 SOURCING_OFFER_CLOSED otherwise). Accepting an accepted offer does nothing.",
+        "operationId": "FarmerSourcingOfferController_accept",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Accept an offer",
+        "tags": [
+          "Sourcing Requests"
+        ]
+      }
+    },
+    "/farmers/me/sourcing-offers/{id}/reject": {
+      "post": {
+        "description": "Also allowed after accepting, when the farmer pulls out. Only while the request is finding supply.",
+        "operationId": "FarmerSourcingOfferController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectSourcingOfferDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Reject an offer",
         "tags": [
           "Sourcing Requests"
         ]
@@ -7406,7 +8126,7 @@
     },
     "/orders/{orderId}/conversation": {
       "post": {
-        "description": "Between the order's buyer and its agent (the handover agent once READY, else the farm's cluster agent). Returns the existing conversation if there is one. 403 NOT_A_PARTICIPANT; 409 CONVERSATION_NOT_OPEN while unpaid, NO_AGENT_ASSIGNED when the farm is in no cluster, CONVERSATION_CLOSED when the order is already fulfilled or cancelled.",
+        "description": "Between the order's buyer and its agent (the handover agent once READY, else the farm's cluster agent). Returns the existing conversation if there is one. An order from a sourcing request returns the request's chat and never opens a new one (409 CONVERSATION_NOT_OPEN if the request has none). 403 NOT_A_PARTICIPANT; 409 CONVERSATION_NOT_OPEN while unpaid, NO_AGENT_ASSIGNED when the farm is in no cluster, CONVERSATION_CLOSED when the order is already fulfilled or cancelled.",
         "operationId": "ConversationController_open",
         "parameters": [
           {
@@ -7436,6 +8156,43 @@
           }
         ],
         "summary": "Open the conversation for an order",
+        "tags": [
+          "Messages"
+        ]
+      }
+    },
+    "/sourcing-requests/{id}/conversation": {
+      "get": {
+        "description": "Between the request's buyer and its agent, opened when the agent accepts the request, and reused for the request's orders. 404 SOURCING_REQUEST_NOT_FOUND unless I am the buyer or the assigned agent; 409 CONVERSATION_NOT_OPEN until the agent accepts.",
+        "operationId": "ConversationController_findForSourcingRequest",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get the chat for a sourcing request",
         "tags": [
           "Messages"
         ]
@@ -7595,7 +8352,7 @@
         ]
       },
       "post": {
-        "description": "Both participants also get it as the message.created socket event. Retrying with the same clientMessageId returns the original. 409 CONVERSATION_CLOSED once the order is fulfilled or cancelled; 409 CLIENT_MESSAGE_ID_REUSED if the clientMessageId was used in another conversation.",
+        "description": "Both participants also get it as the message.created socket event. Retrying with the same clientMessageId returns the original. 409 CONVERSATION_CLOSED once the chat is closed (see ConversationDto.isClosed); 409 CLIENT_MESSAGE_ID_REUSED if the clientMessageId was used in another conversation.",
         "operationId": "ConversationController_send",
         "parameters": [
           {
@@ -7747,7 +8504,7 @@
     },
     "/orders/{id}/dispute": {
       "get": {
-        "description": "For the buyer, the farm owner, the handover agent or an admin. Photo URLs are presigned. 404 DISPUTE_NOT_FOUND when there is none or the order is not yours.",
+        "description": "For the buyer, the farm owner, the handover agent, the sourcing agent or an admin. Photo URLs are presigned. 404 DISPUTE_NOT_FOUND when there is none or the order is not yours.",
         "operationId": "DisputeController_findForOrder",
         "parameters": [
           {
@@ -7977,7 +8734,7 @@
     },
     {
       "name": "Sourcing Requests",
-      "description": "A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts NEW. Admins match them from /admin/sourcing-requests."
+      "description": "A buyer asks LAICOS to source produce that is not listed. Buyers create requests and read their own; each starts PENDING. Admins match them from /admin/sourcing-requests."
     },
     {
       "name": "Agents",
@@ -7993,7 +8750,7 @@
     },
     {
       "name": "Messages",
-      "description": "Text conversations between an order's buyer and its agent, one per order. Open from payment until the order is fulfilled or cancelled, then read-only. Live updates arrive over socket.io at /v1/chat (WebSocket transport, auth: { token: <Firebase ID token> }): message.created carries a Message, conversation.read carries a ConversationReadEvent."
+      "description": "Text conversations between a buyer and an agent: one per order, and one per accepted sourcing request. An order chat is open from payment until the order is fulfilled or cancelled. A sourcing-request chat opens when the agent accepts and stays writable until every order of the paid checkout is closed, including the dispute window; it is closed if the request is closed before payment. Closed chats are read-only. Live updates arrive over socket.io at /v1/chat (WebSocket transport, auth: { token: <Firebase ID token> }): message.created carries a Message, conversation.read carries a ConversationReadEvent."
     },
     {
       "name": "Bank accounts",
@@ -8765,7 +9522,13 @@
           "DISPUTE_RAISED",
           "DISPUTE_RESOLVED",
           "REFUND_PROCESSED",
-          "PAYOUT_PAID"
+          "PAYOUT_PAID",
+          "SOURCING_ASSIGNED",
+          "SOURCING_UNANSWERED",
+          "SOURCING_OFFER",
+          "SOURCING_OFFER_WITHDRAWN",
+          "SOURCING_CONTRACT_READY",
+          "SOURCING_PAYMENT_READY"
         ]
       },
       "NotificationDto": {
@@ -10121,7 +10884,8 @@
           "DRAFT",
           "PUBLISHED",
           "SOLD_OUT",
-          "DISABLED"
+          "DISABLED",
+          "SOURCED"
         ]
       },
       "AdminFarmProductDto": {
@@ -12399,11 +13163,17 @@
           },
           "state": {
             "type": "string",
+            "nullable": true,
             "example": "Kano"
           },
           "lga": {
             "type": "string",
+            "nullable": true,
             "example": "Nassarawa"
+          },
+          "country": {
+            "type": "string",
+            "example": "Nigeria"
           },
           "contactName": {
             "type": "string",
@@ -12419,6 +13189,7 @@
           "street",
           "state",
           "lga",
+          "country",
           "contactName",
           "contactPhone"
         ]
@@ -12430,6 +13201,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "sourced": {
+            "type": "boolean",
+            "description": "True when an agent sourced this order from a farm offer"
+          },
           "orderNumber": {
             "type": "string",
             "example": "ORD-000123",
@@ -12437,7 +13212,8 @@
           },
           "produceId": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "On sourced orders (`sourced: true`) this is a hidden listing that is not browsable."
           },
           "produceName": {
             "type": "string",
@@ -12510,6 +13286,7 @@
         },
         "required": [
           "id",
+          "sourced",
           "orderNumber",
           "produceId",
           "produceName",
@@ -12694,6 +13471,12 @@
             "format": "date",
             "example": "2026-10-10"
           },
+          "deliveryDateTo": {
+            "type": "string",
+            "nullable": true,
+            "format": "date",
+            "description": "End of a delivery window; null for a single date"
+          },
           "shippingTo": {
             "$ref": "#/components/schemas/ShippingToDto"
           },
@@ -12729,6 +13512,7 @@
           "expiresAt",
           "paidAt",
           "deliveryDate",
+          "deliveryDateTo",
           "shippingTo",
           "createdAt",
           "orders",
@@ -13238,6 +14022,10 @@
                 "$ref": "#/components/schemas/AdminOrderDisputeDto"
               }
             ]
+          },
+          "sourced": {
+            "type": "boolean",
+            "description": "True when an agent sourced this order"
           }
         },
         "required": [
@@ -13252,7 +14040,8 @@
           "farm",
           "sourcingRequest",
           "totalPrice",
-          "dispute"
+          "dispute",
+          "sourced"
         ]
       },
       "AdminOrderRowListResponseDto": {
@@ -13336,6 +14125,10 @@
             "format": "date-time",
             "type": "string",
             "nullable": true
+          },
+          "sourced": {
+            "type": "boolean",
+            "description": "True when an agent sourced this order"
           }
         },
         "required": [
@@ -13350,7 +14143,8 @@
           "totalPrice",
           "agentCommission",
           "cancellationReason",
-          "fulfilledAt"
+          "fulfilledAt",
+          "sourced"
         ]
       },
       "AdminOrderDetailBuyerDto": {
@@ -14722,20 +15516,19 @@
           "packaging",
           "condition",
           "deliveryDestination",
-          "requiredDate",
-          "timeline"
+          "requiredDate"
         ]
       },
       "SourcingRequestStatus": {
         "type": "string",
         "enum": [
-          "NEW",
-          "IN_REVIEW",
+          "PENDING",
+          "ASSIGNED",
           "FINDING_SUPPLY",
-          "AWAITING_BUYER",
+          "NEGOTIATING",
           "CONFIRMED",
-          "FULFILMENT",
           "COMPLETED",
+          "FULFILLED",
           "CLOSED"
         ]
       },
@@ -14792,13 +15585,6 @@
             "example": "2026-11-15",
             "description": "Today or later (Africa/Lagos)"
           },
-          "timeline": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SourcingTimeline"
-              }
-            ]
-          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -14814,6 +15600,14 @@
           "logisticsNotes": {
             "type": "string",
             "nullable": true
+          },
+          "timeline": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingTimeline"
+              }
+            ]
           },
           "status": {
             "allOf": [
@@ -14845,11 +15639,11 @@
           "condition",
           "deliveryDestination",
           "requiredDate",
-          "timeline",
           "id",
           "requestNumber",
           "additionalSpecs",
           "logisticsNotes",
+          "timeline",
           "status",
           "checkoutId",
           "createdAt",
@@ -14895,31 +15689,264 @@
           "metaData"
         ]
       },
+      "SourcingContractPartyDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Ada Obi"
+          },
+          "code": {
+            "type": "string",
+            "example": "BY-000001",
+            "description": "Buyer or agent code"
+          }
+        },
+        "required": [
+          "name",
+          "code"
+        ]
+      },
+      "SourcingContractDeliveryDto": {
+        "type": "object",
+        "properties": {
+          "country": {
+            "type": "string",
+            "example": "Nigeria"
+          },
+          "address": {
+            "type": "string",
+            "example": "12 Bompai Road"
+          },
+          "region": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true,
+            "example": "Kano"
+          },
+          "lga": {
+            "type": "string",
+            "nullable": true,
+            "example": "Nassarawa"
+          },
+          "contactName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-11-20"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-11-25"
+          }
+        },
+        "required": [
+          "country",
+          "address",
+          "region",
+          "state",
+          "lga",
+          "contactName",
+          "contactPhone",
+          "from",
+          "to"
+        ]
+      },
+      "SourcingContractLineDto": {
+        "type": "object",
+        "properties": {
+          "farmCode": {
+            "type": "string",
+            "example": "LF-000001"
+          },
+          "farmerName": {
+            "type": "string"
+          },
+          "produceName": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "In `unit`, the offer's own unit"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "agreedUnitPrice": {
+            "type": "string",
+            "example": "1200.00",
+            "description": "Per `unit`, to the farmer"
+          }
+        },
+        "required": [
+          "farmCode",
+          "farmerName",
+          "produceName",
+          "quantity",
+          "unit",
+          "agreedUnitPrice"
+        ]
+      },
+      "SourcingContractTermsDto": {
+        "type": "object",
+        "properties": {
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000015"
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/SourcingContractPartyDto"
+          },
+          "agent": {
+            "$ref": "#/components/schemas/SourcingContractPartyDto"
+          },
+          "produceName": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "In `unit`, as the buyer asked"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "agreedPrice": {
+            "type": "string",
+            "example": "150000.00",
+            "description": "The buyer total"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/SourcingContractDeliveryDto"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourcingContractLineDto"
+            }
+          }
+        },
+        "required": [
+          "requestNumber",
+          "buyer",
+          "agent",
+          "produceName",
+          "quantity",
+          "unit",
+          "agreedPrice",
+          "delivery",
+          "lines"
+        ]
+      },
+      "SourcingContractDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agreedPrice": {
+            "type": "string",
+            "example": "150000.00"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/SourcingContractTermsDto"
+          },
+          "buyerSignedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "agentSignedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "voidedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "checkoutId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "agreedPrice",
+          "terms",
+          "buyerSignedAt",
+          "agentSignedAt",
+          "voidedAt",
+          "createdAt",
+          "checkoutId"
+        ]
+      },
+      "SourcingContractResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SourcingContractDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
       "AdminSourcingSummaryDto": {
         "type": "object",
         "properties": {
           "total": {
             "type": "number"
           },
-          "new": {
+          "pending": {
             "type": "number"
           },
-          "inReview": {
+          "assigned": {
             "type": "number"
           },
           "findingSupply": {
             "type": "number"
           },
-          "awaitingBuyer": {
+          "negotiating": {
             "type": "number"
           },
           "confirmed": {
             "type": "number"
           },
-          "fulfilment": {
+          "completed": {
             "type": "number"
           },
-          "completed": {
+          "fulfilled": {
             "type": "number"
           },
           "closed": {
@@ -14928,13 +15955,13 @@
         },
         "required": [
           "total",
-          "new",
-          "inReview",
+          "pending",
+          "assigned",
           "findingSupply",
-          "awaitingBuyer",
+          "negotiating",
           "confirmed",
-          "fulfilment",
           "completed",
+          "fulfilled",
           "closed"
         ]
       },
@@ -15051,21 +16078,143 @@
           "metaData"
         ]
       },
-      "AdminAllocationDto": {
+      "AdminBuyerCardDto": {
         "type": "object",
         "properties": {
-          "produceId": {
+          "id": {
             "type": "string",
             "format": "uuid"
+          },
+          "buyerId": {
+            "type": "string"
+          },
+          "buyerType": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BuyerType"
+              }
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "lga": {
+            "type": "string",
+            "nullable": true
+          },
+          "legalName": {
+            "type": "string",
+            "nullable": true
+          },
+          "department": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactName": {
+            "type": "string",
+            "nullable": true
+          },
+          "contactPhone": {
+            "type": "string",
+            "nullable": true
+          },
+          "paymentTerms": {
+            "type": "string",
+            "nullable": true
+          },
+          "recentOrders": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "buyerId",
+          "buyerType",
+          "displayName",
+          "phoneNumber",
+          "state",
+          "lga",
+          "legalName",
+          "department",
+          "contactName",
+          "contactPhone",
+          "paymentTerms",
+          "recentOrders"
+        ]
+      },
+      "AdminAssignmentDto": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentCode": {
+            "type": "string"
           },
           "name": {
             "type": "string"
           },
-          "unit": {
-            "type": "string"
+          "clusterName": {
+            "type": "string",
+            "nullable": true
           },
-          "pricePerUnit": {
-            "type": "string"
+          "clusterCode": {
+            "type": "string",
+            "nullable": true,
+            "example": "CL-000018"
+          }
+        },
+        "required": [
+          "agentId",
+          "agentCode",
+          "name",
+          "clusterName",
+          "clusterCode"
+        ]
+      },
+      "SourcingOfferStatus": {
+        "type": "string",
+        "enum": [
+          "OFFERED",
+          "ACCEPTED",
+          "REJECTED"
+        ]
+      },
+      "AdminAllocationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingOfferStatus"
+              }
+            ]
+          },
+          "agreedUnitPrice": {
+            "type": "string",
+            "nullable": true,
+            "example": "1200.00",
+            "description": "Per `unit`"
+          },
+          "farmId": {
+            "type": "string",
+            "format": "uuid"
           },
           "farmCode": {
             "type": "string"
@@ -15076,25 +16225,308 @@
           "farmerName": {
             "type": "string"
           },
-          "floatingQuantity": {
+          "quantity": {
+            "type": "number",
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "agreedUnitPrice",
+          "farmId",
+          "farmCode",
+          "farmName",
+          "farmerName",
+          "quantity",
+          "unit"
+        ]
+      },
+      "CoverageDto": {
+        "type": "object",
+        "properties": {
+          "requested": {
             "type": "number"
           },
-          "selectedQuantity": {
+          "selected": {
+            "type": "number"
+          },
+          "remaining": {
             "type": "number"
           }
         },
         "required": [
-          "produceId",
-          "name",
-          "unit",
-          "pricePerUnit",
-          "farmCode",
-          "farmName",
-          "farmerName",
-          "floatingQuantity"
+          "requested",
+          "selected",
+          "remaining"
         ]
       },
-      "AdminAllocationArrayResponseDto": {
+      "AdminLiveCheckoutDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CheckoutStatus"
+              }
+            ]
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "total": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "expiresAt",
+          "total"
+        ]
+      },
+      "HandoverStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "VERIFIED",
+          "HANDED_OVER"
+        ]
+      },
+      "AdminSourcingOrderDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "orderNumber": {
+            "type": "string"
+          },
+          "farmCode": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OrderStatus"
+              }
+            ]
+          },
+          "handoverStatus": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/HandoverStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "orderNumber",
+          "farmCode",
+          "quantity",
+          "status",
+          "handoverStatus"
+        ]
+      },
+      "AdminSourcingDetailDto": {
+        "type": "object",
+        "properties": {
+          "produceName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Sesame Seeds (Bulk)"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 1,
+            "example": 20,
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "quality": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QualityGrade"
+              }
+            ]
+          },
+          "packaging": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PackagingType"
+              }
+            ]
+          },
+          "condition": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCondition"
+              }
+            ]
+          },
+          "deliveryDestination": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Warehouse A, Ibadan, Oyo State"
+          },
+          "requiredDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-11-15",
+            "description": "Today or later (Africa/Lagos)"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000015"
+          },
+          "additionalSpecs": {
+            "type": "string",
+            "nullable": true
+          },
+          "logisticsNotes": {
+            "type": "string",
+            "nullable": true
+          },
+          "timeline": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingTimeline"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingRequestStatus"
+              }
+            ]
+          },
+          "conversationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "escalatedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "closedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "closeReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "buyer": {
+            "$ref": "#/components/schemas/AdminBuyerCardDto"
+          },
+          "assignment": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminAssignmentDto"
+              }
+            ]
+          },
+          "allocations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminAllocationDto"
+            }
+          },
+          "coverage": {
+            "description": "Counts farmer-accepted offers only, in the request's unit (kg and tonne offers converted)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CoverageDto"
+              }
+            ]
+          },
+          "checkout": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminLiveCheckoutDto"
+              }
+            ]
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSourcingOrderDto"
+            }
+          },
+          "audit": {
+            "description": "The newest five rows",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEventDto"
+            }
+          }
+        },
+        "required": [
+          "produceName",
+          "quantity",
+          "unit",
+          "quality",
+          "packaging",
+          "condition",
+          "deliveryDestination",
+          "requiredDate",
+          "id",
+          "requestNumber",
+          "additionalSpecs",
+          "logisticsNotes",
+          "timeline",
+          "status",
+          "conversationId",
+          "escalatedAt",
+          "closedAt",
+          "closeReason",
+          "buyer",
+          "assignment",
+          "allocations",
+          "coverage",
+          "checkout",
+          "orders",
+          "audit"
+        ]
+      },
+      "AdminSourcingDetailResponseDto": {
         "type": "object",
         "properties": {
           "message": {
@@ -15102,10 +16534,7 @@
             "example": "OK"
           },
           "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdminAllocationDto"
-            }
+            "$ref": "#/components/schemas/AdminSourcingDetailDto"
           }
         },
         "required": [
@@ -15125,38 +16554,6 @@
           "agentId"
         ]
       },
-      "AllocationItemDto": {
-        "type": "object",
-        "properties": {
-          "produceId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "quantity": {
-            "type": "number",
-            "minimum": 1
-          }
-        },
-        "required": [
-          "produceId",
-          "quantity"
-        ]
-      },
-      "SaveAllocationsDto": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "maxItems": 50,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AllocationItemDto"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "CloseSourcingRequestDto": {
         "type": "object",
         "properties": {
@@ -15168,6 +16565,700 @@
         "required": [
           "reason"
         ]
+      },
+      "AgentOfferDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string"
+          },
+          "farmName": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingOfferStatus"
+              }
+            ]
+          },
+          "agreedUnitPrice": {
+            "type": "string",
+            "nullable": true,
+            "example": "1200.00",
+            "description": "Per `unit`"
+          }
+        },
+        "required": [
+          "id",
+          "farmId",
+          "farmCode",
+          "farmName",
+          "quantity",
+          "unit",
+          "status",
+          "agreedUnitPrice"
+        ]
+      },
+      "AgentSourcingContractDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agreedPrice": {
+            "type": "string",
+            "example": "150000.00"
+          },
+          "terms": {
+            "$ref": "#/components/schemas/SourcingContractTermsDto"
+          },
+          "buyerSignedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "agentSignedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "voidedAt": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agreedPrice",
+          "terms",
+          "buyerSignedAt",
+          "agentSignedAt",
+          "voidedAt",
+          "createdAt"
+        ]
+      },
+      "AgentSourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "produceName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Sesame Seeds (Bulk)"
+          },
+          "quantity": {
+            "type": "number",
+            "minimum": 1,
+            "example": 20,
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "quality": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/QualityGrade"
+              }
+            ]
+          },
+          "packaging": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PackagingType"
+              }
+            ]
+          },
+          "condition": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProduceCondition"
+              }
+            ]
+          },
+          "deliveryDestination": {
+            "type": "string",
+            "maxLength": 200,
+            "example": "Warehouse A, Ibadan, Oyo State"
+          },
+          "requiredDate": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-11-15",
+            "description": "Today or later (Africa/Lagos)"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000015"
+          },
+          "additionalSpecs": {
+            "type": "string",
+            "nullable": true
+          },
+          "logisticsNotes": {
+            "type": "string",
+            "nullable": true
+          },
+          "timeline": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingTimeline"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingRequestStatus"
+              }
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "respondBy": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "conversationId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentOfferDto"
+            }
+          },
+          "contract": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentSourcingContractDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "produceName",
+          "quantity",
+          "unit",
+          "quality",
+          "packaging",
+          "condition",
+          "deliveryDestination",
+          "requiredDate",
+          "id",
+          "requestNumber",
+          "additionalSpecs",
+          "logisticsNotes",
+          "timeline",
+          "status",
+          "createdAt",
+          "updatedAt",
+          "respondBy",
+          "conversationId",
+          "offers",
+          "contract"
+        ]
+      },
+      "AgentSourcingRequestListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentSourcingRequestDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "AgentSourcingRequestResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AgentSourcingRequestDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "DeclineSourcingRequestDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "SourcingFarmRowDto": {
+        "type": "object",
+        "properties": {
+          "farmId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "farmCode": {
+            "type": "string"
+          },
+          "farmName": {
+            "type": "string"
+          },
+          "farmerName": {
+            "type": "string"
+          },
+          "farmerCode": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "lga": {
+            "type": "string"
+          },
+          "mainProduce": {
+            "type": "string"
+          },
+          "listingNames": {
+            "description": "Names of its published and sold-out listings",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "offerId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "This request's offer to the farm, if any"
+          }
+        },
+        "required": [
+          "farmId",
+          "farmCode",
+          "farmName",
+          "farmerName",
+          "farmerCode",
+          "state",
+          "lga",
+          "mainProduce",
+          "listingNames",
+          "offerId"
+        ]
+      },
+      "SourcingFarmRowListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourcingFarmRowDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "SourcingOfferLineDto": {
+        "type": "object",
+        "properties": {
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "farmId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A verified farm"
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "example": 50,
+            "description": "Whole units of `unit`"
+          }
+        },
+        "required": [
+          "unit",
+          "farmId",
+          "quantity"
+        ]
+      },
+      "SetSourcingOffersDto": {
+        "type": "object",
+        "properties": {
+          "offers": {
+            "uniqueItems": true,
+            "description": "The whole supply pool, up to 50 farms, each farmId once. Farms left out are withdrawn.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourcingOfferLineDto"
+            }
+          }
+        },
+        "required": [
+          "offers"
+        ]
+      },
+      "PriceSourcingOfferDto": {
+        "type": "object",
+        "properties": {
+          "agreedUnitPrice": {
+            "type": "string",
+            "example": "1200.50",
+            "description": "Naira per unit of the offer's own unit, above 0, at most 2 decimals"
+          }
+        },
+        "required": [
+          "agreedUnitPrice"
+        ]
+      },
+      "SourcingQuoteLineDto": {
+        "type": "object",
+        "properties": {
+          "offerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "produceName": {
+            "type": "string"
+          },
+          "farmCode": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number",
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "agreedUnitPrice": {
+            "type": "string",
+            "example": "1200.00",
+            "description": "Per `unit`"
+          },
+          "total": {
+            "type": "string",
+            "example": "4800.00"
+          },
+          "commission": {
+            "type": "string",
+            "example": "480.00"
+          }
+        },
+        "required": [
+          "offerId",
+          "produceName",
+          "farmCode",
+          "quantity",
+          "unit",
+          "agreedUnitPrice",
+          "total",
+          "commission"
+        ]
+      },
+      "SourcingQuoteDto": {
+        "type": "object",
+        "properties": {
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourcingQuoteLineDto"
+            }
+          },
+          "unpricedOffers": {
+            "type": "number"
+          },
+          "subtotal": {
+            "type": "string",
+            "example": "4800.00"
+          },
+          "serviceFee": {
+            "type": "string",
+            "example": "240.00"
+          },
+          "agentCommission": {
+            "type": "string",
+            "example": "480.00"
+          },
+          "suggestedPrice": {
+            "type": "string",
+            "example": "5520.00",
+            "description": "The floor for the agreed price"
+          }
+        },
+        "required": [
+          "lines",
+          "unpricedOffers",
+          "subtotal",
+          "serviceFee",
+          "agentCommission",
+          "suggestedPrice"
+        ]
+      },
+      "SourcingQuoteResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SourcingQuoteDto"
+          }
+        },
+        "required": [
+          "message",
+          "data"
+        ]
+      },
+      "ConfirmSourcingDto": {
+        "type": "object",
+        "properties": {
+          "agreedPrice": {
+            "type": "string",
+            "example": "150000.00",
+            "description": "The buyer total, at least the suggested price from the quote (409 SOURCING_PRICE_BELOW_FLOOR)"
+          },
+          "deliveryCountry": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 56,
+            "example": "Nigeria",
+            "description": "Any casing of Nigeria is stored as \"Nigeria\""
+          },
+          "deliveryAddress": {
+            "type": "string",
+            "maxLength": 300,
+            "example": "12 Bompai Road, Kano"
+          },
+          "deliveryRegion": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "North West"
+          },
+          "deliveryStateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required when deliveryCountry is Nigeria, refused otherwise"
+          },
+          "deliveryLgaId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required when deliveryCountry is Nigeria, refused otherwise; must lie in deliveryStateId"
+          },
+          "deliveryContactName": {
+            "type": "string",
+            "maxLength": 100,
+            "example": "Musa Ibrahim"
+          },
+          "deliveryContactPhone": {
+            "type": "string",
+            "maxLength": 20,
+            "example": "+2348012345678"
+          },
+          "deliveryFrom": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-11-20",
+            "description": "Today or later (Africa/Lagos)"
+          },
+          "deliveryTo": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-11-25",
+            "description": "On or after deliveryFrom"
+          }
+        },
+        "required": [
+          "agreedPrice",
+          "deliveryCountry",
+          "deliveryAddress",
+          "deliveryFrom",
+          "deliveryTo"
+        ]
+      },
+      "FarmerSourcingOfferDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingOfferStatus"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "number",
+            "description": "In `unit`"
+          },
+          "unit": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingUnit"
+              }
+            ]
+          },
+          "agreedUnitPrice": {
+            "type": "string",
+            "nullable": true,
+            "example": "1200.00",
+            "description": "Per `unit`"
+          },
+          "produceName": {
+            "type": "string",
+            "description": "The request's produce"
+          },
+          "requestNumber": {
+            "type": "string",
+            "example": "REQ-000123"
+          },
+          "requiredDate": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deliveryDestination": {
+            "type": "string"
+          },
+          "requestStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SourcingRequestStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "quantity",
+          "unit",
+          "agreedUnitPrice",
+          "produceName",
+          "requestNumber",
+          "requiredDate",
+          "deliveryDestination",
+          "requestStatus"
+        ]
+      },
+      "FarmerSourcingOfferListResponseDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "example": "OK"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FarmerSourcingOfferDto"
+            }
+          },
+          "metaData": {
+            "$ref": "#/components/schemas/PaginationMetaDto"
+          }
+        },
+        "required": [
+          "message",
+          "data",
+          "metaData"
+        ]
+      },
+      "RejectSourcingOfferDto": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
       },
       "AdminProfileDto": {
         "type": "object",
@@ -15682,14 +17773,6 @@
         "enum": [
           "FARM_VERIFICATION",
           "ORDER_HANDOVER"
-        ]
-      },
-      "HandoverStatus": {
-        "type": "string",
-        "enum": [
-          "PENDING",
-          "VERIFIED",
-          "HANDED_OVER"
         ]
       },
       "HandoverProofDto": {
@@ -16963,13 +19046,23 @@
           },
           "orderId": {
             "type": "string",
-            "format": "uuid"
+            "nullable": true,
+            "format": "uuid",
+            "description": "Set for an order chat; null for a sourcing chat"
+          },
+          "sourcingRequestId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid",
+            "description": "Set for a sourcing chat, which also serves the request's orders"
           },
           "orderNumber": {
             "type": "string",
+            "nullable": true,
             "example": "ORD-000123"
           },
           "orderStatus": {
+            "nullable": true,
             "allOf": [
               {
                 "$ref": "#/components/schemas/OrderStatus"
@@ -16987,9 +19080,10 @@
           "unit": {
             "type": "string",
             "example": "tonnes",
-            "description": "The listing's current unit; orders don't snapshot it"
+            "description": "An order chat shows the listing's current unit (orders don't snapshot it); a sourcing chat the request's SourcingUnit"
           },
           "type": {
+            "nullable": true,
             "allOf": [
               {
                 "$ref": "#/components/schemas/ProduceType"
@@ -16998,7 +19092,7 @@
           },
           "isClosed": {
             "type": "boolean",
-            "description": "The order is FULFILLED or CANCELLED: readable, but no new messages"
+            "description": "Readable, but no new messages. An order chat closes when the order is cancelled, or fulfilled with its dispute window passed and no open dispute. A sourcing chat closes when the request is CLOSED before payment, or once every paid order is closed that way."
           },
           "counterpart": {
             "$ref": "#/components/schemas/ConversationParticipantDto"
@@ -17030,6 +19124,7 @@
         "required": [
           "id",
           "orderId",
+          "sourcingRequestId",
           "orderNumber",
           "orderStatus",
           "produceName",

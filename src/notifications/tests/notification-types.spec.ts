@@ -115,3 +115,92 @@ describe('NOTIFICATION_TYPES for delivery, disputes and money', () => {
     expect(rendered.PAYOUT_PAID.body).toContain('9000.00');
   });
 });
+
+describe('NOTIFICATION_TYPES for sourcing', () => {
+  const user = recipient(Role.BUYER);
+  const both = [NotificationChannel.PUSH, NotificationChannel.EMAIL];
+  const cases = [
+    [
+      'SOURCING_ASSIGNED',
+      NOTIFICATION_TYPES.SOURCING_ASSIGNED.render(
+        { requestId: 'q1', requestNumber: 'REQ-000001', produceName: 'Maize' },
+        user,
+      ),
+      both,
+    ],
+    [
+      'SOURCING_UNANSWERED',
+      NOTIFICATION_TYPES.SOURCING_UNANSWERED.render(
+        { requestId: 'q1', requestNumber: 'REQ-000001', responseHours: 24 },
+        user,
+      ),
+      [NotificationChannel.EMAIL],
+    ],
+    [
+      'SOURCING_OFFER',
+      NOTIFICATION_TYPES.SOURCING_OFFER.render(
+        {
+          requestId: 'q1',
+          offerId: 'f1',
+          produceName: 'Maize',
+          quantity: '50',
+          unit: 'kg',
+        },
+        user,
+      ),
+      both,
+    ],
+    [
+      'SOURCING_OFFER_WITHDRAWN',
+      NOTIFICATION_TYPES.SOURCING_OFFER_WITHDRAWN.render(
+        { requestId: 'q1', offerId: 'f1', produceName: 'Maize' },
+        user,
+      ),
+      both,
+    ],
+    [
+      'SOURCING_CONTRACT_READY',
+      NOTIFICATION_TYPES.SOURCING_CONTRACT_READY.render(
+        { requestId: 'q1', requestNumber: 'REQ-000001' },
+        user,
+      ),
+      both,
+    ],
+    [
+      'SOURCING_PAYMENT_READY',
+      NOTIFICATION_TYPES.SOURCING_PAYMENT_READY.render(
+        {
+          requestId: 'q1',
+          requestNumber: 'REQ-000001',
+          checkoutId: 'c1',
+          amount: '9000.00',
+        },
+        user,
+      ),
+      both,
+    ],
+  ] as const;
+
+  it.each(cases)('%s renders and uses its channels', (type, out, channels) => {
+    expect(NOTIFICATION_TYPES[type].channels).toEqual(channels);
+    expect(out.title).not.toBe('');
+    expect(out.body).not.toBe('');
+    expect(out.email.subject).not.toBe('');
+    expect(out.email.text.startsWith('Hi Ada,')).toBe(true);
+    expect(out.data).toMatchObject({ requestId: 'q1' });
+  });
+
+  it('apologises to the buyer when the agent could not take the request', () => {
+    const out = NOTIFICATION_TYPES.SOURCING_UNANSWERED.render(
+      { requestId: 'q1', requestNumber: 'REQ-000001', responseHours: 48 },
+      user,
+    );
+    expect(out.email.text).toMatch(/sorry/i);
+    expect(out.email.text).toContain('another 48 hours');
+    expect(out.email.text).toMatch(/new agent/i);
+  });
+
+  it('states the amount to pay', () => {
+    expect(cases[5][1].body).toContain('9000.00');
+  });
+});

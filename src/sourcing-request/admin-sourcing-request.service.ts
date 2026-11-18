@@ -8,29 +8,21 @@ import {
   AuditCategory,
   AuditResource,
   CheckoutStatus,
-  FarmVerificationStatus,
+  NotificationType,
   Prisma,
-  ProduceStatus,
+  SourcingOfferStatus,
   SourcingRequestStatus,
-  type SourcingUnit,
   type User,
 } from '../../generated/client';
 import { AuditService } from '../audit/audit.service';
 import { buyerDisplayName } from '../buyer/formatters/buyer.formatter';
-import { CreateCheckoutDto } from '../cart/dto';
-import { formatCheckout } from '../cart/formatters/checkout.formatter';
-import {
-  createCheckout,
-  findReplay,
-  resolveDelivery,
-} from '../cart/utils/place-checkout';
 import { advisoryLock } from '../common/advisory-lock';
 import { createdAtAfter, csvLines } from '../common/csv';
 import { fromDateColumn, lagosDay } from '../common/dates';
 import { fullName } from '../common/names';
 import { paginationMeta, resolvePagination } from '../common/pagination';
-import { orderLine, tryReserveProduce } from '../order/utils/reservation';
-import { CheckoutConfig } from '../payment/checkout-config';
+import { searchTokens } from '../common/search';
+import { NotificationService } from '../notifications/notification.service';
 import { lockCheckout } from '../payment/utils/checkout-lock';
 import {
   CHECKOUT_TRANSACTION,
@@ -39,47 +31,40 @@ import {
 import { releaseCheckout } from '../payment/utils/release-checkout';
 import { PrismaService } from '../prisma/prisma.service';
 import type {
+  AdminAllocationDto,
+  AdminSourcingDetailDto,
   AdminSourcingFilterDto,
   AdminSourcingQueryDto,
   AdminSourcingRowDto,
   AdminSourcingSummaryDto,
   AssignAgentDto,
   CloseSourcingRequestDto,
-  SaveAllocationsDto,
 } from './dto/admin-sourcing-request.dto';
-import {
-  coverage,
-  fulfilmentMark,
-  isListingEligible,
-  requestedAmount,
-  unitsComparable,
-} from './utils/sourcing-rules';
-import { syncSourcingRequest } from './utils/sync-sourcing-request';
+import { supplyCoverage } from './utils/sourcing-pricing';
+import { fulfilmentMark } from './utils/sourcing-rules';
+import { voidLiveContract } from './utils/sourcing-contract';
+import { moveSourcingStatus } from './utils/sourcing-transitions';
 
 const LIVE = [CheckoutStatus.AWAITING_PAYMENT, CheckoutStatus.PAID];
-const OPEN_FOR_MATCH: SourcingRequestStatus[] = [
-  SourcingRequestStatus.NEW,
-  SourcingRequestStatus.IN_REVIEW,
-  SourcingRequestStatus.FINDING_SUPPLY,
-];
 
-const LISTING_INCLUDE = {
+const OFFER_INCLUDE = {
   farm: {
-    include: {
-      cluster: { select: { id: true } },
+    select: {
+      farmCode: true,
+      name: true,
       owner: {
-        include: { user: { select: { firstName: true, lastName: true } } },
+        select: { user: { select: { firstName: true, lastName: true } } },
       },
     },
   },
-} satisfies Prisma.ProduceInclude;
+} satisfies Prisma.SourcingAllocationInclude;
 
 @Injectable()
 export class AdminSourcingRequestService {
   constructor(
     private readonly database: PrismaService,
     private readonly audit: AuditService,
-    private readonly config: CheckoutConfig,
+    private readonly notifications: NotificationService,
   ) {}
 
   async summary(): Promise<AdminSourcingSummaryDto> {
@@ -90,13 +75,13 @@ export class AdminSourcingRequestService {
     const count = (status: SourcingRequestStatus) =>
       groups.find((group) => group.status === status)?._count._all ?? 0;
     const cards = {
-      new: count(SourcingRequestStatus.NEW),
-      inReview: count(SourcingRequestStatus.IN_REVIEW),
+      pending: count(SourcingRequestStatus.PENDING),
+      assigned: count(SourcingRequestStatus.ASSIGNED),
       findingSupply: count(SourcingRequestStatus.FINDING_SUPPLY),
-      awaitingBuyer: count(SourcingRequestStatus.AWAITING_BUYER),
+      negotiating: count(SourcingRequestStatus.NEGOTIATING),
       confirmed: count(SourcingRequestStatus.CONFIRMED),
-      fulfilment: count(SourcingRequestStatus.FULFILMENT),
       completed: count(SourcingRequestStatus.COMPLETED),
+      fulfilled: count(SourcingRequestStatus.FULFILLED),
       closed: count(SourcingRequestStatus.CLOSED),
     };
     return {
@@ -157,7 +142,7 @@ export class AdminSourcingRequestService {
     );
   }
 
-  async findOne(id: string) {
+  async findOne(id: string): Promise<AdminSourcingDetailDto> {
     const request = await this.database.sourcingRequest.findUnique({
       where: { id },
       include: DETAIL_INCLUDE,
@@ -172,10 +157,12 @@ export class AdminSourcingRequestService {
       select: { id: true, orderNumber: true, status: true },
     });
     const audit = await this.audit.findForRequest(id, { page: 1, perPage: 5 });
-    const selected = request.allocations.reduce(
-      (sum, row) =>
-        sum + comparableQuantity(request.unit, row.produce.unit, row.quantity),
-      0,
+    // Only farmer-accepted offers count, as for the agent's supply-complete.
+    const covered = supplyCoverage(
+      request,
+      request.allocations.filter(
+        (row) => row.status === SourcingOfferStatus.ACCEPTED,
+      ),
     );
     const live =
       request.checkouts.find(
@@ -200,6 +187,7 @@ export class AdminSourcingRequestService {
       timeline: request.timeline,
       logisticsNotes: request.logisticsNotes,
       status: request.status,
+      conversationId: request.conversation?.id ?? null,
       escalatedAt: request.escalatedAt,
       closedAt: request.closedAt,
       closeReason: request.closeReason,
@@ -227,13 +215,8 @@ export class AdminSourcingRequestService {
             clusterCode: request.assignedAgent.cluster?.clusterCode ?? null,
           }
         : null,
-      allocations: request.allocations.map((row) =>
-        allocationRow(row.produce, row.quantity),
-      ),
-      coverage: coverage(
-        requestedAmount(request.quantity, request.unit),
-        selected,
-      ),
+      allocations: request.allocations.map(allocationRow),
+      coverage: covered,
       checkout: live
         ? {
             id: live.id,
@@ -249,318 +232,76 @@ export class AdminSourcingRequestService {
         quantity: order.quantity,
         status: order.status,
         handoverStatus: order.handover?.status ?? null,
-        conversationId: order.conversation?.id ?? null,
       })),
       audit: audit.data,
     };
   }
 
-  async listings(id: string) {
-    const request = await this.requireRequest(id);
-    if (!request.assignedAgentId) {
-      throw new ConflictException('Assign an agent before matching listings');
-    }
-    const agent = await this.database.agent.findUnique({
-      where: { id: request.assignedAgentId },
-      include: { cluster: true },
-    });
-    if (!agent?.cluster) {
-      throw new NotFoundException('Agent not found');
-    }
-    const produces = await this.database.produce.findMany({
-      where: {
-        status: ProduceStatus.PUBLISHED,
-        floatingQuantity: { gte: 1 },
-        farm: {
-          verificationStatus: FarmVerificationStatus.VERIFIED,
-          clusterId: agent.cluster.id,
-        },
-      },
-      include: LISTING_INCLUDE,
-      orderBy: { createdAt: 'desc' },
-    });
-    return produces
-      .filter((produce) =>
-        isListingEligible({
-          statusPublished: true,
-          floatingQuantity: produce.floatingQuantity,
-          listingName: produce.name,
-          requestName: request.produceName,
-          farmVerified: true,
-          inAgentCluster: true,
-          requestUnit: request.unit,
-          listingUnit: produce.unit,
-        }),
-      )
-      .map((produce) => allocationRow(produce));
-  }
-
   async assign(admin: User, id: string, dto: AssignAgentDto) {
-    await busyAsConflict(() =>
+    const deliveryIds = await busyAsConflict(() =>
       this.database.$transaction(async (tx) => {
         await advisoryLock(tx, `sourcing:${id}`);
         const request = await this.requireRequest(id, tx);
-        if (!OPEN_FOR_MATCH.includes(request.status)) {
-          throw new ConflictException(
-            'The agent cannot change after a checkout is placed',
-          );
-        }
         const agent = await tx.agent.findUnique({
           where: { id: dto.agentId },
-          include: { cluster: true, user: true },
+          include: { user: true },
         });
         if (!agent) {
           throw new NotFoundException('Agent not found');
         }
-        if (!agent.isVerified || !agent.cluster) {
+        if (!agent.isVerified) {
           throw new ConflictException('The agent must be verified');
         }
-        const allocations = await tx.sourcingAllocation.findMany({
-          where: { sourcingRequestId: id },
-          include: {
-            produce: { select: { farm: { select: { clusterId: true } } } },
-          },
-        });
-        if (
-          allocations.some(
-            (row) => row.produce.farm.clusterId !== agent.cluster!.id,
-          )
-        ) {
-          throw new ConflictException(
-            'The saved listings are outside that agent’s cluster',
-          );
-        }
-        const changed = request.assignedAgentId !== agent.id;
+        await moveSourcingStatus(
+          tx,
+          id,
+          SourcingRequestStatus.ASSIGNED,
+          'ADMIN',
+        );
+        // A reassignment restarts the agent's response window.
         await tx.sourcingRequest.update({
           where: { id },
-          data: { assignedAgentId: agent.id },
+          data: { assignedAgentId: agent.id, assignedAt: new Date() },
         });
-        await syncSourcingRequest(tx, id);
-        if (changed) {
-          await this.audit.record(tx, {
-            actorType: AuditActorType.ADMIN,
-            actorUserId: admin.id,
-            farmerId: null,
-            agentId: agent.id,
-            farmId: null,
-            category: AuditCategory.ASSIGNMENT,
-            title: request.assignedAgentId
-              ? 'Agent reassigned'
-              : 'Agent assigned',
-            summary: `${fullName(agent.user)} (${agent.agentId})`,
-            actionLabel: 'View agent',
-            resource: AuditResource.AGENT,
-            resourceId: agent.id,
-            sourcingRequestId: id,
-          });
-        }
-      }, CHECKOUT_TRANSACTION),
-    );
-    return this.findOne(id);
-  }
-
-  async save(admin: User, id: string, dto: SaveAllocationsDto) {
-    await busyAsConflict(() =>
-      this.database.$transaction(async (tx) => {
-        await advisoryLock(tx, `sourcing:${id}`);
-        const request = await this.requireRequest(id, tx);
-        if (!request.assignedAgentId) {
-          throw new ConflictException(
-            'Assign an agent before matching listings',
-          );
-        }
-        if (!OPEN_FOR_MATCH.includes(request.status)) {
-          throw new ConflictException(
-            'The selection cannot change after a checkout is placed',
-          );
-        }
-        const agent = await tx.agent.findUniqueOrThrow({
-          where: { id: request.assignedAgentId },
-          include: { cluster: true },
-        });
-        const current = await tx.sourcingAllocation.findMany({
-          where: { sourcingRequestId: id },
-        });
-        const next = await this.checkedItems(
-          tx,
-          request,
-          agent.cluster?.id,
-          dto,
-        );
-        await tx.sourcingAllocation.deleteMany({
-          where: { sourcingRequestId: id },
-        });
-        if (next.length > 0) {
-          await tx.sourcingAllocation.createMany({
-            data: next.map((item) => ({
-              sourcingRequestId: id,
-              produceId: item.produceId,
-              quantity: item.quantity,
-            })),
-          });
-        }
-        await syncSourcingRequest(tx, id);
-        if (!sameGroup(current, next)) {
-          await this.audit.record(tx, {
-            actorType: AuditActorType.ADMIN,
-            actorUserId: admin.id,
-            farmerId: null,
-            agentId: request.assignedAgentId,
-            farmId: null,
-            category: AuditCategory.MATCHING,
-            title:
-              next.length === 0
-                ? 'Selection cleared'
-                : 'Supply selection updated',
-            summary:
-              next.length === 0
-                ? 'No listings selected'
-                : next
-                    .map((item) => `${item.produceId} ${item.quantity}`)
-                    .join(', '),
-            actionLabel: 'View request',
-            resource: AuditResource.SOURCING_REQUEST,
-            resourceId: id,
-            sourcingRequestId: id,
-          });
-        }
-      }, CHECKOUT_TRANSACTION),
-    );
-    return this.findOne(id);
-  }
-
-  confirm(
-    admin: User,
-    id: string,
-    idempotencyKey: string,
-    dto: CreateCheckoutDto,
-  ) {
-    return busyAsConflict(() =>
-      this.database.$transaction(async (tx) => {
-        await advisoryLock(tx, `sourcing:${id}`);
-        const request = await tx.sourcingRequest.findUnique({
-          where: { id },
-          include: {
-            allocations: { include: { produce: { include: LISTING_INCLUDE } } },
-            checkouts: {
-              where: { status: { in: LIVE } },
-              select: { id: true, status: true },
-            },
-          },
-        });
-        if (!request) {
-          throw new NotFoundException('Sourcing request not found');
-        }
-        const replay = await findReplay(tx, request.buyerId, idempotencyKey);
-        if (replay) {
-          if (replay.sourcingRequestId !== id) {
-            throw new ConflictException(
-              'Idempotency-Key already belongs to another checkout',
-            );
-          }
-          return formatCheckout(replay);
-        }
-        if (request.checkouts.length > 0) {
-          throw new ConflictException('This request already has a checkout');
-        }
-        if (request.allocations.length === 0) {
-          throw new ConflictException('Select at least one listing');
-        }
-        const selected = request.allocations.reduce(
-          (sum, row) =>
-            sum +
-            comparableQuantity(request.unit, row.produce.unit, row.quantity),
-          0,
-        );
-        if (selected < requestedAmount(request.quantity, request.unit)) {
-          throw new ConflictException(
-            'The selection does not cover the request',
-          );
-        }
-        const clusterId = request.allocations[0]?.produce.farm.clusterId;
-        for (const row of request.allocations) {
-          if (
-            !isListingEligible({
-              statusPublished: row.produce.status === ProduceStatus.PUBLISHED,
-              floatingQuantity: row.produce.floatingQuantity,
-              listingName: row.produce.name,
-              requestName: request.produceName,
-              farmVerified:
-                row.produce.farm.verificationStatus ===
-                FarmVerificationStatus.VERIFIED,
-              inAgentCluster: row.produce.farm.clusterId === clusterId,
-              requestUnit: request.unit,
-              listingUnit: row.produce.unit,
-            }) ||
-            row.quantity > row.produce.floatingQuantity
-          ) {
-            throw new ConflictException(
-              'A selected listing is no longer eligible',
-            );
-          }
-        }
-        const delivery = await resolveDelivery(
-          tx,
-          request.buyerId,
-          dto.addressId,
-          dto.deliveryDate,
-          this.config,
-        );
-        const ordered = [...request.allocations].sort((a, b) =>
-          a.produceId.localeCompare(b.produceId),
-        );
-        const lines: ReturnType<typeof orderLine>[] = [];
-        for (const row of ordered) {
-          const { produce, reserved } = await tryReserveProduce(
-            tx,
-            row.produceId,
-            row.quantity,
-          );
-          if (!reserved || !produce) {
-            throw new ConflictException(
-              'A selected listing is no longer eligible',
-            );
-          }
-          lines.push(orderLine(produce, row.quantity));
-        }
-        const checkout = await createCheckout(
-          tx,
-          {
-            buyerId: request.buyerId,
-            idempotencyKey,
-            lines,
-            delivery,
-            expectedTotal: dto.expectedTotal,
-            sourcingRequestId: id,
-            placedBy: { type: AuditActorType.ADMIN, userId: admin.id },
-          },
-          this.config,
-        );
         await this.audit.record(tx, {
           actorType: AuditActorType.ADMIN,
           actorUserId: admin.id,
           farmerId: null,
-          agentId: request.assignedAgentId,
+          agentId: agent.id,
           farmId: null,
-          category: AuditCategory.MATCHING,
-          title: 'Supply confirmed',
-          summary: checkout.checkoutNumber,
-          actionLabel: 'View request',
-          resource: AuditResource.SOURCING_REQUEST,
-          resourceId: id,
+          category: AuditCategory.ASSIGNMENT,
+          title: request.assignedAgentId
+            ? 'Agent reassigned'
+            : 'Agent assigned',
+          summary: `${fullName(agent.user)} (${agent.agentId})`,
+          actionLabel: 'View agent',
+          resource: AuditResource.AGENT,
+          resourceId: agent.id,
           sourcingRequestId: id,
         });
-        await syncSourcingRequest(tx, id);
-        return formatCheckout(checkout);
+        return this.notifications.notify(
+          {
+            userIds: [agent.userId],
+            type: NotificationType.SOURCING_ASSIGNED,
+            params: {
+              requestId: id,
+              requestNumber: request.requestNumber,
+              produceName: request.produceName,
+            },
+          },
+          tx,
+        );
       }, CHECKOUT_TRANSACTION),
     );
+    void this.notifications.dispatch(deliveryIds);
+    return this.findOne(id);
   }
 
   async escalate(admin: User, id: string) {
     await this.database.$transaction(async (tx) => {
       const request = await this.requireRequest(id, tx);
       if (
-        request.status === SourcingRequestStatus.COMPLETED ||
+        request.status === SourcingRequestStatus.FULFILLED ||
         request.status === SourcingRequestStatus.CLOSED
       ) {
         throw new ConflictException('This request can no longer be escalated');
@@ -595,32 +336,28 @@ export class AdminSourcingRequestService {
       this.database.$transaction(async (tx) => {
         await advisoryLock(tx, `sourcing:${id}`);
         const request = await this.requireRequest(id, tx);
-        if (
-          request.status === SourcingRequestStatus.COMPLETED ||
-          request.status === SourcingRequestStatus.CLOSED
-        ) {
-          throw new ConflictException('This request is already finished');
-        }
-        if (
-          request.status === SourcingRequestStatus.CONFIRMED ||
-          request.status === SourcingRequestStatus.FULFILMENT
-        ) {
-          throw new ConflictException(
-            'Cancel the open orders before closing this request',
-          );
-        }
         const awaiting = await tx.checkout.findFirst({
           where: {
             sourcingRequestId: id,
             status: CheckoutStatus.AWAITING_PAYMENT,
           },
         });
+        // The payment webhook locks the checkout and then writes the request
+        // row, so take the checkout lock before touching the request.
+        if (awaiting) {
+          await lockCheckout(tx, awaiting.id);
+        }
+        // Re-read after the checkout lock: a payment that landed meanwhile
+        // has made the request COMPLETED, which an admin cannot close.
+        await moveSourcingStatus(tx, id, SourcingRequestStatus.CLOSED, 'ADMIN');
         await tx.sourcingRequest.update({
           where: { id },
           data: { closedAt: new Date(), closeReason: dto.reason },
         });
+        if (request.status === SourcingRequestStatus.CONFIRMED) {
+          await voidLiveContract(tx, id);
+        }
         if (awaiting) {
-          await lockCheckout(tx, awaiting.id);
           await releaseCheckout(
             tx,
             awaiting.id,
@@ -629,7 +366,6 @@ export class AdminSourcingRequestService {
             { type: AuditActorType.ADMIN, userId: admin.id },
           );
         }
-        await syncSourcingRequest(tx, id);
         await this.audit.record(tx, {
           actorType: AuditActorType.ADMIN,
           actorUserId: admin.id,
@@ -660,51 +396,6 @@ export class AdminSourcingRequestService {
       throw new NotFoundException('Sourcing request not found');
     }
     return request;
-  }
-
-  private async checkedItems(
-    tx: Prisma.TransactionClient,
-    request: { produceName: string; unit: SourcingUnit },
-    clusterId: string | undefined,
-    dto: SaveAllocationsDto,
-  ) {
-    const seen = new Set<string>();
-    const items: SaveAllocationsDto['items'] = [];
-    for (const item of dto.items) {
-      if (seen.has(item.produceId)) {
-        throw new ConflictException('A listing can only be selected once');
-      }
-      seen.add(item.produceId);
-      const produce = await tx.produce.findUnique({
-        where: { id: item.produceId },
-        include: LISTING_INCLUDE,
-      });
-      if (!produce) {
-        throw new NotFoundException('Listing not found');
-      }
-      if (
-        !clusterId ||
-        !isListingEligible({
-          statusPublished: produce.status === ProduceStatus.PUBLISHED,
-          floatingQuantity: produce.floatingQuantity,
-          listingName: produce.name,
-          requestName: request.produceName,
-          farmVerified:
-            produce.farm.verificationStatus === FarmVerificationStatus.VERIFIED,
-          inAgentCluster: produce.farm.clusterId === clusterId,
-          requestUnit: request.unit,
-          listingUnit: produce.unit,
-        }) ||
-        item.quantity > produce.floatingQuantity
-      ) {
-        throw new ConflictException('A selected listing is not eligible');
-      }
-      if (!unitsComparable(request.unit, produce.unit)) {
-        throw new ConflictException('A selected listing is not eligible');
-      }
-      items.push(item);
-    }
-    return items;
   }
 }
 
@@ -737,9 +428,7 @@ const DETAIL_INCLUDE = {
       cluster: true,
     },
   },
-  allocations: {
-    include: { produce: { include: LISTING_INCLUDE } },
-  },
+  allocations: { include: OFFER_INCLUDE, orderBy: { id: 'asc' } },
   checkouts: {
     where: { status: { in: LIVE } },
     include: {
@@ -747,11 +436,11 @@ const DETAIL_INCLUDE = {
         include: {
           farm: { select: { farmCode: true } },
           handover: { select: { status: true } },
-          conversation: { select: { id: true } },
         },
       },
     },
   },
+  conversation: { select: { id: true } },
 } satisfies Prisma.SourcingRequestInclude;
 
 // The id tiebreak keeps paging and export batches stable when two requests
@@ -779,6 +468,9 @@ const SOURCING_CSV_HEADER = [
 type ListedRequest = Prisma.SourcingRequestGetPayload<{
   include: typeof ROW_INCLUDE;
 }>;
+type DetailAllocation = Prisma.SourcingRequestGetPayload<{
+  include: typeof DETAIL_INCLUDE;
+}>['allocations'][number];
 
 function listWhere(
   filter: AdminSourcingFilterDto,
@@ -804,7 +496,7 @@ function toRow(row: ListedRequest): AdminSourcingRowDto {
     createdAt: row.createdAt,
     escalated: row.escalatedAt !== null,
     shipment:
-      row.status === SourcingRequestStatus.FULFILMENT
+      row.status === SourcingRequestStatus.COMPLETED
         ? fulfilmentMark(paidOrders(row.checkouts))
         : null,
   };
@@ -820,31 +512,8 @@ function paidOrders(
   return checkouts.flatMap((checkout) => checkout.orders);
 }
 
-function comparableQuantity(
-  requestUnit: SourcingUnit,
-  listingUnit: string,
-  quantity: number,
-): number {
-  if (!unitsComparable(requestUnit, listingUnit)) {
-    return 0;
-  }
-  return quantity;
-}
-
-function sameGroup(
-  current: { produceId: string; quantity: number }[],
-  next: { produceId: string; quantity: number }[],
-): boolean {
-  const key = (rows: { produceId: string; quantity: number }[]) =>
-    rows
-      .map((row) => `${row.produceId}:${row.quantity}`)
-      .sort()
-      .join('|');
-  return key(current) === key(next);
-}
-
 function searchWhere(search?: string): Prisma.SourcingRequestWhereInput {
-  const tokens = search?.trim().split(/\s+/).filter(Boolean) ?? [];
+  const tokens = searchTokens(search);
   if (tokens.length === 0) {
     return {};
   }
@@ -877,19 +546,16 @@ function searchWhere(search?: string): Prisma.SourcingRequestWhereInput {
   };
 }
 
-function allocationRow(
-  produce: Prisma.ProduceGetPayload<{ include: typeof LISTING_INCLUDE }>,
-  selectedQuantity?: number,
-) {
+function allocationRow(row: DetailAllocation): AdminAllocationDto {
   return {
-    produceId: produce.id,
-    name: produce.name,
-    unit: produce.unit,
-    pricePerUnit: produce.pricePerUnit.toFixed(2),
-    farmCode: produce.farm.farmCode,
-    farmName: produce.farm.name,
-    farmerName: fullName(produce.farm.owner.user),
-    floatingQuantity: produce.floatingQuantity,
-    ...(selectedQuantity === undefined ? {} : { selectedQuantity }),
+    id: row.id,
+    status: row.status,
+    agreedUnitPrice: row.agreedUnitPrice?.toFixed(2) ?? null,
+    farmId: row.farmId,
+    farmCode: row.farm.farmCode,
+    farmName: row.farm.name,
+    farmerName: fullName(row.farm.owner.user),
+    quantity: row.quantity,
+    unit: row.unit,
   };
 }

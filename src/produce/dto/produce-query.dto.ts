@@ -8,6 +8,7 @@ import {
   IsUUID,
   MaxLength,
   Min,
+  NotEquals,
 } from 'class-validator';
 import {
   ProduceCategory,
@@ -32,6 +33,7 @@ export class ProduceQueryDto extends PaginationQueryDto {
   })
   @IsOptional()
   @IsEnum(ProduceStatus)
+  @NotEquals(ProduceStatus.SOURCED)
   status?: ProduceStatus;
 
   @ApiPropertyOptional({ enum: ProduceType, enumName: 'ProduceType' })

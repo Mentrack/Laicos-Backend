@@ -1,4 +1,6 @@
+import { ConflictException } from '@nestjs/common';
 import {
+  FarmVerificationStatus,
   OrderStatus,
   Prisma,
   SourcingRequestStatus,
@@ -7,26 +9,26 @@ import {
 
 export const OPEN_SOURCING_REQUEST = {
   status: {
-    notIn: [SourcingRequestStatus.COMPLETED, SourcingRequestStatus.CLOSED],
+    notIn: [SourcingRequestStatus.FULFILLED, SourcingRequestStatus.CLOSED],
   },
 } satisfies Prisma.SourcingRequestWhereInput;
 
-const UNIT_WORD: Record<SourcingUnit, string | null> = {
-  [SourcingUnit.KG]: 'kg',
-  [SourcingUnit.TONNES]: 'kg',
-  [SourcingUnit.BAGS]: 'bags',
-  [SourcingUnit.CRATES]: 'crates',
-  [SourcingUnit.BASKETS]: 'baskets',
-  [SourcingUnit.LITRES]: 'litres',
-  [SourcingUnit.PIECES]: 'pieces',
-};
+const WEIGHT: SourcingUnit[] = [SourcingUnit.KG, SourcingUnit.TONNES];
 
+/** Whether an offer in `offerUnit` can count towards a request in `requestUnit`. */
 export function unitsComparable(
   requestUnit: SourcingUnit,
-  listingUnit: string,
+  offerUnit: SourcingUnit,
 ): boolean {
-  const word = UNIT_WORD[requestUnit];
-  return word !== null && listingUnit.trim().toLowerCase() === word;
+  return (
+    requestUnit === offerUnit ||
+    (WEIGHT.includes(requestUnit) && WEIGHT.includes(offerUnit))
+  );
+}
+
+/** The free-text unit a hidden listing, notification or audit line shows. */
+export function listingUnitWord(unit: SourcingUnit): string {
+  return unit.toLowerCase();
 }
 
 /** Whole kilograms for a weight request, otherwise the request's own number. */
@@ -40,95 +42,20 @@ export function requestedAmount(quantity: number, unit: SourcingUnit): number {
   return quantity;
 }
 
-export function coverage(requested: number, selected: number) {
-  return {
-    requested,
-    selected,
-    remaining: Math.max(0, requested - selected),
-  };
-}
-
-export function namesMatch(requestName: string, listingName: string): boolean {
-  return requestName.trim().toLowerCase() === listingName.trim().toLowerCase();
-}
-
-export type ListingCandidate = {
-  statusPublished: boolean;
-  floatingQuantity: number;
-  listingName: string;
-  requestName: string;
-  farmVerified: boolean;
-  inAgentCluster: boolean;
-  requestUnit: SourcingUnit;
-  listingUnit: string;
-};
-
-export function isListingEligible(candidate: ListingCandidate): boolean {
-  return (
-    candidate.statusPublished &&
-    candidate.floatingQuantity >= 1 &&
-    namesMatch(candidate.requestName, candidate.listingName) &&
-    candidate.farmVerified &&
-    candidate.inAgentCluster &&
-    unitsComparable(candidate.requestUnit, candidate.listingUnit)
+// Checked when offering and again at confirm, but not at the second
+// signature: after confirm the agent can still go back and drop the farm.
+export function requireVerifiedFarms(
+  farms: { farmCode: string; verificationStatus: FarmVerificationStatus }[],
+): void {
+  const unverified = farms.filter(
+    (farm) => farm.verificationStatus !== FarmVerificationStatus.VERIFIED,
   );
-}
-
-export type SourcingSnapshot = {
-  closedAt: Date | null;
-  assignedAgentId: string | null;
-  allocationCount: number;
-  awaitingPayment: boolean;
-  /** Null when no checkout is paid. Empty is not "all cancelled". */
-  paidOrders: OrderStatus[] | null;
-};
-
-export function deriveSourcingStatus(
-  snapshot: SourcingSnapshot,
-): SourcingRequestStatus {
-  const paid = snapshot.paidOrders;
-  if (
-    snapshot.closedAt ||
-    (paid !== null &&
-      paid.length > 0 &&
-      paid.every((status) => status === OrderStatus.CANCELLED))
-  ) {
-    return SourcingRequestStatus.CLOSED;
+  if (unverified.length > 0) {
+    throw new ConflictException({
+      message: `Not a verified farm: ${unverified.map((farm) => farm.farmCode).join(', ')}`,
+      code: 'SOURCING_FARM_UNVERIFIED',
+    });
   }
-  if (
-    paid !== null &&
-    paid.some((status) => status === OrderStatus.FULFILLED) &&
-    paid.every(
-      (status) =>
-        status === OrderStatus.FULFILLED || status === OrderStatus.CANCELLED,
-    )
-  ) {
-    return SourcingRequestStatus.COMPLETED;
-  }
-  if (
-    paid !== null &&
-    paid.some(
-      (status) =>
-        status === OrderStatus.READY ||
-        status === OrderStatus.SHIPPED ||
-        status === OrderStatus.FULFILLED,
-    )
-  ) {
-    return SourcingRequestStatus.FULFILMENT;
-  }
-  if (paid !== null) {
-    return SourcingRequestStatus.CONFIRMED;
-  }
-  if (snapshot.awaitingPayment) {
-    return SourcingRequestStatus.AWAITING_BUYER;
-  }
-  if (snapshot.allocationCount > 0) {
-    return SourcingRequestStatus.FINDING_SUPPLY;
-  }
-  if (snapshot.assignedAgentId) {
-    return SourcingRequestStatus.IN_REVIEW;
-  }
-  return SourcingRequestStatus.NEW;
 }
 
 export function fulfilmentMark(

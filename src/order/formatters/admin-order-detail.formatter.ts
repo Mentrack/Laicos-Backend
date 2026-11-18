@@ -32,7 +32,7 @@ export const ADMIN_ORDER_DETAIL_INCLUDE = {
       payments: { where: { status: PaymentStatus.SUCCEEDED }, take: 1 },
       sourcingRequest: {
         include: {
-          allocations: { select: { produce: { select: { farmId: true } } } },
+          allocations: { select: { farmId: true } },
         },
       },
     },
@@ -51,12 +51,14 @@ function deliveryDestination(checkout: {
   deliveryStreet: string | null;
   deliveryLga: string | null;
   deliveryState: string | null;
+  deliveryCountry: string | null;
 }): string | null {
   const parts = [
     checkout.deliveryLabel,
     checkout.deliveryStreet,
     checkout.deliveryLga,
     checkout.deliveryState,
+    checkout.deliveryCountry,
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : null;
 }
@@ -81,6 +83,7 @@ export function toAdminOrderDetail(
       agentCommission: order.agentCommission.toFixed(2),
       cancellationReason: order.cancellationReason,
       fulfilledAt: order.fulfilledAt,
+      sourced: order.sourced,
     },
     buyer: {
       id: buyer.id,
@@ -127,7 +130,7 @@ export function toAdminOrderDetail(
             quantity: request.quantity,
             unit: request.unit,
             farmsAllocated: new Set(
-              request.allocations.map(({ produce }) => produce.farmId),
+              request.allocations.map(({ farmId }) => farmId),
             ).size,
             confirmedAt: checkout.createdAt,
           }
