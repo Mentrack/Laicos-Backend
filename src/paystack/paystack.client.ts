@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Currency } from '../../generated/client';
 import { isRecord } from '../common/narrow';
@@ -43,6 +43,8 @@ export type QueuedTransfer = { reference: string; transferCode: string };
 /** Every Paystack call goes through here; responses are narrowed on arrival. */
 @Injectable()
 export class PaystackClient {
+  private readonly logger = new Logger(PaystackClient.name);
+
   constructor(private readonly config: PaystackConfig) {}
 
   async initializeTransaction(input: InitializeTransaction) {
@@ -186,6 +188,26 @@ export class PaystackClient {
   }
 
   private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    body?: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    try {
+      return await this.send(method, path, body);
+    } catch (error) {
+      if (error instanceof PaystackError) {
+        // Callers map most failures to a generic 409, so this is the only
+        // place Paystack's reason surfaces. The query string is dropped: it
+        // carries account numbers.
+        this.logger.warn(
+          `${method} ${path.split('?')[0]} failed (${error.httpStatus ?? 'no response'}): ${error.message}`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async send(
     method: 'GET' | 'POST',
     path: string,
     body?: Record<string, unknown>,

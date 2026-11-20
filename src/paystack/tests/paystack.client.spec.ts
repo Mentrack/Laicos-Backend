@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'node:crypto';
 import { Currency } from '../../../generated/client';
@@ -15,6 +16,9 @@ const client = new PaystackClient(
   ),
 );
 const fetchMock = jest.spyOn(global, 'fetch');
+const warn = jest
+  .spyOn(Logger.prototype, 'warn')
+  .mockImplementation(() => undefined);
 
 function reply(body: unknown, status = 200) {
   fetchMock.mockResolvedValueOnce(
@@ -37,8 +41,14 @@ async function failure(promise: Promise<unknown>) {
 }
 
 describe('PaystackClient', () => {
-  beforeEach(() => fetchMock.mockReset());
-  afterAll(() => fetchMock.mockRestore());
+  beforeEach(() => {
+    fetchMock.mockReset();
+    warn.mockClear();
+  });
+  afterAll(() => {
+    fetchMock.mockRestore();
+    warn.mockRestore();
+  });
 
   it('initializes a transaction with the secret key', async () => {
     reply({
@@ -88,6 +98,33 @@ describe('PaystackClient', () => {
     const error = await failure(client.verifyTransaction('PAY-000001'));
     expect(error.message).toBe('Invalid key');
     expect(error.httpStatus).toBe(401);
+  });
+
+  it("logs Paystack's message and status on an error response", async () => {
+    reply(
+      { status: false, message: 'Currency not supported by merchant' },
+      400,
+    );
+    await failure(client.verifyTransaction('PAY-000001'));
+    expect(warn).toHaveBeenCalledWith(
+      'GET /transaction/verify/PAY-000001 failed (400): Currency not supported by merchant',
+    );
+  });
+
+  it('logs an unreachable API', async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+    await failure(client.verifyTransaction('x'));
+    expect(warn).toHaveBeenCalledWith(
+      'GET /transaction/verify/x failed (no response): Paystack unreachable: fetch failed',
+    );
+  });
+
+  it('keeps the account number out of the log', async () => {
+    reply({ status: false, message: 'Could not resolve account name' }, 422);
+    await failure(client.resolveAccount('0123456789', '058'));
+    expect(warn).toHaveBeenCalledWith(
+      'GET /bank/resolve failed (422): Could not resolve account name',
+    );
   });
 
   it('treats status false as a failure even on a 200', async () => {
