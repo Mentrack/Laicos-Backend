@@ -1,5 +1,5 @@
 /**
- * Dev seed: 9 farmers (one farm each), 5 extension agents, 2 buyers and an
+ * Dev seed: 9 farmers (one farm each), 5 extension agents, 4 buyers and an
  * admin, plus the verification rounds, produce and orders between them.
  * farmer-6..9 are verified with only in-stock, published listings across the
  * categories, so buyers always have a marketplace to browse and order from.
@@ -74,7 +74,7 @@ interface SeedIdentity {
 }
 
 type AgentKey = 'agent-1' | 'agent-2' | 'agent-3' | 'agent-4' | 'agent-5';
-type BuyerKey = 'buyer-1' | 'buyer-2';
+type BuyerKey = 'buyer-1' | 'buyer-2' | 'buyer-3' | 'buyer-4';
 
 interface SeedAgent extends SeedUser, SeedIdentity {
   key: AgentKey;
@@ -240,6 +240,20 @@ const BUYERS: (SeedUser & { key: BuyerKey })[] = [
     firstName: 'David',
     lastName: 'Eze',
     phoneNumber: '+2348030000202',
+  },
+  {
+    key: 'buyer-3',
+    email: 'cyf.publicitymail@gmail.com',
+    firstName: 'Cyf',
+    lastName: 'Publicity',
+    phoneNumber: '+2348030000203',
+  },
+  {
+    key: 'buyer-4',
+    email: 'judithyakubusuleiman@gmail.com',
+    firstName: 'Judith',
+    lastName: 'Yakubu Suleiman',
+    phoneNumber: '+2348030000204',
   },
 ];
 
